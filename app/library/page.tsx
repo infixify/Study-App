@@ -1,50 +1,124 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase, classLevelsForContent } from "@/lib/supabase";
 import SubjectTabs from "@/components/library/SubjectTabs";
 import ChapterList from "@/components/library/ChapterList";
 import BottomNav from "@/components/dashboard/BottomNav";
 
-// Mock data — matches the shape of `subjects`/`chapters` in schema.sql.
-// Replace with a real Supabase query once lib/supabase.ts has a real client:
-//   supabase.from("subjects").select("*").eq("target_exam", ...).in("class_level", classLevelsForContent(...))
-//   supabase.from("chapters").select("*").eq("subject_id", activeSubjectId)
-const MOCK_SUBJECTS = [
-  {
-    id: "phy",
-    name: "Physics",
-    chapters: [
-      { id: "p1", title: "Kinematics", isToughTopic: false },
-      { id: "p2", title: "Laws of Motion", isToughTopic: false },
-      { id: "p3", title: "Work, Energy & Power", isToughTopic: true },
-      { id: "p4", title: "Rotational Motion", isToughTopic: true },
-    ],
-  },
-  {
-    id: "chem",
-    name: "Chemistry",
-    chapters: [
-      { id: "c1", title: "Mole Concept", isToughTopic: false },
-      { id: "c2", title: "Chemical Bonding", isToughTopic: true },
-      { id: "c3", title: "Equilibrium", isToughTopic: true },
-    ],
-  },
-  {
-    id: "math",
-    name: "Maths",
-    chapters: [
-      { id: "m1", title: "Trigonometry", isToughTopic: true },
-      { id: "m2", title: "Straight Lines", isToughTopic: false },
-      { id: "m3", title: "Calculus Basics", isToughTopic: true },
-    ],
-  },
-];
+interface ChapterItem {
+  id: string;
+  title: string;
+  isToughTopic: boolean;
+}
+
+interface SubjectItem {
+  id: string;
+  name: string;
+  chapters: ChapterItem[];
+}
 
 export default function LibraryPage() {
-  const [activeSubjectId, setActiveSubjectId] = useState(MOCK_SUBJECTS[0].id);
+  const [subjects, setSubjects] = useState<SubjectItem[]>([]);
+  const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("users")
+        .select("class_level, target_exam")
+        .eq("uid", user.id)
+        .maybeSingle();
+
+      if (!profile?.class_level || !profile?.target_exam) {
+        setLoading(false);
+        return;
+      }
+
+      const classLevels = classLevelsForContent(profile.class_level as any);
+
+      const { data: subjectRows } = await supabase
+        .from("subjects")
+        .select("id, name, display_order")
+        .eq("target_exam", profile.target_exam)
+        .in("class_level", classLevels)
+        .order("display_order", { ascending: true });
+
+      if (!subjectRows || subjectRows.length === 0) {
+        if (!cancelled) {
+          setSubjects([]);
+          setLoading(false);
+        }
+        return;
+      }
+
+      const subjectIds = subjectRows.map((s) => s.id);
+
+      const { data: chapterRows } = await supabase
+        .from("chapters")
+        .select("id, subject_id, title, is_tough_topic, display_order")
+        .in("subject_id", subjectIds)
+        .order("display_order", { ascending: true });
+
+      const bySubject: SubjectItem[] = subjectRows.map((s) => ({
+        id: s.id,
+        name: s.name,
+        chapters: (chapterRows ?? [])
+          .filter((c) => c.subject_id === s.id)
+          .map((c) => ({
+            id: c.id,
+            title: c.title,
+            isToughTopic: c.is_tough_topic,
+          })),
+      }));
+
+      if (!cancelled) {
+        setSubjects(bySubject);
+        setActiveSubjectId(bySubject[0]?.id ?? null);
+        setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-paper flex items-center justify-center">
+        <p className="text-ink/60 text-sm">Loading your library…</p>
+      </div>
+    );
+  }
+
+  if (subjects.length === 0) {
+    return (
+      <div className="min-h-screen bg-paper pb-28">
+        <div className="max-w-md mx-auto px-5 pt-8">
+          <h1 className="font-display text-2xl text-ink mb-4">Library</h1>
+          <p className="text-ink/60 text-sm">
+            No subjects found yet for your class/exam. Check back soon.
+          </p>
+        </div>
+        <BottomNav />
+      </div>
+    );
+  }
 
   const activeSubject =
-    MOCK_SUBJECTS.find((s) => s.id === activeSubjectId) ?? MOCK_SUBJECTS[0];
+    subjects.find((s) => s.id === activeSubjectId) ?? subjects[0];
 
   return (
     <div className="min-h-screen bg-paper pb-28">
@@ -52,13 +126,13 @@ export default function LibraryPage() {
         <h1 className="font-display text-2xl text-ink mb-4">Library</h1>
 
         <SubjectTabs
-          subjects={MOCK_SUBJECTS}
-          activeId={activeSubjectId}
+          subjects={subjects}
+          activeId={activeSubject.id}
           onChange={setActiveSubjectId}
         />
 
         {/* key={activeSubject.id} forces a clean remount per subject —
-            this is what was missing before and caused the switching bug */}
+            this is what fixed the tab-switching bug earlier */}
         <ChapterList
           key={activeSubject.id}
           subjectId={activeSubject.id}
@@ -69,4 +143,4 @@ export default function LibraryPage() {
       <BottomNav />
     </div>
   );
-          }
+}
