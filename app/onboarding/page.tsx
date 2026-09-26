@@ -13,7 +13,7 @@ import {
   TargetExam,
   StudyMode,
   OnboardingData,
-  mockSaveOnboarding,
+  saveOnboarding,
 } from "@/lib/supabase";
 
 const TOTAL_STEPS = 4;
@@ -69,7 +69,11 @@ export default function OnboardingPage() {
   const back = () => setStep((s) => Math.max(s - 1, 1));
 
   async function finish(finalData: OnboardingData) {
-    await mockSaveOnboarding(finalData);
+    const result = await saveOnboarding(finalData);
+    if (!result.success) {
+      console.error("Onboarding save failed:", result.error);
+      // could show an error toast here instead of navigating
+    }
     router.push("/dashboard");
   }
 
