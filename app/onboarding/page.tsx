@@ -23,6 +23,7 @@ export default function OnboardingPage() {
   const [step, setStep] = useState(1);
   const [checkingSession, setCheckingSession] = useState(true);
   const [userName, setUserName] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [data, setData] = useState<OnboardingData>({
     classLevel: null,
     targetExam: null,
@@ -66,9 +67,11 @@ export default function OnboardingPage() {
   const back = () => setStep((s) => Math.max(s - 1, 1));
 
   async function finish(finalData: OnboardingData) {
+    setSaveError(null);
     const result = await saveOnboarding(finalData);
     if (!result.success) {
-      alert("Save failed: " + result.error);
+      setSaveError(result.error || "Something went wrong while saving your profile.");
+      return; // stay on this screen so the user can see the error and retry
     }
     router.push("/dashboard");
   }
@@ -135,7 +138,20 @@ export default function OnboardingPage() {
             Signed in as <span className="text-ink font-medium">{userName}</span>
           </p>
         )}
+
+        {saveError && (
+          <div className="mt-4 rounded-ticket border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+            <p className="font-medium">Couldn't save your profile</p>
+            <p className="mt-0.5 text-red-600">{saveError}</p>
+            <button
+              onClick={() => setSaveError(null)}
+              className="mt-2 text-xs font-medium underline"
+            >
+              Try again
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
-                               }
+}
