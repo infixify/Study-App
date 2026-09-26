@@ -31,9 +31,6 @@ export default function OnboardingPage() {
     batchOrBranch: null,
   });
 
-  // After the Google redirect comes back to /onboarding, supabase-js
-  // auto-detects the session from the URL. Pick it up here and skip
-  // straight to Step 2 instead of showing the login button again.
   useEffect(() => {
     async function checkSession() {
       const { data: sessionData } = await supabase.auth.getUser();
@@ -71,8 +68,7 @@ export default function OnboardingPage() {
   async function finish(finalData: OnboardingData) {
     const result = await saveOnboarding(finalData);
     if (!result.success) {
-      console.error("Onboarding save failed:", result.error);
-      // could show an error toast here instead of navigating
+      alert("Save failed: " + result.error);
     }
     router.push("/dashboard");
   }
@@ -142,4 +138,4 @@ export default function OnboardingPage() {
       </div>
     </div>
   );
-}
+                               }
