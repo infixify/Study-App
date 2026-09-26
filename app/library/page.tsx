@@ -10,10 +10,11 @@ interface ChapterItem {
   id: string;
   title: string;
   isToughTopic: boolean;
+  classTag: string; // "10" | "11" | "12" | "Dropper"
 }
 
 interface SubjectItem {
-  id: string;
+  id: string; // grouped by subject NAME (e.g. "Physics"), not a single DB row
   name: string;
   chapters: ChapterItem[];
 }
@@ -49,7 +50,7 @@ export default function LibraryPage() {
 
       const { data: subjectRows } = await supabase
         .from("subjects")
-        .select("id, name, display_order")
+        .select("id, name, class_level, display_order")
         .eq("target_exam", profile.target_exam)
         .in("class_level", classLevels)
         .order("display_order", { ascending: true });
@@ -62,29 +63,46 @@ export default function LibraryPage() {
         return;
       }
 
-      const subjectIds = subjectRows.map((s) => s.id);
+      const subjectRowIds = subjectRows.map((s) => s.id);
 
       const { data: chapterRows } = await supabase
         .from("chapters")
         .select("id, subject_id, title, is_tough_topic, display_order")
-        .in("subject_id", subjectIds)
+        .in("subject_id", subjectRowIds)
         .order("display_order", { ascending: true });
 
-      const bySubject: SubjectItem[] = subjectRows.map((s) => ({
-        id: s.id,
-        name: s.name,
-        chapters: (chapterRows ?? [])
+      // Group multiple DB subject rows (e.g. Physics-Class11 + Physics-Class12,
+      // both matched by classLevelsForContent for an "11_12" user) into ONE
+      // tab per subject NAME. Each chapter keeps a classTag so the UI can
+      // badge which class it came from.
+      const grouped = new Map<string, SubjectItem>();
+
+      const sortedSubjectRows = [...subjectRows].sort((a, b) =>
+        a.class_level < b.class_level ? -1 : a.class_level > b.class_level ? 1 : 0
+      );
+
+      for (const s of sortedSubjectRows) {
+        const key = s.name;
+        if (!grouped.has(key)) {
+          grouped.set(key, { id: key, name: s.name, chapters: [] });
+        }
+        const entry = grouped.get(key)!;
+        const chaptersForThisRow = (chapterRows ?? [])
           .filter((c) => c.subject_id === s.id)
           .map((c) => ({
             id: c.id,
             title: c.title,
             isToughTopic: c.is_tough_topic,
-          })),
-      }));
+            classTag: s.class_level,
+          }));
+        entry.chapters.push(...chaptersForThisRow);
+      }
+
+      const finalSubjects = Array.from(grouped.values());
 
       if (!cancelled) {
-        setSubjects(bySubject);
-        setActiveSubjectId(bySubject[0]?.id ?? null);
+        setSubjects(finalSubjects);
+        setActiveSubjectId(finalSubjects[0]?.id ?? null);
         setLoading(false);
       }
     }
@@ -131,8 +149,6 @@ export default function LibraryPage() {
           onChange={setActiveSubjectId}
         />
 
-        {/* key={activeSubject.id} forces a clean remount per subject —
-            this is what fixed the tab-switching bug earlier */}
         <ChapterList
           key={activeSubject.id}
           subjectId={activeSubject.id}
