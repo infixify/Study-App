@@ -1,10 +1,10 @@
 // lib/supabase.ts
-// Swap this stub for the real client once you have your project URL + anon key:
-// import { createClient } from "@supabase/supabase-js";
-// export const supabase = createClient(
-//   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-//   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-// );
+import { createClient } from "@supabase/supabase-js";
+
+export const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export type ClassLevel = "10" | "11" | "12" | "11_12" | "Dropper";
 export type TargetExam = "JEE" | "NEET" | "Boards";
