@@ -4,6 +4,7 @@ interface Chapter {
   id: string;
   title: string;
   isToughTopic: boolean;
+  classTag?: string; // "10" | "11" | "12" | "Dropper" — optional so single-class views still work
 }
 
 interface ChapterListProps {
@@ -20,11 +21,18 @@ export default function ChapterList({ chapters }: ChapterListProps) {
       {chapters.map((ch) => (
         <div
           key={ch.id}
-          className="bg-white rounded-ticket border border-ink/10 px-4 py-3 flex items-center justify-between"
+          className="bg-white rounded-ticket border border-ink/10 px-4 py-3 flex items-center justify-between gap-2"
         >
-          <span className="text-sm font-medium text-ink">{ch.title}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            {ch.classTag && (
+              <span className="shrink-0 text-[10px] font-semibold text-ink/60 bg-ink/5 px-2 py-1 rounded-full">
+                {ch.classTag === "Dropper" ? "Dropper" : `Class ${ch.classTag}`}
+              </span>
+            )}
+            <span className="text-sm font-medium text-ink truncate">{ch.title}</span>
+          </div>
           {ch.isToughTopic && (
-            <span className="text-[10px] font-semibold text-coral bg-coral/10 px-2 py-1 rounded-full">
+            <span className="shrink-0 text-[10px] font-semibold text-coral bg-coral/10 px-2 py-1 rounded-full">
               Tough topic
             </span>
           )}
