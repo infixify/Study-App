@@ -25,6 +25,32 @@ export async function mockGoogleSignIn(): Promise<{ name: string; email: string 
   return { name: "Aarav Sharma", email: "aarav.sharma@gmail.com" };
 }
 
+// Shared helper: resolves a batch/institute display string to its row id.
+// Uses case-insensitive + trimmed matching so small formatting differences
+// (extra space, different case) don't silently null out batch_or_branch_id.
+// Returns null for "Self" mode or the "Other / not listed" option.
+async function resolveBatchId(batchOrBranch: string | null): Promise<string | null> {
+  if (!batchOrBranch || batchOrBranch === BATCH_OTHER) return null;
+
+  const { data: batchRow, error } = await supabase
+    .from("batches")
+    .select("id, name")
+    .ilike("name", batchOrBranch.trim())
+    .maybeSingle();
+
+  if (error) {
+    console.error("Batch lookup failed:", error.message);
+    return null;
+  }
+  if (!batchRow) {
+    console.warn(
+      `No batch match found for "${batchOrBranch}" — batch_or_branch_id will be null.`
+    );
+    return null;
+  }
+  return batchRow.id;
+}
+
 // Real profile write — creates/updates the signed-in user's row.
 // NOTE: class_level / target_exam / wants_boards should only ever be written
 // here, at signup time. After onboarding_completed = true, the DB trigger
@@ -36,15 +62,7 @@ export async function saveOnboarding(data: OnboardingData) {
     return { success: false, error: "Not signed in" };
   }
 
-  let batchId: string | null = null;
-  if (data.batchOrBranch) {
-    const { data: batchRow } = await supabase
-      .from("batches")
-      .select("id")
-      .eq("name", data.batchOrBranch)
-      .maybeSingle();
-    batchId = batchRow?.id ?? null;
-  }
+  const batchId = await resolveBatchId(data.batchOrBranch);
 
   const { error } = await supabase.from("users").upsert({
     uid: authData.user.id,
@@ -82,15 +100,7 @@ export async function updateEditableProfile(fields: {
     return { success: false, error: "Not signed in" };
   }
 
-  let batchId: string | null = null;
-  if (fields.batchOrBranch) {
-    const { data: batchRow } = await supabase
-      .from("batches")
-      .select("id")
-      .eq("name", fields.batchOrBranch)
-      .maybeSingle();
-    batchId = batchRow?.id ?? null;
-  }
+  const batchId = await resolveBatchId(fields.batchOrBranch);
 
   const { error } = await supabase
     .from("users")
@@ -166,4 +176,4 @@ export function classLevelsForContent(classLevel: ClassLevel | null): string[] {
   if (classLevel === "11_12") return ["11", "12"];
   if (!classLevel) return [];
   return [classLevel];
-  }
+}
