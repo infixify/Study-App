@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import StepRail from "@/components/onboarding/StepRail";
 import StepLogin from "@/components/onboarding/StepLogin";
@@ -8,6 +8,7 @@ import StepClass from "@/components/onboarding/StepClass";
 import StepExam from "@/components/onboarding/StepExam";
 import StepMode from "@/components/onboarding/StepMode";
 import {
+  supabase,
   ClassLevel,
   TargetExam,
   StudyMode,
@@ -20,6 +21,7 @@ const TOTAL_STEPS = 4;
 export default function OnboardingPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [userName, setUserName] = useState<string | null>(null);
   const [data, setData] = useState<OnboardingData>({
     classLevel: null,
@@ -29,12 +31,54 @@ export default function OnboardingPage() {
     batchOrBranch: null,
   });
 
+  // After the Google redirect comes back to /onboarding, supabase-js
+  // auto-detects the session from the URL. Pick it up here and skip
+  // straight to Step 2 instead of showing the login button again.
+  useEffect(() => {
+    async function checkSession() {
+      const { data: sessionData } = await supabase.auth.getUser();
+      if (sessionData?.user) {
+        const name =
+          sessionData.user.user_metadata?.full_name ||
+          sessionData.user.user_metadata?.name ||
+          sessionData.user.email ||
+          "there";
+        setUserName(name);
+        setStep(2);
+      }
+      setCheckingSession(false);
+    }
+    checkSession();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const name =
+          session.user.user_metadata?.full_name ||
+          session.user.user_metadata?.name ||
+          session.user.email ||
+          "there";
+        setUserName(name);
+        setStep((s) => (s === 1 ? 2 : s));
+      }
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
   const next = () => setStep((s) => Math.min(s + 1, TOTAL_STEPS));
   const back = () => setStep((s) => Math.max(s - 1, 1));
 
   async function finish(finalData: OnboardingData) {
     await mockSaveOnboarding(finalData);
     router.push("/dashboard");
+  }
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-paper">
+        <p className="text-sm text-slate">Loading…</p>
+      </div>
+    );
   }
 
   return (
