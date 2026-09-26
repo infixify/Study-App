@@ -68,6 +68,10 @@ export async function saveOnboarding(data: OnboardingData) {
   return { success: true };
 }
 
+// Backward-compat alias — app/onboarding/page.tsx uses the new name directly;
+// this keeps any other still-mock-named import from breaking the build.
+export const mockSaveOnboarding = saveOnboarding;
+
 // Real profile update for the EDITABLE fields only (study_mode, batch).
 export async function updateEditableProfile(fields: {
   studyMode: StudyMode;
@@ -102,6 +106,9 @@ export async function updateEditableProfile(fields: {
   }
   return { success: true };
 }
+
+// Backward-compat alias for app/profile/page.tsx (still imports the mock name).
+export const mockUpdateEditableProfile = updateEditableProfile;
 
 // ---------------------------------------------------------------------------
 // Batches — Online is grouped by institute with real, named batch series.
@@ -159,4 +166,4 @@ export function classLevelsForContent(classLevel: ClassLevel | null): string[] {
   if (classLevel === "11_12") return ["11", "12"];
   if (!classLevel) return [];
   return [classLevel];
-}
+  }
