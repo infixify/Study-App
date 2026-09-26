@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { mockGoogleSignIn } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 interface StepLoginProps {
   onSignedIn: (name: string) => void;
@@ -12,9 +12,19 @@ export default function StepLogin({ onSignedIn }: StepLoginProps) {
 
   async function handleSignIn() {
     setLoading(true);
-    const { name } = await mockGoogleSignIn();
-    setLoading(false);
-    onSignedIn(name);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/onboarding`,
+      },
+    });
+    if (error) {
+      console.error("Google sign-in failed:", error.message);
+      setLoading(false);
+    }
+    // On success the browser redirects to Google, then back to /onboarding.
+    // onSignedIn is NOT called here — the parent page picks up the session
+    // on mount after the redirect (see app/onboarding/page.tsx).
   }
 
   return (
@@ -33,7 +43,7 @@ export default function StepLogin({ onSignedIn }: StepLoginProps) {
         className="flex items-center justify-center gap-3 border border-ink/15 bg-white rounded-ticket py-3.5 font-medium text-ink hover:border-ink/30 transition-colors disabled:opacity-60"
       >
         {loading ? (
-          <span>Signing in…</span>
+          <span>Redirecting to Google…</span>
         ) : (
           <>
             <GoogleIcon />
