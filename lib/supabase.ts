@@ -18,31 +18,88 @@ export interface OnboardingData {
   batchOrBranch: string | null;
 }
 
-// Mocked auth call — replace with supabase.auth.signInWithOAuth({ provider: "google" })
+// Mocked auth call — kept only in case anything still imports it.
+// Real sign-in now happens via supabase.auth.signInWithOAuth in StepLogin.tsx.
 export async function mockGoogleSignIn(): Promise<{ name: string; email: string }> {
   await new Promise((r) => setTimeout(r, 600));
   return { name: "Aarav Sharma", email: "aarav.sharma@gmail.com" };
 }
 
-// Mocked profile write — replace with supabase.from("users").upsert(...)
+// Real profile write — creates/updates the signed-in user's row.
 // NOTE: class_level / target_exam / wants_boards should only ever be written
 // here, at signup time. After onboarding_completed = true, the DB trigger
 // (see schema.sql -> trg_users_lock_after_onboarding) rejects changes to
 // these three columns, so the profile screen must never send them again.
-export async function mockSaveOnboarding(data: OnboardingData) {
-  await new Promise((r) => setTimeout(r, 400));
-  console.log("Saving onboarding profile:", data);
+export async function saveOnboarding(data: OnboardingData) {
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData?.user) {
+    return { success: false, error: "Not signed in" };
+  }
+
+  let batchId: string | null = null;
+  if (data.batchOrBranch) {
+    const { data: batchRow } = await supabase
+      .from("batches")
+      .select("id")
+      .eq("name", data.batchOrBranch)
+      .maybeSingle();
+    batchId = batchRow?.id ?? null;
+  }
+
+  const { error } = await supabase.from("users").upsert({
+    uid: authData.user.id,
+    name:
+      authData.user.user_metadata?.full_name ||
+      authData.user.user_metadata?.name ||
+      "Student",
+    email: authData.user.email!,
+    class_level: data.classLevel,
+    target_exam: data.targetExam,
+    wants_boards: data.wantsBoards,
+    study_mode: data.studyMode,
+    batch_or_branch_id: batchId,
+    onboarding_completed: true,
+  });
+
+  if (error) {
+    console.error("Failed to save onboarding profile:", error.message);
+    return { success: false, error: error.message };
+  }
   return { success: true };
 }
 
-// Mocked profile update for the EDITABLE fields only (study_mode, batch).
-// Real version: supabase.from("users").update({ study_mode, batch_or_branch_id }).eq("uid", uid)
-export async function mockUpdateEditableProfile(fields: {
+// Real profile update for the EDITABLE fields only (study_mode, batch).
+export async function updateEditableProfile(fields: {
   studyMode: StudyMode;
   batchOrBranch: string | null;
 }) {
-  await new Promise((r) => setTimeout(r, 300));
-  console.log("Updating editable profile fields:", fields);
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData?.user) {
+    return { success: false, error: "Not signed in" };
+  }
+
+  let batchId: string | null = null;
+  if (fields.batchOrBranch) {
+    const { data: batchRow } = await supabase
+      .from("batches")
+      .select("id")
+      .eq("name", fields.batchOrBranch)
+      .maybeSingle();
+    batchId = batchRow?.id ?? null;
+  }
+
+  const { error } = await supabase
+    .from("users")
+    .update({
+      study_mode: fields.studyMode,
+      batch_or_branch_id: batchId,
+    })
+    .eq("uid", authData.user.id);
+
+  if (error) {
+    console.error("Failed to update editable profile:", error.message);
+    return { success: false, error: error.message };
+  }
   return { success: true };
 }
 
