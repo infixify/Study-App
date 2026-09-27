@@ -186,7 +186,6 @@ export default function DashboardPage() {
 
     const streak = todayLog?.streak_count ?? recentLogs?.[0]?.streak_count ?? 0;
 
-    // consistency still uses last 14 days of the 30-day set fetched above
     const last14 = (recentLogs ?? []).slice(0, 14);
     const daysWithStudy = last14.filter((r) => (r.study_time_minutes ?? 0) > 0).length;
     const consistency = last14.length
@@ -471,6 +470,12 @@ export default function DashboardPage() {
             <p className="text-[11px] text-slate mt-1.5">
               {state.syllabusProgress.doneChapters}/{state.syllabusProgress.totalChapters} chapters marked done
             </p>
+            <Link
+              href="/library"
+              className="mt-3 block text-center text-xs font-medium text-teal bg-teal/10 rounded-full py-2"
+            >
+              Update chapter progress →
+            </Link>
           </div>
         )}
 
@@ -493,4 +498,4 @@ export default function DashboardPage() {
       <BottomNav />
     </div>
   );
-      }
+}
