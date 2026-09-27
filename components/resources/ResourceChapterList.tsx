@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, createElement, Fragment } from "react";
 import { supabase } from "@/lib/supabase";
+
+const e = createElement;
 
 interface Chapter {
   id: string;
@@ -86,110 +88,101 @@ export default function ResourceChapterList({ chapters, subjectRowIds }: Resourc
     return resources.filter((r) => r.chapter_id === null && r.category === category).length;
   }
 
-  return (
-    <div className="flex flex-col gap-3 mt-4">
-      {chapters.map((ch) => {
-        const isExpanded = expandedChapterId === ch.id;
-        return (
-          <div
-            key={ch.id}
-            className="bg-white rounded-ticket border border-ink/10 overflow-hidden"
-          >
-            <button
-              onClick={() => toggleChapter(ch.id)}
-              className="w-full px-4 py-3 flex items-center gap-2 text-left"
-            >
-              {ch.classTag && (
-                <span className="shrink-0 text-[10px] font-semibold text-ink/60 bg-ink/5 px-2 py-1 rounded-full">
-                  {ch.classTag === "Dropper" ? "Dropper" : `Class ${ch.classTag}`}
-                </span>
-              )}
-              <span className="text-sm font-medium text-ink flex-1">{ch.title}</span>
-              <span className="text-ink/40 text-xs">{isExpanded ? "▲" : "▼"}</span>
-            </button>
+  function renderResourceRow(r: Resource) {
+    return e(
+      "div",
+      { key: r.id, className: "flex items-center justify-between bg-paper rounded-lg px-3 py-2 border border-ink/5" },
+      e("span", { className: "text-xs text-ink" }, r.title),
+      e(
+        "div",
+        { className: "flex gap-2 shrink-0" },
+        e("a", { href: r.url, target: "_blank", rel: "noopener noreferrer", className: "text-[11px] font-semibold text-teal" }, "View"),
+        e("a", { href: r.url, download: true, className: "text-[11px] font-semibold text-marigold" }, "Download")
+      )
+    );
+  }
 
-            {isExpanded && (
-              <div className="px-4 pb-4">
-                {loadingResources ? (
-                  <p className="text-xs text-slate py-2">Loading…</p>
-                ) : openCategory ? (
-                  <div>
-                    <button
-                      onClick={() => setOpenCategory(null)}
-                      className="text-xs text-teal font-medium mb-2"
-                    >
-                      ← Back
-                    </button>
-                    <div className="flex flex-col gap-2">
-                      {resources
-                        .filter(
-                          (r) =>
-                            r.category === openCategory &&
-                            (r.chapter_id === ch.id || r.chapter_id === null)
-                        )
-                        .map((r) => (
-                          <div
-                            key={r.id}
-                            className="flex items-center justify-between bg-paper rounded-lg px-3 py-2 border border-ink/5"
-                          >
-                            <span className="text-xs text-ink">{r.title}</span>
-                            <div className="flex gap-2 shrink-0">
-                              
-                                href={r.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[11px] font-semibold text-teal"
-                              >
-                                View
-                              </a>
-                              
-                                href={r.url}
-                                download
-                                className="text-[11px] font-semibold text-marigold"
-                              >
-                                Download
-                              </a>
-                            </div>
-                          </div>
-                        ))}
-                      {resources.filter(
-                        (r) =>
-                          r.category === openCategory &&
-                          (r.chapter_id === ch.id || r.chapter_id === null)
-                      ).length === 0 && (
-                        <p className="text-xs text-slate py-2">No resources yet.</p>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {CATEGORIES.map((cat) => {
-                      const count = countFor(ch.id, cat.key) + subjectWideCountFor(cat.key);
-                      return (
-                        <button
-                          key={cat.key}
-                          onClick={() => setOpenCategory(cat.key)}
-                          disabled={count === 0}
-                          className={`text-xs font-medium py-2 rounded-lg border ${
-                            count > 0
-                              ? "border-teal/30 bg-teal/10 text-teal"
-                              : "border-ink/10 bg-ink/5 text-ink/30"
-                          }`}
-                        >
-                          {cat.label} {count > 0 ? `(${count})` : ""}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+  function renderCategoryView(chapterId: string) {
+    const rows = resources.filter(
+      (r) => r.category === openCategory && (r.chapter_id === chapterId || r.chapter_id === null)
+    );
+    return e(
+      "div",
+      null,
+      e(
+        "button",
+        { onClick: () => setOpenCategory(null), className: "text-xs text-teal font-medium mb-2" },
+        "← Back"
+      ),
+      e(
+        "div",
+        { className: "flex flex-col gap-2" },
+        rows.length === 0
+          ? e("p", { className: "text-xs text-slate py-2" }, "No resources yet.")
+          : rows.map(renderResourceRow)
+      )
+    );
+  }
+
+  function renderCategoryGrid(chapterId: string) {
+    return e(
+      "div",
+      { className: "grid grid-cols-2 gap-2" },
+      CATEGORIES.map((cat) => {
+        const count = countFor(chapterId, cat.key) + subjectWideCountFor(cat.key);
+        return e(
+          "button",
+          {
+            key: cat.key,
+            onClick: () => setOpenCategory(cat.key),
+            disabled: count === 0,
+            className: `text-xs font-medium py-2 rounded-lg border ${
+              count > 0 ? "border-teal/30 bg-teal/10 text-teal" : "border-ink/10 bg-ink/5 text-ink/30"
+            }`,
+          },
+          `${cat.label} ${count > 0 ? `(${count})` : ""}`
         );
-      })}
-      {chapters.length === 0 && (
-        <p className="text-sm text-slate text-center py-8">No chapters yet.</p>
-      )}
-    </div>
+      })
+    );
+  }
+
+  function renderChapter(ch: Chapter) {
+    const isExpanded = expandedChapterId === ch.id;
+    return e(
+      "div",
+      { key: ch.id, className: "bg-white rounded-ticket border border-ink/10 overflow-hidden" },
+      e(
+        "button",
+        { onClick: () => toggleChapter(ch.id), className: "w-full px-4 py-3 flex items-center gap-2 text-left" },
+        ch.classTag
+          ? e(
+              "span",
+              { className: "shrink-0 text-[10px] font-semibold text-ink/60 bg-ink/5 px-2 py-1 rounded-full" },
+              ch.classTag === "Dropper" ? "Dropper" : `Class ${ch.classTag}`
+            )
+          : null,
+        e("span", { className: "text-sm font-medium text-ink flex-1" }, ch.title),
+        e("span", { className: "text-ink/40 text-xs" }, isExpanded ? "▲" : "▼")
+      ),
+      isExpanded
+        ? e(
+            "div",
+            { className: "px-4 pb-4" },
+            loadingResources
+              ? e("p", { className: "text-xs text-slate py-2" }, "Loading…")
+              : openCategory
+              ? renderCategoryView(ch.id)
+              : renderCategoryGrid(ch.id)
+          )
+        : null
+    );
+  }
+
+  return e(
+    "div",
+    { className: "flex flex-col gap-3 mt-4" },
+    chapters.length === 0
+      ? e("p", { className: "text-sm text-slate text-center py-8" }, "No chapters yet.")
+      : chapters.map(renderChapter)
   );
 }
