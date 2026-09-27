@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 
 const ITEMS = [
   { key: "home", label: "Home", icon: "⌂", href: "/dashboard" },
-  { key: "library", label: "Library", icon: "▤", href: "/library" },
+  { key: "resources", label: "Resources", icon: "▤", href: "/resources" },
   { key: "tests", label: "Tests", icon: "◎", href: "/tests" },
   { key: "focus", label: "Focus", icon: "◷", href: "/focus" },
   { key: "profile", label: "Profile", icon: "◍", href: "/profile" },
