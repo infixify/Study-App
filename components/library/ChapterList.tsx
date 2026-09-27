@@ -22,8 +22,12 @@ export default function ChapterList({ chapters, targetExam }: ChapterListProps) 
   return (
     <div className="flex flex-col gap-3 mt-4">
       {chapters.map((ch) => {
+        // Droppers only ever study JEE/NEET content — a "not in competitive
+        // syllabus" badge is meaningless to them, so never show it.
         const showOffSyllabusBadge =
-          targetExam !== "Boards" && ch.inCompetitiveSyllabus === false;
+          ch.classTag !== "Dropper" &&
+          targetExam !== "Boards" &&
+          ch.inCompetitiveSyllabus === false;
 
         const showAdvancedOnlyBadge =
           targetExam === "JEE" && ch.jeeScope === "advanced_only";
@@ -31,33 +35,35 @@ export default function ChapterList({ chapters, targetExam }: ChapterListProps) 
         return (
           <div
             key={ch.id}
-            className="bg-white rounded-ticket border border-ink/10 px-4 py-3 flex items-center justify-between gap-2"
+            className="bg-white rounded-ticket border border-ink/10 px-4 py-3 flex flex-col gap-2"
           >
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-start gap-2">
               {ch.classTag && (
-                <span className="shrink-0 text-[10px] font-semibold text-ink/60 bg-ink/5 px-2 py-1 rounded-full">
+                <span className="shrink-0 mt-0.5 text-[10px] font-semibold text-ink/60 bg-ink/5 px-2 py-1 rounded-full">
                   {ch.classTag === "Dropper" ? "Dropper" : `Class ${ch.classTag}`}
                 </span>
               )}
-              <span className="text-sm font-medium text-ink truncate">{ch.title}</span>
+              <span className="text-sm font-medium text-ink">{ch.title}</span>
             </div>
-            <div className="shrink-0 flex items-center gap-2">
-              {showOffSyllabusBadge && (
-                <span className="text-[10px] font-semibold text-ink/50 bg-ink/5 px-2 py-1 rounded-full whitespace-nowrap">
-                  Not in JEE/NEET syllabus
-                </span>
-              )}
-              {showAdvancedOnlyBadge && (
-                <span className="text-[10px] font-semibold text-marigold bg-marigold/10 px-2 py-1 rounded-full whitespace-nowrap">
-                  Advanced only
-                </span>
-              )}
-              {ch.isToughTopic && (
-                <span className="text-[10px] font-semibold text-coral bg-coral/10 px-2 py-1 rounded-full">
-                  Tough topic
-                </span>
-              )}
-            </div>
+            {(showOffSyllabusBadge || showAdvancedOnlyBadge || ch.isToughTopic) && (
+              <div className="flex flex-wrap items-center gap-2">
+                {showOffSyllabusBadge && (
+                  <span className="text-[10px] font-semibold text-ink/50 bg-ink/5 px-2 py-1 rounded-full whitespace-nowrap">
+                    Not in {targetExam}
+                  </span>
+                )}
+                {showAdvancedOnlyBadge && (
+                  <span className="text-[10px] font-semibold text-marigold bg-marigold/10 px-2 py-1 rounded-full whitespace-nowrap">
+                    Advanced only
+                  </span>
+                )}
+                {ch.isToughTopic && (
+                  <span className="text-[10px] font-semibold text-coral bg-coral/10 px-2 py-1 rounded-full">
+                    Tough topic
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         );
       })}
