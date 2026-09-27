@@ -192,4 +192,4 @@ export default function ResourceChapterList({ chapters, subjectRowIds }: Resourc
       )}
     </div>
   );
-                            }
+}
