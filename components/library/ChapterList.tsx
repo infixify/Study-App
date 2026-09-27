@@ -6,6 +6,7 @@ interface Chapter {
   isToughTopic: boolean;
   classTag?: string; // "10" | "11" | "12" | "Dropper" — optional so single-class views still work
   inCompetitiveSyllabus?: boolean; // undefined-safe so non-Library callers still work
+  jeeScope?: "common" | "advanced_only"; // only meaningful when targetExam === "JEE"
 }
 
 interface ChapterListProps {
@@ -24,6 +25,9 @@ export default function ChapterList({ chapters, targetExam }: ChapterListProps) 
         const showOffSyllabusBadge =
           targetExam !== "Boards" && ch.inCompetitiveSyllabus === false;
 
+        const showAdvancedOnlyBadge =
+          targetExam === "JEE" && ch.jeeScope === "advanced_only";
+
         return (
           <div
             key={ch.id}
@@ -41,6 +45,11 @@ export default function ChapterList({ chapters, targetExam }: ChapterListProps) 
               {showOffSyllabusBadge && (
                 <span className="text-[10px] font-semibold text-ink/50 bg-ink/5 px-2 py-1 rounded-full whitespace-nowrap">
                   Not in JEE/NEET syllabus
+                </span>
+              )}
+              {showAdvancedOnlyBadge && (
+                <span className="text-[10px] font-semibold text-marigold bg-marigold/10 px-2 py-1 rounded-full whitespace-nowrap">
+                  Advanced only
                 </span>
               )}
               {ch.isToughTopic && (
