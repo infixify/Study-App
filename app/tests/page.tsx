@@ -57,16 +57,27 @@ export default function TestsPage() {
 
     const { data: profile } = await supabase
       .from("users")
-      .select("target_exam")
+      .select("target_exam, class_level")
       .eq("uid", user.id)
       .maybeSingle();
 
     const exam = profile?.target_exam ?? null;
     setTargetExam(exam);
 
+    // subjects.class_level only has rows for 10/11/12/Dropper — Dropper rows
+    // already hold the combined 11+12 syllabus, so map both "Dropper" and
+    // "11+12" user profiles onto the same "Dropper" subjects.class_level.
+    const rawClass = profile?.class_level ?? null;
+    const mappedClassLevel =
+      rawClass === "11+12" || rawClass === "Dropper" ? "Dropper" : rawClass;
+
     const [{ data: subjectRows }, { data: logRows }] = await Promise.all([
-      exam
-        ? supabase.from("subjects").select("id, name").eq("target_exam", exam)
+      exam && mappedClassLevel
+        ? supabase
+            .from("subjects")
+            .select("id, name")
+            .eq("target_exam", exam)
+            .eq("class_level", mappedClassLevel)
         : Promise.resolve({ data: [] as SubjectRow[] }),
       supabase
         .from("test_logs")
@@ -78,15 +89,7 @@ export default function TestsPage() {
         .limit(50),
     ]);
 
-    // de-dupe subjects by name (multiple class_level rows share the same name)
-    const seen = new Set<string>();
-    const uniqueSubjects = ((subjectRows as SubjectRow[] | null) ?? []).filter((s) => {
-      if (seen.has(s.name)) return false;
-      seen.add(s.name);
-      return true;
-    });
-
-    setSubjects(uniqueSubjects);
+    setSubjects((subjectRows as SubjectRow[] | null) ?? []);
     setLogs((logRows as TestLogRow[] | null) ?? []);
     setLoading(false);
   }, []);
@@ -105,6 +108,7 @@ export default function TestsPage() {
         .from("chapters")
         .select("id, title, subject_id")
         .eq("subject_id", subjectId)
+        .eq("in_competitive_syllabus", true)
         .order("display_order", { ascending: true });
       setChapters((data as ChapterRow[] | null) ?? []);
     }
@@ -364,4 +368,4 @@ export default function TestsPage() {
       </div>
     </div>
   );
-    }
+        }
