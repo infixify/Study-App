@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { supabase, classLevelsForContent } from "@/lib/supabase";
 import GreetingHeader from "@/components/dashboard/GreetingHeader";
 import CountdownCard from "@/components/dashboard/CountdownCard";
@@ -241,9 +242,6 @@ export default function DashboardPage() {
         : { exam_date: estimatedDateFor(key, targetYear), label: ESTIMATED_DATES[key].label, isEstimate: true };
     }
 
-    // Syllabus progress — mirrors the grouping logic used on the Library page:
-    // fetch this user's subjects (by class+exam), then chapters, then their
-    // chapter_progress rows, and roll it all up into one overall % done.
     let syllabusProgress: DashboardState["syllabusProgress"] = { doneChapters: 0, totalChapters: 0, pct: 0 };
 
     if (targetExam && classLevel) {
@@ -437,7 +435,15 @@ export default function DashboardPage() {
           targetMinutes={state.targetMinutesToday}
         />
 
-        <TaskWidget tasks={state.tasks} />
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-sm font-medium text-ink">Upcoming tasks</p>
+            <Link href="/todo" className="text-xs text-teal font-medium">
+              View all →
+            </Link>
+          </div>
+          <TaskWidget tasks={state.tasks} />
+        </div>
 
         {state.syllabusProgress.totalChapters > 0 && (
           <div className="mt-3 rounded-ticket border border-ink/10 bg-white p-4">
@@ -478,4 +484,4 @@ export default function DashboardPage() {
       <BottomNav />
     </div>
   );
-                  }
+          }
