@@ -11,6 +11,7 @@ interface ChapterItem {
   title: string;
   isToughTopic: boolean;
   classTag: string; // "10" | "11" | "12" | "Dropper"
+  inCompetitiveSyllabus: boolean;
 }
 
 interface SubjectItem {
@@ -22,6 +23,7 @@ interface SubjectItem {
 export default function LibraryPage() {
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
   const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
+  const [targetExam, setTargetExam] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -58,6 +60,7 @@ export default function LibraryPage() {
       if (!subjectRows || subjectRows.length === 0) {
         if (!cancelled) {
           setSubjects([]);
+          setTargetExam(profile.target_exam);
           setLoading(false);
         }
         return;
@@ -67,7 +70,7 @@ export default function LibraryPage() {
 
       const { data: chapterRows } = await supabase
         .from("chapters")
-        .select("id, subject_id, title, is_tough_topic, display_order")
+        .select("id, subject_id, title, is_tough_topic, display_order, in_competitive_syllabus")
         .in("subject_id", subjectRowIds)
         .order("display_order", { ascending: true });
 
@@ -94,6 +97,7 @@ export default function LibraryPage() {
             title: c.title,
             isToughTopic: c.is_tough_topic,
             classTag: s.class_level,
+            inCompetitiveSyllabus: c.in_competitive_syllabus,
           }));
         entry.chapters.push(...chaptersForThisRow);
       }
@@ -103,6 +107,7 @@ export default function LibraryPage() {
       if (!cancelled) {
         setSubjects(finalSubjects);
         setActiveSubjectId(finalSubjects[0]?.id ?? null);
+        setTargetExam(profile.target_exam);
         setLoading(false);
       }
     }
@@ -153,6 +158,7 @@ export default function LibraryPage() {
           key={activeSubject.id}
           subjectId={activeSubject.id}
           chapters={activeSubject.chapters}
+          targetExam={targetExam}
         />
       </div>
 
