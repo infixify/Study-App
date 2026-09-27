@@ -142,7 +142,7 @@ export default function DashboardPage() {
       { data: todayLog },
       { data: recentLogs },
       { data: taskRows },
-      { data: attempts },
+      { data: testLogs },
       { data: scheduleRows },
     ] = await Promise.all([
       supabase
@@ -166,11 +166,11 @@ export default function DashboardPage() {
         .order("due_date", { ascending: true })
         .limit(10),
       supabase
-        .from("test_attempts")
-        .select("accuracy, submitted_at")
+        .from("test_logs")
+        .select("accuracy, test_date")
         .eq("user_id", user.id)
-        .not("submitted_at", "is", null)
-        .order("submitted_at", { ascending: false })
+        .not("accuracy", "is", null)
+        .order("test_date", { ascending: false })
         .limit(10),
       targetExam
         ? supabase
@@ -191,7 +191,7 @@ export default function DashboardPage() {
       : 0;
 
     const validAccuracies =
-      attempts?.map((a) => a.accuracy).filter((a): a is number => a != null) ?? [];
+      testLogs?.map((t) => t.accuracy).filter((a): a is number => a != null) ?? [];
     const accuracy = validAccuracies.length
       ? Math.round(
           validAccuracies.reduce((sum, a) => sum + a, 0) / validAccuracies.length
