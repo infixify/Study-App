@@ -18,11 +18,21 @@ type TaskItem = {
   done: boolean;
 };
 
+type ExamScheduleRow = {
+  exam_key: string;
+  label: string;
+  exam_date: string;
+  is_confirmed: boolean;
+};
+
 interface DashboardState {
   name: string;
   streak: number;
   targetExam: string | null;
-  examDate: string | null;
+  // JEE gets two separate countdowns; NEET (or anything else) gets one.
+  mainsCountdown: ExamScheduleRow | null;
+  advancedCountdown: ExamScheduleRow | null;
+  singleCountdown: ExamScheduleRow | null;
   studiedMinutesToday: number;
   targetMinutesToday: number;
   tasks: TaskItem[];
@@ -34,19 +44,14 @@ const EMPTY_STATE: DashboardState = {
   name: "",
   streak: 0,
   targetExam: null,
-  examDate: null,
+  mainsCountdown: null,
+  advancedCountdown: null,
+  singleCountdown: null,
   studiedMinutesToday: 0,
   targetMinutesToday: 240,
   tasks: [],
   accuracy: 0,
   consistency: 0,
-};
-
-// TODO: move this somewhere central (env var / admin-configurable) once
-// multiple exam dates / exams need to be supported per user.
-const EXAM_DATE_BY_TARGET: Record<string, string> = {
-  JEE: "2027-01-24",
-  NEET: "2027-05-03",
 };
 
 function todayISO() {
@@ -57,6 +62,24 @@ function daysAgoISO(n: number) {
   const d = new Date();
   d.setDate(d.getDate() - n);
   return d.toISOString().slice(0, 10);
+}
+
+// Of the JEE Main session rows, pick whichever hasn't passed yet (soonest first).
+// If both sessions have already passed, fall back to showing the later one.
+function pickNextMainsSession(sessions: ExamScheduleRow[]): ExamScheduleRow | null {
+  if (!sessions.length) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const upcoming = sessions
+    .filter((s) => new Date(s.exam_date) >= today)
+    .sort((a, b) => new Date(a.exam_date).getTime() - new Date(b.exam_date).getTime());
+
+  if (upcoming.length) return upcoming[0];
+
+  return sessions
+    .slice()
+    .sort((a, b) => new Date(b.exam_date).getTime() - new Date(a.exam_date).getTime())[0];
 }
 
 export default function DashboardPage() {
@@ -77,18 +100,21 @@ export default function DashboardPage() {
 
       const today = todayISO();
 
+      const { data: profile } = await supabase
+        .from("users")
+        .select("name, target_exam")
+        .eq("uid", user.id)
+        .maybeSingle();
+
+      const targetExam = profile?.target_exam ?? null;
+
       const [
-        { data: profile },
         { data: todayLog },
         { data: recentLogs },
         { data: taskRows },
         { data: attempts },
+        { data: scheduleRows },
       ] = await Promise.all([
-        supabase
-          .from("users")
-          .select("name, target_exam")
-          .eq("uid", user.id)
-          .maybeSingle(),
         supabase
           .from("daily_logs")
           .select("study_time_minutes, target_minutes, streak_count")
@@ -116,17 +142,19 @@ export default function DashboardPage() {
           .not("submitted_at", "is", null)
           .order("submitted_at", { ascending: false })
           .limit(10),
+        targetExam
+          ? supabase
+              .from("exam_schedule")
+              .select("exam_key, label, exam_date, is_confirmed")
+              .eq("target_exam", targetExam)
+              .order("display_order", { ascending: true })
+          : Promise.resolve({ data: [] as ExamScheduleRow[] }),
       ]);
 
       if (cancelled) return;
 
-      // Streak: today's row if it exists, else most recent row we fetched.
-      const streak =
-        todayLog?.streak_count ??
-        recentLogs?.[0]?.streak_count ??
-        0;
+      const streak = todayLog?.streak_count ?? recentLogs?.[0]?.streak_count ?? 0;
 
-      // Consistency: % of last 14 days with any logged study time.
       const daysWithStudy =
         recentLogs?.filter((r) => (r.study_time_minutes ?? 0) > 0).length ?? 0;
       const consistency = recentLogs?.length
@@ -149,13 +177,28 @@ export default function DashboardPage() {
           done: t.status === "completed",
         })) ?? [];
 
-      const targetExam = profile?.target_exam ?? null;
+      const rows = (scheduleRows as ExamScheduleRow[] | null) ?? [];
+
+      let mainsCountdown: ExamScheduleRow | null = null;
+      let advancedCountdown: ExamScheduleRow | null = null;
+      let singleCountdown: ExamScheduleRow | null = null;
+
+      if (targetExam === "JEE") {
+        const mainsSessions = rows.filter((r) => r.exam_key.startsWith("JEE_MAINS"));
+        mainsCountdown = pickNextMainsSession(mainsSessions);
+        advancedCountdown = rows.find((r) => r.exam_key === "JEE_ADVANCED") ?? null;
+      } else {
+        // NEET, Boards, or anything else with a single row.
+        singleCountdown = rows[0] ?? null;
+      }
 
       setState({
         name: profile?.name || "Student",
         streak,
         targetExam,
-        examDate: targetExam ? EXAM_DATE_BY_TARGET[targetExam] ?? null : null,
+        mainsCountdown,
+        advancedCountdown,
+        singleCountdown,
         studiedMinutesToday: todayLog?.study_time_minutes ?? 0,
         targetMinutesToday: todayLog?.target_minutes ?? 240,
         tasks,
@@ -179,16 +222,41 @@ export default function DashboardPage() {
     );
   }
 
+  // "(tentative)" suffix flags exam-schedule rows the board hasn't officially
+  // confirmed yet — see exam_schedule.is_confirmed. Keeps CountdownCard itself untouched.
+  function labelFor(row: ExamScheduleRow) {
+    return row.is_confirmed ? row.label : `${row.label} (tentative)`;
+  }
+
   return (
     <div className="min-h-screen bg-paper pb-28">
       <div className="max-w-md mx-auto px-5 pt-8">
         <GreetingHeader name={state.name} streak={state.streak} />
 
-        {state.examDate && (
-          <CountdownCard
-            examDate={state.examDate}
-            examLabel={state.targetExam === "JEE" ? "JEE Mains" : state.targetExam ?? ""}
-          />
+        {state.targetExam === "JEE" ? (
+          <>
+            {state.mainsCountdown && (
+              <CountdownCard
+                examDate={state.mainsCountdown.exam_date}
+                examLabel={labelFor(state.mainsCountdown)}
+              />
+            )}
+            {state.advancedCountdown && (
+              <div className="mt-3">
+                <CountdownCard
+                  examDate={state.advancedCountdown.exam_date}
+                  examLabel={labelFor(state.advancedCountdown)}
+                />
+              </div>
+            )}
+          </>
+        ) : (
+          state.singleCountdown && (
+            <CountdownCard
+              examDate={state.singleCountdown.exam_date}
+              examLabel={labelFor(state.singleCountdown)}
+            />
+          )
         )}
 
         <StudyTimeTracker
