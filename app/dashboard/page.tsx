@@ -60,6 +60,7 @@ interface DashboardState {
   singleCountdown: { exam_date: string; label: string; isEstimate: boolean } | null;
   studiedMinutesToday: number;
   targetMinutesToday: number;
+  recentLogs: { log_date: string; study_time_minutes: number; target_minutes: number }[];
   tasks: TaskItem[];
   accuracy: number;
   consistency: number;
@@ -78,6 +79,7 @@ const EMPTY_STATE: DashboardState = {
   singleCountdown: null,
   studiedMinutesToday: 0,
   targetMinutesToday: 240,
+  recentLogs: [],
   tasks: [],
   accuracy: 0,
   consistency: 0,
@@ -153,9 +155,9 @@ export default function DashboardPage() {
         .maybeSingle(),
       supabase
         .from("daily_logs")
-        .select("log_date, study_time_minutes, streak_count")
+        .select("log_date, study_time_minutes, target_minutes, streak_count")
         .eq("user_id", user.id)
-        .gte("log_date", daysAgoISO(13))
+        .gte("log_date", daysAgoISO(29))
         .order("log_date", { ascending: false }),
       supabase
         .from("tasks")
@@ -184,10 +186,11 @@ export default function DashboardPage() {
 
     const streak = todayLog?.streak_count ?? recentLogs?.[0]?.streak_count ?? 0;
 
-    const daysWithStudy =
-      recentLogs?.filter((r) => (r.study_time_minutes ?? 0) > 0).length ?? 0;
-    const consistency = recentLogs?.length
-      ? Math.round((daysWithStudy / recentLogs.length) * 100)
+    // consistency still uses last 14 days of the 30-day set fetched above
+    const last14 = (recentLogs ?? []).slice(0, 14);
+    const daysWithStudy = last14.filter((r) => (r.study_time_minutes ?? 0) > 0).length;
+    const consistency = last14.length
+      ? Math.round((daysWithStudy / last14.length) * 100)
       : 0;
 
     const validAccuracies =
@@ -300,6 +303,11 @@ export default function DashboardPage() {
       singleCountdown,
       studiedMinutesToday: todayLog?.study_time_minutes ?? 0,
       targetMinutesToday: todayLog?.target_minutes ?? 240,
+      recentLogs: (recentLogs ?? []).map((r) => ({
+        log_date: r.log_date,
+        study_time_minutes: r.study_time_minutes,
+        target_minutes: r.target_minutes ?? 240,
+      })),
       tasks,
       accuracy,
       consistency,
@@ -433,6 +441,7 @@ export default function DashboardPage() {
         <StudyTimeTracker
           studiedMinutes={state.studiedMinutesToday}
           targetMinutes={state.targetMinutesToday}
+          recentLogs={state.recentLogs}
         />
 
         <div className="mt-4">
@@ -484,4 +493,4 @@ export default function DashboardPage() {
       <BottomNav />
     </div>
   );
-          }
+      }
