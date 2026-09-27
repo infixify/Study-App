@@ -147,6 +147,13 @@ export default function LibraryPage() {
     );
   }
 
+  function getSubjectStats(subj: SubjectItem) {
+    const total = subj.chapters.length;
+    const done = subj.chapters.filter((c) => c.progressStatus === "done").length;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    return { total, done, pct };
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-paper flex items-center justify-center">
@@ -182,6 +189,24 @@ export default function LibraryPage() {
           activeId={activeSubject.id}
           onChange={setActiveSubjectId}
         />
+
+        <div className="grid grid-cols-2 gap-2 mt-4 mb-2">
+          {subjects.map((subj) => {
+            const { done, total, pct } = getSubjectStats(subj);
+            return (
+              <div key={subj.id} className="rounded-ticket border border-ink/10 bg-white p-3">
+                <p className="text-xs font-medium text-ink truncate">{subj.name}</p>
+                <div className="w-full h-1.5 bg-ink/5 rounded-full mt-2 overflow-hidden">
+                  <div
+                    className="h-full bg-teal transition-all"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate mt-1">{done}/{total} done ({pct}%)</p>
+              </div>
+            );
+          })}
+        </div>
 
         <ChapterList
           key={activeSubject.id}
