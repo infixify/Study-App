@@ -6,8 +6,18 @@ import { supabase } from "@/lib/supabase";
 
 type Scope = "chapter" | "subject" | "full_syllabus";
 
-type SubjectRow = { id: string; name: string };
-type ChapterRow = { id: string; title: string; subject_id: string };
+// A subject the user can pick. For a plain class (10/11/12) or Dropper this
+// wraps exactly one underlying subjects row. For "11+12" combined students
+// it wraps TWO rows (their Class 11 row + their Class 12 row) sharing the
+// same subject name, since subjects.class_level has no "11+12" value of its
+// own — chapters get pulled from both ids and merged.
+type SubjectOption = {
+  key: string; // subject name, used as the stable selector value
+  name: string;
+  sources: { id: string; classLevel: string }[];
+};
+
+type ChapterOption = { id: string; title: string; classLevel: string };
 
 type TestLogRow = {
   id: string;
@@ -27,16 +37,16 @@ type TestLogRow = {
 
 export default function TestsPage() {
   const [targetExam, setTargetExam] = useState<string | null>(null);
-  const [subjects, setSubjects] = useState<SubjectRow[]>([]);
-  const [chapters, setChapters] = useState<ChapterRow[]>([]);
+  const [isPureDropper, setIsPureDropper] = useState(false);
+  const [subjects, setSubjects] = useState<SubjectOption[]>([]);
+  const [chapters, setChapters] = useState<ChapterOption[]>([]);
   const [logs, setLogs] = useState<TestLogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // form state
   const [scope, setScope] = useState<Scope>("chapter");
-  const [subjectId, setSubjectId] = useState("");
+  const [subjectKey, setSubjectKey] = useState("");
   const [chapterId, setChapterId] = useState("");
   const [testName, setTestName] = useState("");
   const [totalQuestions, setTotalQuestions] = useState("");
@@ -64,21 +74,21 @@ export default function TestsPage() {
     const exam = profile?.target_exam ?? null;
     setTargetExam(exam);
 
-    // subjects.class_level only has rows for 10/11/12/Dropper — Dropper rows
-    // already hold the combined 11+12 syllabus, so map both "Dropper" and
-    // "11+12" user profiles onto the same "Dropper" subjects.class_level.
     const rawClass = profile?.class_level ?? null;
-    const mappedClassLevel =
-      rawClass === "11+12" || rawClass === "Dropper" ? "Dropper" : rawClass;
+    const pureDropper = rawClass === "Dropper";
+    setIsPureDropper(pureDropper);
+
+    const classesToFetch: string[] =
+      rawClass === "Dropper" ? ["Dropper"] : rawClass === "11+12" ? ["11", "12"] : rawClass ? [rawClass] : [];
 
     const [{ data: subjectRows }, { data: logRows }] = await Promise.all([
-      exam && mappedClassLevel
+      exam && classesToFetch.length
         ? supabase
             .from("subjects")
-            .select("id, name")
+            .select("id, name, class_level")
             .eq("target_exam", exam)
-            .eq("class_level", mappedClassLevel)
-        : Promise.resolve({ data: [] as SubjectRow[] }),
+            .in("class_level", classesToFetch)
+        : Promise.resolve({ data: [] as { id: string; name: string; class_level: string }[] }),
       supabase
         .from("test_logs")
         .select(
@@ -89,7 +99,21 @@ export default function TestsPage() {
         .limit(50),
     ]);
 
-    setSubjects((subjectRows as SubjectRow[] | null) ?? []);
+    const grouped = new Map<string, SubjectOption>();
+    (subjectRows ?? []).forEach((row) => {
+      const existing = grouped.get(row.name);
+      if (existing) {
+        existing.sources.push({ id: row.id, classLevel: row.class_level });
+      } else {
+        grouped.set(row.name, {
+          key: row.name,
+          name: row.name,
+          sources: [{ id: row.id, classLevel: row.class_level }],
+        });
+      }
+    });
+
+    setSubjects(Array.from(grouped.values()));
     setLogs((logRows as TestLogRow[] | null) ?? []);
     setLoading(false);
   }, []);
@@ -100,20 +124,39 @@ export default function TestsPage() {
 
   useEffect(() => {
     async function loadChapters() {
-      if (!subjectId) {
+      const subject = subjects.find((s) => s.key === subjectKey);
+      if (!subject) {
         setChapters([]);
         return;
       }
-      const { data } = await supabase
+
+      const ids = subject.sources.map((s) => s.id);
+      let query = supabase
         .from("chapters")
-        .select("id, title, subject_id")
-        .eq("subject_id", subjectId)
-        .eq("in_competitive_syllabus", true)
+        .select("id, title, subject_id, display_order")
+        .in("subject_id", ids)
         .order("display_order", { ascending: true });
-      setChapters((data as ChapterRow[] | null) ?? []);
+
+      if (isPureDropper) {
+        query = query.eq("in_competitive_syllabus", true);
+      }
+
+      const { data } = await query;
+
+      const idToClass = new Map(subject.sources.map((s) => [s.id, s.classLevel]));
+      const mapped: ChapterOption[] = (data ?? []).map((c) => ({
+        id: c.id,
+        title:
+          subject.sources.length > 1
+            ? `${idToClass.get(c.subject_id) === "11" ? "XI" : "XII"} — ${c.title}`
+            : c.title,
+        classLevel: idToClass.get(c.subject_id) ?? "",
+      }));
+
+      setChapters(mapped);
     }
     if (scope === "chapter") loadChapters();
-  }, [subjectId, scope]);
+  }, [subjectKey, scope, subjects, isPureDropper]);
 
   function resetForm() {
     setTestName("");
@@ -132,7 +175,7 @@ export default function TestsPage() {
     if (!testName.trim()) return setError("Give the test a name.");
     if (!totalQuestions) return setError("Total questions is required.");
     if (scope === "chapter" && !chapterId) return setError("Pick a chapter.");
-    if (scope === "subject" && !subjectId) return setError("Pick a subject.");
+    if (scope === "subject" && !subjectKey) return setError("Pick a subject.");
 
     setSaving(true);
     const { data: authData } = await supabase.auth.getUser();
@@ -143,11 +186,14 @@ export default function TestsPage() {
       return;
     }
 
+    const subject = subjects.find((s) => s.key === subjectKey);
+    const representativeSubjectId = subject?.sources[0]?.id ?? null;
+
     const { error: insertError } = await supabase.from("test_logs").insert({
       user_id: user.id,
       scope,
       chapter_id: scope === "chapter" ? chapterId : null,
-      subject_id: scope === "chapter" || scope === "subject" ? subjectId || null : null,
+      subject_id: scope === "chapter" || scope === "subject" ? representativeSubjectId : null,
       test_name: testName.trim(),
       target_exam: targetExam,
       total_questions: Number(totalQuestions),
@@ -190,7 +236,6 @@ export default function TestsPage() {
           syllabus mocks. This isn't a test engine — just your record, tracked over time.
         </p>
 
-        {/* ---- Add new log ---- */}
         <div className="rounded-ticket border border-ink/10 bg-white p-4 mb-8">
           <p className="text-sm font-medium mb-3">Log a test</p>
 
@@ -200,7 +245,7 @@ export default function TestsPage() {
                 key={s}
                 onClick={() => {
                   setScope(s);
-                  setSubjectId("");
+                  setSubjectKey("");
                   setChapterId("");
                 }}
                 className={`flex-1 text-xs rounded-full py-2 font-medium border ${
@@ -214,20 +259,20 @@ export default function TestsPage() {
 
           {(scope === "chapter" || scope === "subject") && (
             <select
-              value={subjectId}
-              onChange={(e) => setSubjectId(e.target.value)}
+              value={subjectKey}
+              onChange={(e) => setSubjectKey(e.target.value)}
               className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
             >
               <option value="">Select subject…</option>
               {subjects.map((s) => (
-                <option key={s.id} value={s.id}>
+                <option key={s.key} value={s.key}>
                   {s.name}
                 </option>
               ))}
             </select>
           )}
 
-          {scope === "chapter" && subjectId && (
+          {scope === "chapter" && subjectKey && (
             <select
               value={chapterId}
               onChange={(e) => setChapterId(e.target.value)}
@@ -318,7 +363,6 @@ export default function TestsPage() {
           </button>
         </div>
 
-        {/* ---- Past logs ---- */}
         <p className="text-sm font-medium mb-3">Your test history</p>
         {logs.length === 0 && (
           <p className="text-sm text-slate">No tests logged yet — add your first one above.</p>
@@ -368,4 +412,4 @@ export default function TestsPage() {
       </div>
     </div>
   );
-        }
+                }
