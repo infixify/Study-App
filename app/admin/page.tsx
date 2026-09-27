@@ -56,20 +56,26 @@ export default function AdminPage() {
   const [addingShift, setAddingShift] = useState(false);
 
   const checkAccess = useCallback(async () => {
-    const { data: authData } = await supabase.auth.getUser();
-    const user = authData?.user;
-    if (!user) {
-      setSession(false);
-      setIsAdmin(false);
-      setChecking(false);
-      return;
-    }
-    setSession(true);
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) {
+        setSession(false);
+        setIsAdmin(false);
+        setChecking(false);
+        return;
+      }
+      setSession(true);
 
-    const { data: adminCheck } = await supabase.rpc("is_admin");
-    if (adminCheck) {
-      setIsAdmin(true);
-      await loadAdminData();
+      const { data: adminCheck, error: rpcError } = await supabase.rpc("is_admin");
+      if (rpcError) {
+        setAuthError("Admin check failed: " + rpcError.message);
+      } else if (adminCheck) {
+        setIsAdmin(true);
+        await loadAdminData();
+      }
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Could not verify admin access.");
     }
     setChecking(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,24 +91,29 @@ export default function AdminPage() {
     setAuthNotice(null);
     setAuthBusy(true);
 
-    if (mode === "register") {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) {
-        setAuthError(error.message);
+    try {
+      if (mode === "register") {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) {
+          setAuthError(error.message);
+        } else {
+          setAuthNotice(
+            "Registered. If email confirmation is on for this project, check your inbox and confirm before logging in — otherwise you're already signed in."
+          );
+          await checkAccess();
+        }
       } else {
-        setAuthNotice(
-          "Registered. If email confirmation is on for this project, check your inbox and confirm before logging in — otherwise you're already signed in."
-        );
-        await checkAccess();
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          setAuthError(error.message);
+        } else {
+          await checkAccess();
+        }
       }
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setAuthError(error.message);
-      } else {
-        await checkAccess();
-      }
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Something went wrong. Try again.");
     }
+
     setAuthBusy(false);
   }
 
@@ -434,4 +445,4 @@ function StatCard({ label, value }: { label: string; value: number }) {
       <p className="text-xs text-slate mt-0.5">{label}</p>
     </div>
   );
-    }
+                              }
