@@ -1,0 +1,192 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import BottomNav from "@/components/dashboard/BottomNav";
+import {
+  loadAndReconcileStreak,
+  saveFocusSession,
+  MIN_STREAK_SECONDS,
+} from "@/lib/focus";
+
+function formatTime(totalSeconds: number) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+
+type ModalState =
+  | { type: "none" }
+  | { type: "streak_reset_on_load" }
+  | { type: "session_too_short"; seconds: number }
+  | { type: "session_saved"; streak: number };
+
+export default function FocusPage() {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const [isRunning, setIsRunning] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const startedAtRef = useRef<Date | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [longestStreak, setLongestStreak] = useState(0);
+  const [modal, setModal] = useState<ModalState>({ type: "none" });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function init() {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      if (!cancelled) setUserId(user.id);
+
+      const streakInfo = await loadAndReconcileStreak(user.id);
+      if (cancelled) return;
+
+      setCurrentStreak(streakInfo.currentStreak);
+      setLongestStreak(streakInfo.longestStreak);
+      if (streakInfo.streakWasReset) {
+        setModal({ type: "streak_reset_on_load" });
+      }
+      setLoading(false);
+    }
+
+    init();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isRunning) {
+      intervalRef.current = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [isRunning]);
+
+  function handleStart() {
+    startedAtRef.current = new Date();
+    setElapsedSeconds(0);
+    setIsRunning(true);
+  }
+
+  async function handleStop() {
+    setIsRunning(false);
+    const startedAt = startedAtRef.current;
+    if (!startedAt || !userId) return;
+
+    const endedAt = new Date();
+    const result = await saveFocusSession(userId, startedAt, endedAt);
+
+    if (!result.countedForStreak) {
+      setModal({ type: "session_too_short", seconds: elapsedSeconds });
+    } else {
+      setCurrentStreak(result.newStreak);
+      setLongestStreak(result.newLongest);
+      setModal({ type: "session_saved", streak: result.newStreak });
+    }
+
+    startedAtRef.current = null;
+    setElapsedSeconds(0);
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-paper flex items-center justify-center">
+        <p className="text-ink/60 text-sm">Loading Focus Mode…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-paper pb-28">
+      <div className="max-w-md mx-auto px-5 pt-8 flex flex-col items-center">
+        <h1 className="font-display text-2xl text-ink mb-1 self-start">Focus Mode</h1>
+        <p className="text-ink/60 text-sm mb-8 self-start">
+          🔥 {currentStreak} day streak · Best: {longestStreak}
+        </p>
+
+        <div className="w-full flex flex-col items-center bg-white rounded-ticket border border-ink/10 py-12 px-6">
+          <span className="font-display text-5xl text-ink tabular-nums mb-8">
+            {formatTime(elapsedSeconds)}
+          </span>
+
+          {!isRunning ? (
+            <button
+              onClick={handleStart}
+              className="w-full py-3 rounded-ticket bg-coral text-white font-semibold text-sm"
+            >
+              Start Session
+            </button>
+          ) : (
+            <button
+              onClick={handleStop}
+              className="w-full py-3 rounded-ticket bg-ink text-white font-semibold text-sm"
+            >
+              Stop Session
+            </button>
+          )}
+
+          <p className="text-ink/40 text-xs mt-4 text-center">
+            Study at least {Math.floor(MIN_STREAK_SECONDS / 60)} minutes to count toward your streak.
+          </p>
+        </div>
+      </div>
+
+      <BottomNav />
+
+      {modal.type !== "none" && (
+        <div className="fixed inset-0 bg-ink/40 flex items-end sm:items-center justify-center z-50 px-5 pb-8 sm:pb-0">
+          <div className="bg-white rounded-ticket p-6 w-full max-w-sm">
+            {modal.type === "streak_reset_on_load" && (
+              <>
+                <h2 className="font-display text-lg text-ink mb-2">Streak reset 😔</h2>
+                <p className="text-ink/60 text-sm mb-5">
+                  You missed a day, so your streak is back to 0. Start a session now to begin a new one.
+                </p>
+              </>
+            )}
+            {modal.type === "session_too_short" && (
+              <>
+                <h2 className="font-display text-lg text-ink mb-2">Too short to count</h2>
+                <p className="text-ink/60 text-sm mb-5">
+                  That session was {formatTime(modal.seconds)} — sessions need to be at
+                  least {Math.floor(MIN_STREAK_SECONDS / 60)} minutes to count toward your streak. It's still fine, just try a longer one next time.
+                </p>
+              </>
+            )}
+            {modal.type === "session_saved" && (
+              <>
+                <h2 className="font-display text-lg text-ink mb-2">Nice work! 🔥</h2>
+                <p className="text-ink/60 text-sm mb-5">
+                  Session saved. Your streak is now {modal.streak} day{modal.streak === 1 ? "" : "s"}.
+                </p>
+              </>
+            )}
+            <button
+              onClick={() => setModal({ type: "none" })}
+              className="w-full py-3 rounded-ticket bg-ink text-white font-semibold text-sm"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
