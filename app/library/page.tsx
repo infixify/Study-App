@@ -93,6 +93,13 @@ export default function LibraryPage() {
         const entry = grouped.get(key)!;
         const chaptersForThisRow = (chapterRows ?? [])
           .filter((c) => c.subject_id === s.id)
+          // Droppers only study JEE/NEET-relevant content — drop chapters
+          // that aren't in the competitive syllabus entirely (not just hide
+          // the badge), since school-boards-only chapters are irrelevant to them.
+          .filter((c) => {
+            if (s.class_level !== "Dropper") return true;
+            return c.in_competitive_syllabus !== false;
+          })
           .map((c) => ({
             id: c.id,
             title: c.title,
