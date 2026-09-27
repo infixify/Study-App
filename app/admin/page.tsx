@@ -42,6 +42,8 @@ type ResourceRow = {
   chapter_title: string;
 };
 
+type ResScope = "chapter" | "subject";
+
 const RESOURCE_CATEGORIES = [
   { key: "full_notes", label: "Notes" },
   { key: "short_notes", label: "Short Notes" },
@@ -78,6 +80,7 @@ export default function AdminPage() {
   // --- resources upload state ---
   const [allSubjects, setAllSubjects] = useState<SubjectRow[]>([]);
   const [resChapters, setResChapters] = useState<ChapterRow[]>([]);
+  const [resScope, setResScope] = useState<ResScope>("chapter");
   const [resCategory, setResCategory] = useState(RESOURCE_CATEGORIES[0].key);
   const [resSubjectId, setResSubjectId] = useState("");
   const [resChapterId, setResChapterId] = useState("");
@@ -267,7 +270,7 @@ export default function AdminPage() {
       url: r.url,
       category: r.category,
       resource_type: r.resource_type,
-      chapter_title: r.chapters?.title ?? "—",
+      chapter_title: r.chapters?.title ?? "Whole subject",
     }));
     setRecentResources(mapped);
   }
@@ -292,13 +295,14 @@ export default function AdminPage() {
     setResError(null);
 
     if (!resSubjectId) return setResError("Pick a subject.");
-    if (!resChapterId) return setResError("Pick a chapter.");
+    if (resScope === "chapter" && !resChapterId) return setResError("Pick a chapter.");
     if (!resTitle.trim()) return setResError("Give the resource a title.");
     if (!resUrl.trim()) return setResError("Paste the resource URL.");
 
     setResSaving(true);
     const { error: insertError } = await supabase.from("resources").insert({
-      chapter_id: resChapterId,
+      chapter_id: resScope === "chapter" ? resChapterId : null,
+      subject_id: resScope === "subject" ? resSubjectId : null,
       category: resCategory,
       resource_type: resType,
       title: resTitle.trim(),
@@ -554,6 +558,31 @@ export default function AdminPage() {
           </p>
 
           <div className="rounded-ticket border border-ink/10 bg-white p-4 mb-4">
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={() => {
+                  setResScope("chapter");
+                  setResChapterId("");
+                }}
+                className={`flex-1 text-xs rounded-full py-2 font-medium border ${
+                  resScope === "chapter" ? "bg-marigold/15 border-marigold text-ink" : "border-ink/12 text-slate"
+                }`}
+              >
+                This chapter
+              </button>
+              <button
+                onClick={() => {
+                  setResScope("subject");
+                  setResChapterId("");
+                }}
+                className={`flex-1 text-xs rounded-full py-2 font-medium border ${
+                  resScope === "subject" ? "bg-marigold/15 border-marigold text-ink" : "border-ink/12 text-slate"
+                }`}
+              >
+                Whole subject (combined bundle)
+              </button>
+            </div>
+
             <div className="grid grid-cols-2 gap-2 mb-2">
               <select
                 value={resCategory}
@@ -593,7 +622,7 @@ export default function AdminPage() {
               ))}
             </select>
 
-            {resSubjectId && (
+            {resScope === "chapter" && resSubjectId && (
               <select
                 value={resChapterId}
                 onChange={(e) => setResChapterId(e.target.value)}
@@ -653,7 +682,7 @@ export default function AdminPage() {
                 </div>
                 <button onClick={() => deleteResource(r.id)} className="text-xs text-coral">
                   Remove
-                  </button>
+                </button>
               </div>
             ))}
           </div>
