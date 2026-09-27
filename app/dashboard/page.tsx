@@ -33,8 +33,23 @@ type ExamShiftRow = {
   shift_time: string;
 };
 
-// Years a student can target — extend this as new cycles open up.
-const TARGET_YEARS = [2027, 2028];
+// Years a student can target.
+const TARGET_YEARS = [2027, 2028, 2029, 2030];
+
+// Fallback estimated exam-month/day per exam type, used only for years that
+// don't have a real exam_schedule row yet (NTA/boards haven't announced).
+// Based on the typical historical pattern — clearly labeled "(estimated)".
+const ESTIMATED_DATES: Record<string, { month: number; day: number; label: string }> = {
+  JEE_MAINS: { month: 1, day: 24, label: "JEE Main Session 1" },
+  JEE_ADVANCED: { month: 5, day: 25, label: "JEE Advanced" },
+  NEET: { month: 5, day: 5, label: "NEET UG" },
+  BOARDS: { month: 2, day: 15, label: "Board Exams begin" },
+};
+
+function estimatedDateFor(key: keyof typeof ESTIMATED_DATES, year: number): string {
+  const { month, day } = ESTIMATED_DATES[key];
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
 
 interface DashboardState {
   name: string;
@@ -42,10 +57,10 @@ interface DashboardState {
   targetExam: string | null;
   targetYear: number;
   selectedShiftId: string | null;
-  mainsCountdown: ExamScheduleRow | null;
+  mainsCountdown: { exam_date: string; label: string; isEstimate: boolean } | null;
   mainsShifts: ExamShiftRow[];
-  advancedCountdown: ExamScheduleRow | null;
-  singleCountdown: ExamScheduleRow | null;
+  advancedCountdown: { exam_date: string; label: string; isEstimate: boolean } | null;
+  singleCountdown: { exam_date: string; label: string; isEstimate: boolean } | null;
   studiedMinutesToday: number;
   targetMinutesToday: number;
   tasks: TaskItem[];
@@ -80,7 +95,6 @@ function daysAgoISO(n: number) {
   return d.toISOString().slice(0, 10);
 }
 
-// Of the JEE Main session rows, pick whichever hasn't passed yet (soonest first).
 function pickNextMainsSession(sessions: ExamScheduleRow[]): ExamScheduleRow | null {
   if (!sessions.length) return null;
   const today = new Date();
@@ -194,28 +208,38 @@ export default function DashboardPage() {
 
     const rows = (scheduleRows as ExamScheduleRow[] | null) ?? [];
 
-    let mainsCountdown: ExamScheduleRow | null = null;
-    let advancedCountdown: ExamScheduleRow | null = null;
-    let singleCountdown: ExamScheduleRow | null = null;
+    let mainsCountdown: DashboardState["mainsCountdown"] = null;
+    let advancedCountdown: DashboardState["advancedCountdown"] = null;
+    let singleCountdown: DashboardState["singleCountdown"] = null;
     let mainsShifts: ExamShiftRow[] = [];
 
     if (targetExam === "JEE") {
       const mainsSessions = rows.filter((r) => r.exam_key.startsWith("JEE_MAINS"));
-      mainsCountdown = pickNextMainsSession(mainsSessions);
-      advancedCountdown = rows.find((r) => r.exam_key === "JEE_ADVANCED") ?? null;
+      const mainsRow = pickNextMainsSession(mainsSessions);
+      const advancedRow = rows.find((r) => r.exam_key === "JEE_ADVANCED") ?? null;
 
-      // Shifts (specific dates/times) only exist once NTA releases the full
-      // schedule for a session — fetch them for whichever session is "next".
-      if (mainsCountdown) {
+      mainsCountdown = mainsRow
+        ? { exam_date: mainsRow.exam_date, label: mainsRow.label, isEstimate: false }
+        : { exam_date: estimatedDateFor("JEE_MAINS", targetYear), label: ESTIMATED_DATES.JEE_MAINS.label, isEstimate: true };
+
+      advancedCountdown = advancedRow
+        ? { exam_date: advancedRow.exam_date, label: advancedRow.label, isEstimate: false }
+        : { exam_date: estimatedDateFor("JEE_ADVANCED", targetYear), label: ESTIMATED_DATES.JEE_ADVANCED.label, isEstimate: true };
+
+      if (mainsRow) {
         const { data: shiftRows } = await supabase
           .from("exam_shifts")
           .select("id, exam_schedule_id, shift_date, shift_time")
-          .eq("exam_schedule_id", mainsCountdown.id)
+          .eq("exam_schedule_id", mainsRow.id)
           .order("display_order", { ascending: true });
         mainsShifts = (shiftRows as ExamShiftRow[] | null) ?? [];
       }
-    } else {
-      singleCountdown = rows[0] ?? null;
+    } else if (targetExam) {
+      const key = targetExam === "NEET" ? "NEET" : "BOARDS";
+      const row = rows[0] ?? null;
+      singleCountdown = row
+        ? { exam_date: row.exam_date, label: row.label, isEstimate: false }
+        : { exam_date: estimatedDateFor(key, targetYear), label: ESTIMATED_DATES[key].label, isEstimate: true };
     }
 
     setState({
@@ -248,8 +272,6 @@ export default function DashboardPage() {
     if (user) {
       await supabase
         .from("users")
-        // Changing target year invalidates any previously picked shift
-        // (it belonged to the old year's session), so clear it too.
         .update({ target_year: newYear, selected_shift_id: null })
         .eq("uid", user.id);
       await load();
@@ -279,10 +301,8 @@ export default function DashboardPage() {
     );
   }
 
-  // "(tentative)" suffix flags exam-schedule rows not yet officially confirmed.
-  function labelFor(row: ExamScheduleRow, overrideDate?: string) {
-    const base = row.is_confirmed || overrideDate ? row.label : `${row.label} (tentative)`;
-    return base;
+  function labelFor(row: { label: string; isEstimate: boolean }) {
+    return row.isEstimate ? `${row.label} (estimated)` : row.label;
   }
 
   const selectedMainsShift = state.mainsShifts.find((s) => s.id === state.selectedShiftId) ?? null;
@@ -292,7 +312,6 @@ export default function DashboardPage() {
       <div className="max-w-md mx-auto px-5 pt-8">
         <GreetingHeader name={state.name} streak={state.streak} />
 
-        {/* Target year switcher */}
         {state.targetExam && (
           <div className="mt-4 flex items-center justify-between text-xs">
             <span className="text-slate">Targeting</span>
@@ -316,11 +335,10 @@ export default function DashboardPage() {
             {state.mainsCountdown && (
               <CountdownCard
                 examDate={selectedMainsShift ? selectedMainsShift.shift_date : state.mainsCountdown.exam_date}
-                examLabel={labelFor(state.mainsCountdown, selectedMainsShift?.shift_date)}
+                examLabel={labelFor(state.mainsCountdown)}
               />
             )}
 
-            {/* Shift picker — only appears once NTA has released specific dates/shifts */}
             {state.mainsShifts.length > 0 && (
               <div className="mt-3 rounded-ticket border border-ink/10 bg-white p-4">
                 <p className="text-sm font-medium mb-1">Your exam shift</p>
@@ -391,4 +409,4 @@ export default function DashboardPage() {
       <BottomNav />
     </div>
   );
-      }
+                               }
