@@ -1,7 +1,7 @@
 // app/dashboard/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import GreetingHeader from "@/components/dashboard/GreetingHeader";
 import CountdownCard from "@/components/dashboard/CountdownCard";
@@ -19,18 +19,31 @@ type TaskItem = {
 };
 
 type ExamScheduleRow = {
+  id: string;
   exam_key: string;
   label: string;
   exam_date: string;
   is_confirmed: boolean;
 };
 
+type ExamShiftRow = {
+  id: string;
+  exam_schedule_id: string;
+  shift_date: string;
+  shift_time: string;
+};
+
+// Years a student can target — extend this as new cycles open up.
+const TARGET_YEARS = [2027, 2028];
+
 interface DashboardState {
   name: string;
   streak: number;
   targetExam: string | null;
-  // JEE gets two separate countdowns; NEET (or anything else) gets one.
+  targetYear: number;
+  selectedShiftId: string | null;
   mainsCountdown: ExamScheduleRow | null;
+  mainsShifts: ExamShiftRow[];
   advancedCountdown: ExamScheduleRow | null;
   singleCountdown: ExamScheduleRow | null;
   studiedMinutesToday: number;
@@ -44,7 +57,10 @@ const EMPTY_STATE: DashboardState = {
   name: "",
   streak: 0,
   targetExam: null,
+  targetYear: 2027,
+  selectedShiftId: null,
   mainsCountdown: null,
+  mainsShifts: [],
   advancedCountdown: null,
   singleCountdown: null,
   studiedMinutesToday: 0,
@@ -65,7 +81,6 @@ function daysAgoISO(n: number) {
 }
 
 // Of the JEE Main session rows, pick whichever hasn't passed yet (soonest first).
-// If both sessions have already passed, fall back to showing the later one.
 function pickNextMainsSession(sessions: ExamScheduleRow[]): ExamScheduleRow | null {
   if (!sessions.length) return null;
   const today = new Date();
@@ -86,133 +101,175 @@ export default function DashboardPage() {
   const [chatOpen, setChatOpen] = useState(false);
   const [state, setState] = useState<DashboardState>(EMPTY_STATE);
   const [loading, setLoading] = useState(true);
+  const [savingYear, setSavingYear] = useState(false);
+  const [savingShift, setSavingShift] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      const { data: authData } = await supabase.auth.getUser();
-      const user = authData?.user;
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      const today = todayISO();
-
-      const { data: profile } = await supabase
-        .from("users")
-        .select("name, target_exam")
-        .eq("uid", user.id)
-        .maybeSingle();
-
-      const targetExam = profile?.target_exam ?? null;
-
-      const [
-        { data: todayLog },
-        { data: recentLogs },
-        { data: taskRows },
-        { data: attempts },
-        { data: scheduleRows },
-      ] = await Promise.all([
-        supabase
-          .from("daily_logs")
-          .select("study_time_minutes, target_minutes, streak_count")
-          .eq("user_id", user.id)
-          .eq("log_date", today)
-          .maybeSingle(),
-        supabase
-          .from("daily_logs")
-          .select("log_date, study_time_minutes, streak_count")
-          .eq("user_id", user.id)
-          .gte("log_date", daysAgoISO(13))
-          .order("log_date", { ascending: false }),
-        supabase
-          .from("tasks")
-          .select("id, title, task_type, status, due_date")
-          .eq("user_id", user.id)
-          .lte("due_date", today)
-          .neq("status", "completed")
-          .order("due_date", { ascending: true })
-          .limit(10),
-        supabase
-          .from("test_attempts")
-          .select("accuracy, submitted_at")
-          .eq("user_id", user.id)
-          .not("submitted_at", "is", null)
-          .order("submitted_at", { ascending: false })
-          .limit(10),
-        targetExam
-          ? supabase
-              .from("exam_schedule")
-              .select("exam_key, label, exam_date, is_confirmed")
-              .eq("target_exam", targetExam)
-              .order("display_order", { ascending: true })
-          : Promise.resolve({ data: [] as ExamScheduleRow[] }),
-      ]);
-
-      if (cancelled) return;
-
-      const streak = todayLog?.streak_count ?? recentLogs?.[0]?.streak_count ?? 0;
-
-      const daysWithStudy =
-        recentLogs?.filter((r) => (r.study_time_minutes ?? 0) > 0).length ?? 0;
-      const consistency = recentLogs?.length
-        ? Math.round((daysWithStudy / recentLogs.length) * 100)
-        : 0;
-
-      const validAccuracies =
-        attempts?.map((a) => a.accuracy).filter((a): a is number => a != null) ?? [];
-      const accuracy = validAccuracies.length
-        ? Math.round(
-            validAccuracies.reduce((sum, a) => sum + a, 0) / validAccuracies.length
-          )
-        : 0;
-
-      const tasks: TaskItem[] =
-        taskRows?.map((t) => ({
-          id: t.id,
-          title: t.title,
-          type: t.task_type as "todo" | "backlog",
-          done: t.status === "completed",
-        })) ?? [];
-
-      const rows = (scheduleRows as ExamScheduleRow[] | null) ?? [];
-
-      let mainsCountdown: ExamScheduleRow | null = null;
-      let advancedCountdown: ExamScheduleRow | null = null;
-      let singleCountdown: ExamScheduleRow | null = null;
-
-      if (targetExam === "JEE") {
-        const mainsSessions = rows.filter((r) => r.exam_key.startsWith("JEE_MAINS"));
-        mainsCountdown = pickNextMainsSession(mainsSessions);
-        advancedCountdown = rows.find((r) => r.exam_key === "JEE_ADVANCED") ?? null;
-      } else {
-        // NEET, Boards, or anything else with a single row.
-        singleCountdown = rows[0] ?? null;
-      }
-
-      setState({
-        name: profile?.name || "Student",
-        streak,
-        targetExam,
-        mainsCountdown,
-        advancedCountdown,
-        singleCountdown,
-        studiedMinutesToday: todayLog?.study_time_minutes ?? 0,
-        targetMinutesToday: todayLog?.target_minutes ?? 240,
-        tasks,
-        accuracy,
-        consistency,
-      });
+  const load = useCallback(async () => {
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData?.user;
+    if (!user) {
       setLoading(false);
+      return;
     }
 
-    load();
-    return () => {
-      cancelled = true;
-    };
+    const today = todayISO();
+
+    const { data: profile } = await supabase
+      .from("users")
+      .select("name, target_exam, target_year, selected_shift_id")
+      .eq("uid", user.id)
+      .maybeSingle();
+
+    const targetExam = profile?.target_exam ?? null;
+    const targetYear = profile?.target_year ?? 2027;
+    const selectedShiftId = profile?.selected_shift_id ?? null;
+
+    const [
+      { data: todayLog },
+      { data: recentLogs },
+      { data: taskRows },
+      { data: attempts },
+      { data: scheduleRows },
+    ] = await Promise.all([
+      supabase
+        .from("daily_logs")
+        .select("study_time_minutes, target_minutes, streak_count")
+        .eq("user_id", user.id)
+        .eq("log_date", today)
+        .maybeSingle(),
+      supabase
+        .from("daily_logs")
+        .select("log_date, study_time_minutes, streak_count")
+        .eq("user_id", user.id)
+        .gte("log_date", daysAgoISO(13))
+        .order("log_date", { ascending: false }),
+      supabase
+        .from("tasks")
+        .select("id, title, task_type, status, due_date")
+        .eq("user_id", user.id)
+        .lte("due_date", today)
+        .neq("status", "completed")
+        .order("due_date", { ascending: true })
+        .limit(10),
+      supabase
+        .from("test_attempts")
+        .select("accuracy, submitted_at")
+        .eq("user_id", user.id)
+        .not("submitted_at", "is", null)
+        .order("submitted_at", { ascending: false })
+        .limit(10),
+      targetExam
+        ? supabase
+            .from("exam_schedule")
+            .select("id, exam_key, label, exam_date, is_confirmed")
+            .eq("target_exam", targetExam)
+            .eq("year", targetYear)
+            .order("display_order", { ascending: true })
+        : Promise.resolve({ data: [] as ExamScheduleRow[] }),
+    ]);
+
+    const streak = todayLog?.streak_count ?? recentLogs?.[0]?.streak_count ?? 0;
+
+    const daysWithStudy =
+      recentLogs?.filter((r) => (r.study_time_minutes ?? 0) > 0).length ?? 0;
+    const consistency = recentLogs?.length
+      ? Math.round((daysWithStudy / recentLogs.length) * 100)
+      : 0;
+
+    const validAccuracies =
+      attempts?.map((a) => a.accuracy).filter((a): a is number => a != null) ?? [];
+    const accuracy = validAccuracies.length
+      ? Math.round(
+          validAccuracies.reduce((sum, a) => sum + a, 0) / validAccuracies.length
+        )
+      : 0;
+
+    const tasks: TaskItem[] =
+      taskRows?.map((t) => ({
+        id: t.id,
+        title: t.title,
+        type: t.task_type as "todo" | "backlog",
+        done: t.status === "completed",
+      })) ?? [];
+
+    const rows = (scheduleRows as ExamScheduleRow[] | null) ?? [];
+
+    let mainsCountdown: ExamScheduleRow | null = null;
+    let advancedCountdown: ExamScheduleRow | null = null;
+    let singleCountdown: ExamScheduleRow | null = null;
+    let mainsShifts: ExamShiftRow[] = [];
+
+    if (targetExam === "JEE") {
+      const mainsSessions = rows.filter((r) => r.exam_key.startsWith("JEE_MAINS"));
+      mainsCountdown = pickNextMainsSession(mainsSessions);
+      advancedCountdown = rows.find((r) => r.exam_key === "JEE_ADVANCED") ?? null;
+
+      // Shifts (specific dates/times) only exist once NTA releases the full
+      // schedule for a session — fetch them for whichever session is "next".
+      if (mainsCountdown) {
+        const { data: shiftRows } = await supabase
+          .from("exam_shifts")
+          .select("id, exam_schedule_id, shift_date, shift_time")
+          .eq("exam_schedule_id", mainsCountdown.id)
+          .order("display_order", { ascending: true });
+        mainsShifts = (shiftRows as ExamShiftRow[] | null) ?? [];
+      }
+    } else {
+      singleCountdown = rows[0] ?? null;
+    }
+
+    setState({
+      name: profile?.name || "Student",
+      streak,
+      targetExam,
+      targetYear,
+      selectedShiftId,
+      mainsCountdown,
+      mainsShifts,
+      advancedCountdown,
+      singleCountdown,
+      studiedMinutesToday: todayLog?.study_time_minutes ?? 0,
+      targetMinutesToday: todayLog?.target_minutes ?? 240,
+      tasks,
+      accuracy,
+      consistency,
+    });
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleYearChange(newYear: number) {
+    setSavingYear(true);
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData?.user;
+    if (user) {
+      await supabase
+        .from("users")
+        // Changing target year invalidates any previously picked shift
+        // (it belonged to the old year's session), so clear it too.
+        .update({ target_year: newYear, selected_shift_id: null })
+        .eq("uid", user.id);
+      await load();
+    }
+    setSavingYear(false);
+  }
+
+  async function handleShiftChange(shiftId: string) {
+    setSavingShift(true);
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData?.user;
+    if (user) {
+      await supabase
+        .from("users")
+        .update({ selected_shift_id: shiftId || null })
+        .eq("uid", user.id);
+      await load();
+    }
+    setSavingShift(false);
+  }
 
   if (loading) {
     return (
@@ -222,25 +279,74 @@ export default function DashboardPage() {
     );
   }
 
-  // "(tentative)" suffix flags exam-schedule rows the board hasn't officially
-  // confirmed yet — see exam_schedule.is_confirmed. Keeps CountdownCard itself untouched.
-  function labelFor(row: ExamScheduleRow) {
-    return row.is_confirmed ? row.label : `${row.label} (tentative)`;
+  // "(tentative)" suffix flags exam-schedule rows not yet officially confirmed.
+  function labelFor(row: ExamScheduleRow, overrideDate?: string) {
+    const base = row.is_confirmed || overrideDate ? row.label : `${row.label} (tentative)`;
+    return base;
   }
+
+  const selectedMainsShift = state.mainsShifts.find((s) => s.id === state.selectedShiftId) ?? null;
 
   return (
     <div className="min-h-screen bg-paper pb-28">
       <div className="max-w-md mx-auto px-5 pt-8">
         <GreetingHeader name={state.name} streak={state.streak} />
 
+        {/* Target year switcher */}
+        {state.targetExam && (
+          <div className="mt-4 flex items-center justify-between text-xs">
+            <span className="text-slate">Targeting</span>
+            <select
+              value={state.targetYear}
+              disabled={savingYear}
+              onChange={(e) => handleYearChange(Number(e.target.value))}
+              className="rounded-full border border-ink/15 bg-white px-3 py-1 text-xs font-medium disabled:opacity-50"
+            >
+              {TARGET_YEARS.map((y) => (
+                <option key={y} value={y}>
+                  {state.targetExam} {y}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {state.targetExam === "JEE" ? (
           <>
             {state.mainsCountdown && (
               <CountdownCard
-                examDate={state.mainsCountdown.exam_date}
-                examLabel={labelFor(state.mainsCountdown)}
+                examDate={selectedMainsShift ? selectedMainsShift.shift_date : state.mainsCountdown.exam_date}
+                examLabel={labelFor(state.mainsCountdown, selectedMainsShift?.shift_date)}
               />
             )}
+
+            {/* Shift picker — only appears once NTA has released specific dates/shifts */}
+            {state.mainsShifts.length > 0 && (
+              <div className="mt-3 rounded-ticket border border-ink/10 bg-white p-4">
+                <p className="text-sm font-medium mb-1">Your exam shift</p>
+                <p className="text-xs text-slate mb-3">
+                  Pick the exact date + shift from your admit card for the most accurate countdown.
+                </p>
+                <select
+                  value={state.selectedShiftId ?? ""}
+                  disabled={savingShift}
+                  onChange={(e) => handleShiftChange(e.target.value)}
+                  className="w-full rounded-ticket border border-ink/15 bg-white p-3 text-sm disabled:opacity-50"
+                >
+                  <option value="">Not selected yet — using session date</option>
+                  {state.mainsShifts.map((shift) => (
+                    <option key={shift.id} value={shift.id}>
+                      {new Date(shift.shift_date).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                      })}{" "}
+                      — {shift.shift_time}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {state.advancedCountdown && (
               <div className="mt-3">
                 <CountdownCard
@@ -285,4 +391,4 @@ export default function DashboardPage() {
       <BottomNav />
     </div>
   );
-}
+      }
