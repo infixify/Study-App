@@ -7,6 +7,7 @@ interface Chapter {
   classTag?: string; // "10" | "11" | "12" | "Dropper" — optional so single-class views still work
   inCompetitiveSyllabus?: boolean; // undefined-safe so non-Library callers still work
   jeeScope?: "common" | "advanced_only"; // only meaningful when targetExam === "JEE"
+  neetScope?: "common" | "neet_only"; // only meaningful when targetExam === "NEET"
 }
 
 interface ChapterListProps {
@@ -32,6 +33,9 @@ export default function ChapterList({ chapters, targetExam }: ChapterListProps) 
         const showAdvancedOnlyBadge =
           targetExam === "JEE" && ch.jeeScope === "advanced_only";
 
+        const showNeetOnlyBadge =
+          targetExam === "NEET" && ch.neetScope === "neet_only";
+
         return (
           <div
             key={ch.id}
@@ -45,7 +49,7 @@ export default function ChapterList({ chapters, targetExam }: ChapterListProps) 
               )}
               <span className="text-sm font-medium text-ink">{ch.title}</span>
             </div>
-            {(showOffSyllabusBadge || showAdvancedOnlyBadge || ch.isToughTopic) && (
+            {(showOffSyllabusBadge || showAdvancedOnlyBadge || showNeetOnlyBadge || ch.isToughTopic) && (
               <div className="flex flex-wrap items-center gap-2">
                 {showOffSyllabusBadge && (
                   <span className="text-[10px] font-semibold text-ink/50 bg-ink/5 px-2 py-1 rounded-full whitespace-nowrap">
@@ -55,6 +59,11 @@ export default function ChapterList({ chapters, targetExam }: ChapterListProps) 
                 {showAdvancedOnlyBadge && (
                   <span className="text-[10px] font-semibold text-marigold bg-marigold/10 px-2 py-1 rounded-full whitespace-nowrap">
                     Advanced only
+                  </span>
+                )}
+                {showNeetOnlyBadge && (
+                  <span className="text-[10px] font-semibold text-marigold bg-marigold/10 px-2 py-1 rounded-full whitespace-nowrap">
+                    NEET only
                   </span>
                 )}
                 {ch.isToughTopic && (
