@@ -79,7 +79,7 @@ export default function TestsPage() {
     setIsPureDropper(pureDropper);
 
     const classesToFetch: string[] =
-      rawClass === "Dropper" ? ["Dropper"] : rawClass === "11+12" ? ["11", "12"] : rawClass ? [rawClass] : [];
+  rawClass === "Dropper" ? ["Dropper"] : rawClass === "11_12" ? ["11", "12"] : rawClass ? [rawClass] : [];
 
     const [{ data: subjectRows }, { data: logRows }] = await Promise.all([
       exam && classesToFetch.length
