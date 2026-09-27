@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, classLevelsForContent } from "@/lib/supabase";
 import GreetingHeader from "@/components/dashboard/GreetingHeader";
 import CountdownCard from "@/components/dashboard/CountdownCard";
 import StudyTimeTracker from "@/components/dashboard/StudyTimeTracker";
@@ -33,12 +33,8 @@ type ExamShiftRow = {
   shift_time: string;
 };
 
-// Years a student can target.
 const TARGET_YEARS = [2027, 2028, 2029, 2030];
 
-// Fallback estimated exam-month/day per exam type, used only for years that
-// don't have a real exam_schedule row yet (NTA/boards haven't announced).
-// Based on the typical historical pattern — clearly labeled "(estimated)".
 const ESTIMATED_DATES: Record<string, { month: number; day: number; label: string }> = {
   JEE_MAINS: { month: 1, day: 24, label: "JEE Main Session 1" },
   JEE_ADVANCED: { month: 5, day: 25, label: "JEE Advanced" },
@@ -66,6 +62,7 @@ interface DashboardState {
   tasks: TaskItem[];
   accuracy: number;
   consistency: number;
+  syllabusProgress: { doneChapters: number; totalChapters: number; pct: number };
 }
 
 const EMPTY_STATE: DashboardState = {
@@ -83,6 +80,7 @@ const EMPTY_STATE: DashboardState = {
   tasks: [],
   accuracy: 0,
   consistency: 0,
+  syllabusProgress: { doneChapters: 0, totalChapters: 0, pct: 0 },
 };
 
 function todayISO() {
@@ -130,13 +128,14 @@ export default function DashboardPage() {
 
     const { data: profile } = await supabase
       .from("users")
-      .select("name, target_exam, target_year, selected_shift_id")
+      .select("name, target_exam, target_year, selected_shift_id, class_level")
       .eq("uid", user.id)
       .maybeSingle();
 
     const targetExam = profile?.target_exam ?? null;
     const targetYear = profile?.target_year ?? 2027;
     const selectedShiftId = profile?.selected_shift_id ?? null;
+    const classLevel = profile?.class_level ?? null;
 
     const [
       { data: todayLog },
@@ -242,6 +241,55 @@ export default function DashboardPage() {
         : { exam_date: estimatedDateFor(key, targetYear), label: ESTIMATED_DATES[key].label, isEstimate: true };
     }
 
+    // Syllabus progress — mirrors the grouping logic used on the Library page:
+    // fetch this user's subjects (by class+exam), then chapters, then their
+    // chapter_progress rows, and roll it all up into one overall % done.
+    let syllabusProgress: DashboardState["syllabusProgress"] = { doneChapters: 0, totalChapters: 0, pct: 0 };
+
+    if (targetExam && classLevel) {
+      const classLevels = classLevelsForContent(classLevel as any);
+
+      const { data: subjectRows } = await supabase
+        .from("subjects")
+        .select("id, class_level")
+        .eq("target_exam", targetExam)
+        .in("class_level", classLevels);
+
+      const subjectIds = (subjectRows ?? []).map((s) => s.id);
+
+      if (subjectIds.length) {
+        const dropperIds = (subjectRows ?? [])
+          .filter((s) => s.class_level === "Dropper")
+          .map((s) => s.id);
+
+        const { data: chapterRows } = await supabase
+          .from("chapters")
+          .select("id, subject_id, in_competitive_syllabus")
+          .in("subject_id", subjectIds);
+
+        const relevantChapters = (chapterRows ?? []).filter((c) => {
+          if (dropperIds.includes(c.subject_id)) return c.in_competitive_syllabus !== false;
+          return true;
+        });
+
+        const chapterIds = relevantChapters.map((c) => c.id);
+
+        const { data: progressRows } = chapterIds.length
+          ? await supabase
+              .from("chapter_progress")
+              .select("chapter_id, status")
+              .eq("user_id", user.id)
+              .in("chapter_id", chapterIds)
+          : { data: [] as { chapter_id: string; status: string }[] };
+
+        const doneChapters = (progressRows ?? []).filter((p) => p.status === "done").length;
+        const totalChapters = relevantChapters.length;
+        const pct = totalChapters > 0 ? Math.round((doneChapters / totalChapters) * 100) : 0;
+
+        syllabusProgress = { doneChapters, totalChapters, pct };
+      }
+    }
+
     setState({
       name: profile?.name || "Student",
       streak,
@@ -257,6 +305,7 @@ export default function DashboardPage() {
       tasks,
       accuracy,
       consistency,
+      syllabusProgress,
     });
     setLoading(false);
   }, []);
@@ -390,6 +439,26 @@ export default function DashboardPage() {
 
         <TaskWidget tasks={state.tasks} />
 
+        {state.syllabusProgress.totalChapters > 0 && (
+          <div className="mt-3 rounded-ticket border border-ink/10 bg-white p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium">Syllabus Progress</p>
+              <span className="text-xs font-semibold text-teal">
+                {state.syllabusProgress.pct}%
+              </span>
+            </div>
+            <div className="w-full h-2 bg-ink/5 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-teal transition-all"
+                style={{ width: `${state.syllabusProgress.pct}%` }}
+              />
+            </div>
+            <p className="text-[11px] text-slate mt-1.5">
+              {state.syllabusProgress.doneChapters}/{state.syllabusProgress.totalChapters} chapters marked done
+            </p>
+          </div>
+        )}
+
         <AnalyticsRadar
           accuracy={state.accuracy}
           consistency={state.consistency}
@@ -409,4 +478,4 @@ export default function DashboardPage() {
       <BottomNav />
     </div>
   );
-                               }
+                  }
