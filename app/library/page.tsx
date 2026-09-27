@@ -13,6 +13,7 @@ interface ChapterItem {
   classTag: string; // "10" | "11" | "12" | "Dropper"
   inCompetitiveSyllabus: boolean;
   jeeScope: "common" | "advanced_only";
+  neetScope: "common" | "neet_only";
 }
 
 interface SubjectItem {
@@ -71,7 +72,7 @@ export default function LibraryPage() {
 
       const { data: chapterRows } = await supabase
         .from("chapters")
-        .select("id, subject_id, title, is_tough_topic, display_order, in_competitive_syllabus, jee_scope")
+        .select("id, subject_id, title, is_tough_topic, display_order, in_competitive_syllabus, jee_scope, neet_scope")
         .in("subject_id", subjectRowIds)
         .order("display_order", { ascending: true });
 
@@ -107,6 +108,7 @@ export default function LibraryPage() {
             classTag: s.class_level,
             inCompetitiveSyllabus: c.in_competitive_syllabus,
             jeeScope: (c.jee_scope ?? "common") as "common" | "advanced_only",
+            neetScope: (c.neet_scope ?? "common") as "common" | "neet_only",
           }));
         entry.chapters.push(...chaptersForThisRow);
       }
