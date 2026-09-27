@@ -6,18 +6,21 @@ import SubjectTabs from "@/components/library/SubjectTabs";
 import ChapterList from "@/components/library/ChapterList";
 import BottomNav from "@/components/dashboard/BottomNav";
 
+type ProgressStatus = "not_started" | "in_progress" | "done";
+
 interface ChapterItem {
   id: string;
   title: string;
   isToughTopic: boolean;
-  classTag: string; // "10" | "11" | "12" | "Dropper"
+  classTag: string;
   inCompetitiveSyllabus: boolean;
   jeeScope: "common" | "advanced_only";
   neetScope: "common" | "neet_only";
+  progressStatus: ProgressStatus;
 }
 
 interface SubjectItem {
-  id: string; // grouped by subject NAME (e.g. "Physics"), not a single DB row
+  id: string;
   name: string;
   chapters: ChapterItem[];
 }
@@ -70,16 +73,22 @@ export default function LibraryPage() {
 
       const subjectRowIds = subjectRows.map((s) => s.id);
 
-      const { data: chapterRows } = await supabase
-        .from("chapters")
-        .select("id, subject_id, title, is_tough_topic, display_order, in_competitive_syllabus, jee_scope, neet_scope")
-        .in("subject_id", subjectRowIds)
-        .order("display_order", { ascending: true });
+      const [{ data: chapterRows }, { data: progressRows }] = await Promise.all([
+        supabase
+          .from("chapters")
+          .select("id, subject_id, title, is_tough_topic, display_order, in_competitive_syllabus, jee_scope, neet_scope")
+          .in("subject_id", subjectRowIds)
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("chapter_progress")
+          .select("chapter_id, status")
+          .eq("user_id", user.id),
+      ]);
 
-      // Group multiple DB subject rows (e.g. Physics-Class11 + Physics-Class12,
-      // both matched by classLevelsForContent for an "11_12" user) into ONE
-      // tab per subject NAME. Each chapter keeps a classTag so the UI can
-      // badge which class it came from.
+      const progressMap = new Map<string, ProgressStatus>(
+        (progressRows ?? []).map((p) => [p.chapter_id, p.status as ProgressStatus])
+      );
+
       const grouped = new Map<string, SubjectItem>();
 
       const sortedSubjectRows = [...subjectRows].sort((a, b) =>
@@ -94,9 +103,6 @@ export default function LibraryPage() {
         const entry = grouped.get(key)!;
         const chaptersForThisRow = (chapterRows ?? [])
           .filter((c) => c.subject_id === s.id)
-          // Droppers only study JEE/NEET-relevant content — drop chapters
-          // that aren't in the competitive syllabus entirely (not just hide
-          // the badge), since school-boards-only chapters are irrelevant to them.
           .filter((c) => {
             if (s.class_level !== "Dropper") return true;
             return c.in_competitive_syllabus !== false;
@@ -109,6 +115,7 @@ export default function LibraryPage() {
             inCompetitiveSyllabus: c.in_competitive_syllabus,
             jeeScope: (c.jee_scope ?? "common") as "common" | "advanced_only",
             neetScope: (c.neet_scope ?? "common") as "common" | "neet_only",
+            progressStatus: progressMap.get(c.id) ?? "not_started",
           }));
         entry.chapters.push(...chaptersForThisRow);
       }
@@ -128,6 +135,17 @@ export default function LibraryPage() {
       cancelled = true;
     };
   }, []);
+
+  function handleProgressChange(chapterId: string, status: ProgressStatus) {
+    setSubjects((prev) =>
+      prev.map((subj) => ({
+        ...subj,
+        chapters: subj.chapters.map((ch) =>
+          ch.id === chapterId ? { ...ch, progressStatus: status } : ch
+        ),
+      }))
+    );
+  }
 
   if (loading) {
     return (
@@ -170,6 +188,7 @@ export default function LibraryPage() {
           subjectId={activeSubject.id}
           chapters={activeSubject.chapters}
           targetExam={targetExam}
+          onProgressChange={handleProgressChange}
         />
       </div>
 
