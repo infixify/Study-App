@@ -1,9 +1,26 @@
 "use client";
 
-import { useEffect, useState, createElement, Fragment } from "react";
-import { supabase } from "@/lib/supabase";
+import { useState, createElement } from "react";
 
 const e = createElement;
+
+export interface Resource {
+  id: string;
+  title: string;
+  url: string;
+  category: string;
+  chapter_id: string | null;
+  subject_id: string | null;
+}
+
+export const RESOURCE_TYPES: { key: string; label: string; icon: string }[] = [
+  { key: "ncert", label: "NCERT Chapter Wise", icon: "📘" },
+  { key: "full_notes", label: "Notes", icon: "📝" },
+  { key: "short_notes", label: "Short Notes", icon: "📄" },
+  { key: "formula_sheet", label: "Formula Sheets", icon: "🧮" },
+  { key: "pyq", label: "PYQs", icon: "🗂️" },
+  { key: "mock_test", label: "Mock Tests", icon: "🎯" },
+];
 
 interface Chapter {
   id: string;
@@ -11,178 +28,137 @@ interface Chapter {
   classTag?: string;
 }
 
-interface Resource {
-  id: string;
-  title: string;
-  url: string;
-  category: string;
-  chapter_id: string;
-  subject_id: string | null;
-}
-
 interface ResourceChapterListProps {
   chapters: Chapter[];
   subjectRowIds: string[];
+  category: string;
+  resources: Resource[];
 }
 
-const CATEGORIES: { key: string; label: string }[] = [
-  { key: "ncert", label: "NCERT" },
-  { key: "full_notes", label: "Notes" },
-  { key: "short_notes", label: "Short Notes" },
-  { key: "formula_sheet", label: "Formula Sheets" },
-  { key: "pyq", label: "PYQs" },
-  { key: "mock_test", label: "Mock Tests" },
-];
+export default function ResourceChapterList({
+  chapters,
+  subjectRowIds,
+  category,
+  resources,
+}: ResourceChapterListProps) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-export default function ResourceChapterList({ chapters, subjectRowIds }: ResourceChapterListProps) {
-  const [resources, setResources] = useState<Resource[]>([]);
-  const [loadingResources, setLoadingResources] = useState(true);
-  const [expandedChapterId, setExpandedChapterId] = useState<string | null>(null);
-  const [openCategory, setOpenCategory] = useState<string | null>(null);
+  const typeLabel = RESOURCE_TYPES.find((t) => t.key === category)?.label ?? "resources";
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoadingResources(true);
-    setExpandedChapterId(null);
-    setOpenCategory(null);
+  // Subject-wide combined bundles for this type (chapter_id is null).
+  const bundles = resources.filter(
+    (r) =>
+      r.chapter_id === null &&
+      r.category === category &&
+      r.subject_id !== null &&
+      subjectRowIds.includes(r.subject_id)
+  );
 
-    async function load() {
-      const chapterIds = chapters.map((c) => c.id);
-      if (chapterIds.length === 0) {
-        if (!cancelled) {
-          setResources([]);
-          setLoadingResources(false);
-        }
-        return;
-      }
-
-      const [{ data: chapterResources }, { data: subjectResources }] = await Promise.all([
-        supabase.from("resources").select("id, title, url, category, chapter_id, subject_id").in("chapter_id", chapterIds),
-        subjectRowIds.length > 0
-          ? supabase.from("resources").select("id, title, url, category, chapter_id, subject_id").in("subject_id", subjectRowIds).is("chapter_id", null)
-          : Promise.resolve({ data: [] as Resource[] }),
-      ]);
-
-      if (!cancelled) {
-        setResources([...(chapterResources ?? []), ...(subjectResources ?? [])]);
-        setLoadingResources(false);
-      }
-    }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [chapters, subjectRowIds]);
-
-  function toggleChapter(chapterId: string) {
-    setOpenCategory(null);
-    setExpandedChapterId((prev) => (prev === chapterId ? null : chapterId));
-  }
-
-  function countFor(chapterId: string, category: string) {
-    return resources.filter((r) => r.chapter_id === chapterId && r.category === category).length;
-  }
-
-  function subjectWideCountFor(category: string) {
-    return resources.filter((r) => r.chapter_id === null && r.category === category).length;
-  }
+  // Only chapters that actually have a file of this type.
+  const chaptersWithFiles = chapters
+    .map((ch) => ({
+      ch,
+      rows: resources.filter((r) => r.chapter_id === ch.id && r.category === category),
+    }))
+    .filter((x) => x.rows.length > 0);
 
   function renderResourceRow(r: Resource) {
     return e(
       "div",
-      { key: r.id, className: "flex items-center justify-between bg-paper rounded-lg px-3 py-2 border border-ink/5" },
-      e("span", { className: "text-xs text-ink" }, r.title),
+      {
+        key: r.id,
+        className:
+          "flex items-center justify-between bg-paper rounded-lg px-3 py-2 border border-ink/5",
+      },
+      e("span", { className: "text-xs text-ink pr-2" }, r.title),
       e(
         "div",
-        { className: "flex gap-2 shrink-0" },
-        e("a", { href: r.url, target: "_blank", rel: "noopener noreferrer", className: "text-[11px] font-semibold text-teal" }, "View"),
-        e("a", { href: r.url, download: true, className: "text-[11px] font-semibold text-marigold" }, "Download")
-      )
-    );
-  }
-
-  function renderCategoryView(chapterId: string) {
-    const rows = resources.filter(
-      (r) => r.category === openCategory && (r.chapter_id === chapterId || r.chapter_id === null)
-    );
-    return e(
-      "div",
-      null,
-      e(
-        "button",
-        { onClick: () => setOpenCategory(null), className: "text-xs text-teal font-medium mb-2" },
-        "← Back"
-      ),
-      e(
-        "div",
-        { className: "flex flex-col gap-2" },
-        rows.length === 0
-          ? e("p", { className: "text-xs text-slate py-2" }, "No resources yet.")
-          : rows.map(renderResourceRow)
-      )
-    );
-  }
-
-  function renderCategoryGrid(chapterId: string) {
-    return e(
-      "div",
-      { className: "grid grid-cols-2 gap-2" },
-      CATEGORIES.map((cat) => {
-        const count = countFor(chapterId, cat.key) + subjectWideCountFor(cat.key);
-        return e(
-          "button",
+        { className: "flex gap-3 shrink-0" },
+        e(
+          "a",
           {
-            key: cat.key,
-            onClick: () => setOpenCategory(cat.key),
-            disabled: count === 0,
-            className: `text-xs font-medium py-2 rounded-lg border ${
-              count > 0 ? "border-teal/30 bg-teal/10 text-teal" : "border-ink/10 bg-ink/5 text-ink/30"
-            }`,
+            href: r.url,
+            target: "_blank",
+            rel: "noopener noreferrer",
+            className: "text-[11px] font-semibold text-teal",
           },
-          `${cat.label} ${count > 0 ? `(${count})` : ""}`
-        );
-      })
+          "View"
+        ),
+        e(
+          "a",
+          {
+            href: r.url,
+            download: true,
+            className: "text-[11px] font-semibold text-marigold",
+          },
+          "Download"
+        )
+      )
     );
   }
 
-  function renderChapter(ch: Chapter) {
-    const isExpanded = expandedChapterId === ch.id;
+  function renderBundles() {
+    if (bundles.length === 0) return null;
+    return e(
+      "div",
+      { className: "bg-white rounded-ticket border border-marigold/40 p-4" },
+      e("p", { className: "text-xs font-semibold text-ink mb-2" }, "Full subject"),
+      e("div", { className: "flex flex-col gap-2" }, bundles.map(renderResourceRow))
+    );
+  }
+
+  function renderChapter(item: { ch: Chapter; rows: Resource[] }) {
+    const { ch, rows } = item;
+    const isExpanded = expandedId === ch.id;
     return e(
       "div",
       { key: ch.id, className: "bg-white rounded-ticket border border-ink/10 overflow-hidden" },
       e(
         "button",
-        { onClick: () => toggleChapter(ch.id), className: "w-full px-4 py-3 flex items-center gap-2 text-left" },
+        {
+          onClick: () => setExpandedId(isExpanded ? null : ch.id),
+          className: "w-full px-4 py-3 flex items-center gap-2 text-left",
+        },
         ch.classTag
           ? e(
               "span",
-              { className: "shrink-0 text-[10px] font-semibold text-ink/60 bg-ink/5 px-2 py-1 rounded-full" },
+              {
+                className:
+                  "shrink-0 text-[10px] font-semibold text-ink/60 bg-ink/5 px-2 py-1 rounded-full",
+              },
               ch.classTag === "Dropper" ? "Dropper" : `Class ${ch.classTag}`
             )
           : null,
         e("span", { className: "text-sm font-medium text-ink flex-1" }, ch.title),
+        e(
+          "span",
+          { className: "shrink-0 text-[10px] font-semibold text-teal bg-teal/10 px-2 py-1 rounded-full" },
+          `${rows.length}`
+        ),
         e("span", { className: "text-ink/40 text-xs" }, isExpanded ? "▲" : "▼")
       ),
       isExpanded
         ? e(
             "div",
-            { className: "px-4 pb-4" },
-            loadingResources
-              ? e("p", { className: "text-xs text-slate py-2" }, "Loading…")
-              : openCategory
-              ? renderCategoryView(ch.id)
-              : renderCategoryGrid(ch.id)
+            { className: "px-4 pb-4 flex flex-col gap-2" },
+            rows.map(renderResourceRow)
           )
         : null
+    );
+  }
+
+  if (bundles.length === 0 && chaptersWithFiles.length === 0) {
+    return e(
+      "p",
+      { className: "text-sm text-slate text-center py-10" },
+      `No ${typeLabel} added for this subject yet.`
     );
   }
 
   return e(
     "div",
     { className: "flex flex-col gap-3 mt-4" },
-    chapters.length === 0
-      ? e("p", { className: "text-sm text-slate text-center py-8" }, "No chapters yet.")
-      : chapters.map(renderChapter)
+    renderBundles(),
+    chaptersWithFiles.map(renderChapter)
   );
 }
