@@ -11,10 +11,6 @@ interface ModuleBlock {
   }[];
 }
 
-// ============================================================================
-// AUTOMATIC EXAM-PERSONALISED KNOWLEDGE ENGINES
-// ============================================================================
-
 const JEE_ENGINE: Record<string, { formulas: ModuleBlock; notes: ModuleBlock }> = {
   "motion in a straight line": {
     formulas: {
@@ -277,47 +273,63 @@ async function uploadWithRetry(path: string, bytes: Uint8Array, retries = 3): Pr
   }
 }
 
-// ============================================================================
-// SINGLE-CLICK MASTER CONTROLLER
-// ============================================================================
 export default function MasterGeneratorPage() {
   const [running, setRunning] = useState(false);
-  const [status, setStatus] = useState("Click Master Button to Automatically Personalize the Entire App");
+  const [status, setStatus] = useState("Click to Resume & Finish remaining chapters!");
   const [pct, setPct] = useState(0);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function run1ClickMaster() {
+  async function runSmartResume() {
     setRunning(true);
     setErr(null);
     setDone(false);
 
     try {
-      setStatus("Analyzing entire curriculum & subjects from Supabase...");
+      setStatus("Checking chapters already finished in database...");
+
+      // 1. Check which chapters already have BOTH formula_sheet and short_notes
+      const { data: existingFormulas } = await supabase.from("resources").select("chapter_id").eq("category", "formula_sheet");
+      const { data: existingNotes } = await supabase.from("resources").select("chapter_id").eq("category", "short_notes");
+
+      const formulaSet = new Set((existingFormulas || []).map((r) => r.chapter_id));
+      const noteSet = new Set((existingNotes || []).map((r) => r.chapter_id));
+
       const { data: subs } = await supabase.from("subjects").select("id, name, class_level, target_exam");
       if (!subs || subs.length === 0) throw new Error("No subjects found in database");
 
       const subIds = subs.map((s) => s.id);
       const { data: chs } = await supabase.from("chapters").select("id, title, subject_id").in("subject_id", subIds);
-      if (!chs || chs.length === 0) throw new Error("No chapters found in database");
+      if (!chs || chs.length === 0) throw new Error("No chapters found");
 
-      const categories: ("formula_sheet" | "short_notes")[] = ["formula_sheet", "short_notes"];
+      let skippedCount = 0;
+      let newlyUploaded = 0;
 
       for (let i = 0; i < chs.length; i++) {
         const ch = chs[i];
         setPct(Math.round(((i + 1) / chs.length) * 100));
 
+        // SMART RESUME: If both formula & short note exist for this chapter, skip instantly!
+        if (formulaSet.has(ch.id) && noteSet.has(ch.id)) {
+          skippedCount++;
+          continue;
+        }
+
         const parentSub = subs.find((s) => s.id === ch.subject_id);
         if (!parentSub) continue;
 
-        const targetExam = parentSub.target_exam; // Automatically reads "JEE", "NEET", or "Boards"!
-        setStatus("Deploying [" + targetExam + " • " + parentSub.name + "] " + ch.title + " (" + (i + 1) + "/" + chs.length + ")");
+        const targetExam = parentSub.target_exam;
+        setStatus("Resuming (" + (i + 1) + "/" + chs.length + "): [" + targetExam + "] " + ch.title);
 
         const engine = targetExam === "JEE" ? JEE_ENGINE : targetExam === "NEET" ? NEET_ENGINE : BOARDS_ENGINE;
         const cleanKey = ch.title.toLowerCase().trim();
         const entry = engine[cleanKey];
 
-        for (const cat of categories) {
+        const categoriesToUpload: ("formula_sheet" | "short_notes")[] = [];
+        if (!formulaSet.has(ch.id)) categoriesToUpload.push("formula_sheet");
+        if (!noteSet.has(ch.id)) categoriesToUpload.push("short_notes");
+
+        for (const cat of categoriesToUpload) {
           const isFormula = cat === "formula_sheet";
           const moduleData: ModuleBlock = (entry && (isFormula ? entry.formulas : entry.notes)) || {
             badge: targetExam + " " + (isFormula ? "High-Yield Equations & Shortcuts" : "Coaching Concept & Traps Framework"),
@@ -362,7 +374,6 @@ export default function MasterGeneratorPage() {
           await uploadWithRetry(path, pdfBytes);
           const { data: pubData } = supabase.storage.from("resources").getPublicUrl(path);
 
-          // Force Overwrite: Purana sheet delete karke naya authentic coaching sheet insert
           await supabase.from("resources").delete().eq("chapter_id", ch.id).eq("category", cat);
           await supabase.from("resources").insert({
             chapter_id: ch.id,
@@ -373,12 +384,14 @@ export default function MasterGeneratorPage() {
             category: cat,
             display_order: 0,
           });
+
+          newlyUploaded++;
         }
 
         await new Promise((resolve) => setTimeout(resolve, 110));
       }
 
-      setStatus("Complete! 100% of all subjects, classes & exams are freshly deployed with personalized content!");
+      setStatus("Finished! " + skippedCount + " were already safely saved, " + newlyUploaded + " newly finished!");
       setDone(true);
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -400,8 +413,8 @@ export default function MasterGeneratorPage() {
         e(
           "div",
           null,
-          e("h1", { className: "text-lg font-bold text-ink" }, "PrepWise 1-Click Master Deployer"),
-          e("p", { className: "text-xs text-slate" }, "100% Automatic  *  JEE, NEET, Boards & Droppers  *  Force Overwrite ON")
+          e("h1", { className: "text-lg font-bold text-ink" }, "PrepWise Smart Resume Studio"),
+          e("p", { className: "text-xs text-slate" }, "Pehle se saved chapters 0 sec mein skip honge")
         )
       ),
       running || done
@@ -420,17 +433,16 @@ export default function MasterGeneratorPage() {
       e(
         "div",
         { className: "flex flex-col gap-3 pt-2" },
-        // SINGLE MASTER BUTTON
         e(
           "button",
           {
             type: "button",
             disabled: running,
-            onClick: () => run1ClickMaster(),
+            onClick: () => runSmartResume(),
             className:
               "w-full py-5 rounded-xl bg-teal text-white font-bold text-sm shadow-xl hover:bg-teal/90 disabled:opacity-50 transition-all text-center flex items-center justify-center gap-2",
           },
-          running ? "Personalizing & Overwriting..." : "🚀 1-Click Auto-Personalize Entire App (All Classes & Exams)"
+          running ? "Resuming & Completing..." : "⚡ Resume From Where Chrome Was Closed"
         )
       ),
       done
@@ -440,7 +452,7 @@ export default function MasterGeneratorPage() {
               href: "/resources",
               className: "w-full py-3 text-center bg-teal text-white rounded-xl text-xs font-semibold shadow hover:bg-teal/90 transition-all",
             },
-            "Go to App & Test Updated Resources"
+            "Go to App & Test Resources"
           )
         : null
     )
