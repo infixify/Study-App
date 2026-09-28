@@ -149,6 +149,24 @@ function buildUniversalPdf(title: string, exam: string, cls: string, sub: string
   return new TextEncoder().encode(pdf);
 }
 
+// Resilient upload with automatic 3x retry on network blips
+async function uploadWithRetry(path: string, bytes: Uint8Array, retries = 3): Promise<void> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const { error } = await supabase.storage.from("resources").upload(path, bytes, {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+      if (!error) return;
+      if (attempt === retries) throw error;
+    } catch (err: any) {
+      if (attempt === retries) throw err;
+      // Wait before retrying (exponential backoff)
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
+  }
+}
+
 export default function MasterGeneratorPage() {
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState("Ready to publish 100% of all syllabus chapters");
@@ -210,11 +228,8 @@ export default function MasterGeneratorPage() {
           ".pdf";
         const path = "formula_sheets/" + fileName;
 
-        const { error: upErr } = await supabase.storage.from("resources").upload(path, pdfBytes, {
-          contentType: "application/pdf",
-          upsert: true,
-        });
-        if (upErr) throw new Error("Storage upload error on " + ch.title + ": " + upErr.message);
+        // Upload with resilient retry engine
+        await uploadWithRetry(path, pdfBytes);
 
         const { data: pubData } = supabase.storage.from("resources").getPublicUrl(path);
 
@@ -228,6 +243,9 @@ export default function MasterGeneratorPage() {
           category: "formula_sheet",
           display_order: 0,
         });
+
+        // 120ms safety throttle so mobile sockets never get exhausted
+        await new Promise((resolve) => setTimeout(resolve, 120));
       }
 
       setStatus("Awesome! 100% of all syllabus chapters now have official Formula Sheets!");
