@@ -11,110 +11,107 @@ const apiKey =
 
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json();
-
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return NextResponse.json({ error: "No messages provided" }, { status: 400 });
-    }
+    const body = await req.json();
+    const { messages, question, imageBase64 } = body;
 
     if (!apiKey) {
       return NextResponse.json({
-        reply:
-          "Gemini API key configure nahi hai Vercel environment variables mein. Please GEMINI_API_KEY set karein!",
+        reply: "Gemini API Key missing on Vercel. Please check environment variables.",
       });
     }
 
-    const systemPrompt = `
-You are an expert JEE (Mains & Advanced) and NEET Doubt Solving Faculty at a premier coaching institute.
-Your task is to solve student academic questions with extreme clarity, precision, and pedagogical rigor.
+    // Determine the latest question text and image
+    let promptText = question || "";
+    let rawImage = imageBase64 || null;
 
-Instructions:
-1. Remember previous conversation context: If an image was shared earlier, refer to that question.
-2. If an image is provided, perform precise OCR to extract the question and any diagram details.
-3. State the Given Data and the Core Concept/Formula being tested.
-4. Provide a clear, Step-by-Step Mathematical/Conceptual derivation without skipping crucial steps.
-5. Highlight the Final Answer clearly (including option letter if it is an MCQ).
-6. Add a 1-line "Pro Tip / Common Trap" (where students usually make calculation or sign mistakes).
-7. Language: Clean, student-friendly English (or polite Hinglish if asked).
-`;
-
-    // Convert chat history into Gemini contents format
-    const contents: any[] = [];
-
-    // System turn
-    contents.push({
-      role: "user",
-      parts: [{ text: systemPrompt }],
-    });
-    contents.push({
-      role: "model",
-      parts: [{ text: "Understood. I am ready to solve JEE/NEET doubts step-by-step with full accuracy." }],
-    });
-
-    // Add recent conversation history (last 6 messages for context)
-    const recentMessages = messages.slice(-6);
-
-    for (const msg of recentMessages) {
-      const role = msg.role === "user" ? "user" : "model";
-      const parts: any[] = [];
-
-      if (msg.content && msg.content.trim()) {
-        parts.push({ text: msg.content.trim() });
-      }
-
-      // Check if this message had an image
-      if (msg.image && typeof msg.image === "string") {
-        const match = msg.image.match(/^data:([^;]+);base64,(.+)$/);
-        if (match) {
-          parts.push({
-            inline_data: {
-              mime_type: match[1],
-              data: match[2],
-            },
-          });
-        }
-      }
-
-      if (parts.length > 0) {
-        contents.push({ role, parts });
+    if (Array.isArray(messages) && messages.length > 0) {
+      const lastUserMsg = [...messages].reverse().find((m: any) => m.role === "user");
+      if (lastUserMsg) {
+        if (!promptText && lastUserMsg.content) promptText = lastUserMsg.content;
+        if (!rawImage && lastUserMsg.image) rawImage = lastUserMsg.image;
       }
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents,
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 2048,
-          },
-        }),
+    if (!promptText && !rawImage) {
+      return NextResponse.json({ reply: "Please provide a question or an image to solve." });
+    }
+
+    // Build parts for Gemini API
+    const parts: any[] = [];
+
+    // 1. System Prompt
+    parts.push({
+      text: `You are an expert Kota JEE & NEET Doubt Solving Faculty.
+Solve the following academic problem step-by-step.
+- If an image is provided, extract the question and solve it.
+- State the Given data and core formula.
+- Provide clear mathematical/conceptual steps.
+- Highlight the Final Answer clearly.
+- Language: Clear, student-friendly English.`
+    });
+
+    // 2. Question Text
+    if (promptText && promptText.trim()) {
+      parts.push({ text: `Question: ${promptText.trim()}` });
+    } else {
+      parts.push({ text: "Please solve the question in the attached image step-by-step." });
+    }
+
+    // 3. Image Part (Strict Sanitization)
+    if (rawImage && typeof rawImage === "string") {
+      let mimeType = "image/jpeg";
+      let base64Data = rawImage;
+
+      if (rawImage.includes(",")) {
+        const [header, data] = rawImage.split(",");
+        base64Data = data;
+        const mimeMatch = header.match(/:(.*?);/);
+        if (mimeMatch) mimeType = mimeMatch[1];
       }
-    );
+
+      if (base64Data) {
+        parts.push({
+          inline_data: {
+            mime_type: mimeType,
+            data: base64Data.trim(),
+          },
+        });
+      }
+    }
+
+    // Call Google Gemini 1.5 Flash
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+    const response = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 2048,
+        },
+      }),
+    });
+
+    const resJson = await response.json();
 
     if (!response.ok) {
-      const errText = await response.text();
-      console.error("Gemini API error:", response.status, errText);
-      return NextResponse.json(
-        { reply: "Doubt solver abhi thoda busy hai. Please 10 seconds baad dobara try karein!" },
-        { status: 500 }
-      );
+      console.error("Gemini API Error Detail:", resJson);
+      const errMsg = resJson?.error?.message || "Google API request rejected";
+      return NextResponse.json({ reply: `AI Engine Error: ${errMsg}` }, { status: 200 });
     }
 
-    const data = await response.json();
-    const replyText =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "Question ka solution generate nahi ho paya. Please dobara try karein.";
+    const answer =
+      resJson?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "Could not generate solution for this image. Please upload a clearer crop of the question.";
 
-    return NextResponse.json({ reply: replyText });
+    return NextResponse.json({ reply: answer });
   } catch (error: any) {
-    console.error("AI Doubt endpoint error:", error);
+    console.error("Endpoint crash error:", error);
     return NextResponse.json(
-      { reply: "Internal server error. Please try again in a moment." },
-      { status: 500 }
+      { reply: `Server error: ${error.message || "Something went wrong"}` },
+      { status: 200 }
     );
   }
 }
