@@ -21,18 +21,22 @@ export default function StepExam({
 }: StepExamProps) {
   const [exam, setExam] = useState<TargetExam | null>(selectedExam);
   
-  // Droppers don't have school exams; 11th and 12th default to true
+  // Droppers don't have school/board exams
   const isDropper = classLevel === "Dropper";
+
+  // For 10, 11, 12, and 11_12, default to true unless explicitly false
   const [includeSchool, setIncludeSchool] = useState<boolean>(
-    isDropper ? false : wantsBoards ?? true
+    isDropper ? false : (wantsBoards ?? true)
   );
 
-  // Dynamic naming based on student's class
+  // Dynamic naming based on student's class (including 11_12)
   const schoolExamTitle =
     classLevel === "11"
       ? "Class 11 School Exams"
       : classLevel === "12"
       ? "Class 12 Board Exams"
+      : classLevel === "11_12"
+      ? "School & Board Exams"
       : classLevel === "10"
       ? "Class 10 Board Exams"
       : "School / Board Exams";
@@ -40,6 +44,8 @@ export default function StepExam({
   const schoolExamSubtitle =
     classLevel === "11"
       ? "Include CBSE/State annual exams and NCERT coverage alongside competitive prep"
+      : classLevel === "11_12"
+      ? "Include school annual exams, Board countdown & NCERT coverage alongside competitive prep"
       : "Track Board countdown, subjective practice & NCERT alongside competitive prep";
 
   return (
@@ -73,7 +79,7 @@ export default function StepExam({
         ))}
       </div>
 
-      {/* School / Board Exam Toggle (Only for Class 10, 11, 12 — hidden for Droppers) */}
+      {/* School / Board Exam Toggle (Hidden only for Droppers) */}
       {!isDropper && (
         <div className="mt-6 rounded-ticket border border-ink/10 bg-white p-4">
           <div className="flex items-center justify-between gap-3">
@@ -84,12 +90,12 @@ export default function StepExam({
               </p>
             </div>
             
-            {/* Clean iOS-style Toggle Switch */}
+            {/* Toggle Switch */}
             <button
               type="button"
               role="switch"
               aria-checked={includeSchool}
-              onClick={() => setIncludeSchool(!includeSchool)}
+              onClick={() => setIncludeSchool((prev) => !prev)}
               className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                 includeSchool ? "bg-teal" : "bg-ink/20"
               }`}
