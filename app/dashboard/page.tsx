@@ -11,6 +11,8 @@ import TaskWidget from "@/components/dashboard/TaskWidget";
 import AnalyticsRadar from "@/components/dashboard/AnalyticsRadar";
 import BottomNav from "@/components/dashboard/BottomNav";
 import AiChatSheet from "@/components/dashboard/AiChatSheet";
+import { ActivityHeatmap } from "@/components/dashboard/ActivityHeatmap";
+import { BacklogRadar } from "@/components/dashboard/BacklogRadar";
 
 type TaskItem = {
   id: string;
@@ -49,6 +51,7 @@ function estimatedDateFor(key: keyof typeof ESTIMATED_DATES, year: number): stri
 }
 
 interface DashboardState {
+  userId: string | null;
   name: string;
   streak: number;
   targetExam: string | null;
@@ -68,6 +71,7 @@ interface DashboardState {
 }
 
 const EMPTY_STATE: DashboardState = {
+  userId: null,
   name: "",
   streak: 0,
   targetExam: null,
@@ -291,6 +295,7 @@ export default function DashboardPage() {
     }
 
     setState({
+      userId: user.id,
       name: profile?.name || "Student",
       streak,
       targetExam,
@@ -363,11 +368,11 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-paper pb-28">
-      <div className="max-w-md mx-auto px-5 pt-8">
+      <div className="max-w-md mx-auto px-5 pt-8 flex flex-col gap-4">
         <GreetingHeader name={state.name} streak={state.streak} />
 
         {state.targetExam && (
-          <div className="mt-4 flex items-center justify-between text-xs">
+          <div className="flex items-center justify-between text-xs">
             <span className="text-slate">Targeting</span>
             <select
               value={state.targetYear}
@@ -394,7 +399,7 @@ export default function DashboardPage() {
             )}
 
             {state.mainsShifts.length > 0 && (
-              <div className="mt-3 rounded-ticket border border-ink/10 bg-white p-4">
+              <div className="rounded-ticket border border-ink/10 bg-white p-4">
                 <p className="text-sm font-medium mb-1">Your exam shift</p>
                 <p className="text-xs text-slate mb-3">
                   Pick the exact date + shift from your admit card for the most accurate countdown.
@@ -420,12 +425,10 @@ export default function DashboardPage() {
             )}
 
             {state.advancedCountdown && (
-              <div className="mt-3">
-                <CountdownCard
-                  examDate={state.advancedCountdown.exam_date}
-                  examLabel={labelFor(state.advancedCountdown)}
-                />
-              </div>
+              <CountdownCard
+                examDate={state.advancedCountdown.exam_date}
+                examLabel={labelFor(state.advancedCountdown)}
+              />
             )}
           </>
         ) : (
@@ -437,13 +440,21 @@ export default function DashboardPage() {
           )
         )}
 
+        {/* 🚨 Backlog Radar Widget */}
+        {state.userId && <BacklogRadar userId={state.userId} />}
+
+        {/* ⏱️ Study Tracker */}
         <StudyTimeTracker
           studiedMinutes={state.studiedMinutesToday}
           targetMinutes={state.targetMinutesToday}
           recentLogs={state.recentLogs}
         />
 
-        <div className="mt-4">
+        {/* 🟩 Consistency Heatmap (Study Hours + Solved Questions) */}
+        {state.userId && <ActivityHeatmap userId={state.userId} />}
+
+        {/* 📝 Upcoming Tasks */}
+        <div>
           <div className="flex items-center justify-between mb-1">
             <p className="text-sm font-medium text-ink">Upcoming tasks</p>
             <Link href="/todo" className="text-xs text-teal font-medium">
@@ -453,8 +464,9 @@ export default function DashboardPage() {
           <TaskWidget tasks={state.tasks} />
         </div>
 
+        {/* 📊 Syllabus Progress */}
         {state.syllabusProgress.totalChapters > 0 && (
-          <div className="mt-3 rounded-ticket border border-ink/10 bg-white p-4">
+          <div className="rounded-ticket border border-ink/10 bg-white p-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-medium">Syllabus Progress</p>
               <span className="text-xs font-semibold text-teal">
@@ -471,7 +483,7 @@ export default function DashboardPage() {
               {state.syllabusProgress.doneChapters}/{state.syllabusProgress.totalChapters} chapters marked done
             </p>
             <Link
-              href="/library"
+              href="/resources"
               className="mt-3 block text-center text-xs font-medium text-teal bg-teal/10 rounded-full py-2"
             >
               Update chapter progress →
@@ -479,6 +491,7 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* 🎯 Analytics Radar */}
         <AnalyticsRadar
           accuracy={state.accuracy}
           consistency={state.consistency}
