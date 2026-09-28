@@ -13,6 +13,7 @@ import {
   updateEditableProfile,
 } from "@/lib/supabase";
 import BottomNav from "@/components/dashboard/BottomNav";
+import AppHeader from "@/components/dashboard/AppHeader";
 
 interface UserProfile {
   name: string;
@@ -28,10 +29,16 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Editable fields
   const [studyMode, setStudyMode] = useState<StudyMode>("Online");
   const [batch, setBatch] = useState<string>("");
   const [editingBatch, setEditingBatch] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Name editing
+  const [editingName, setEditingName] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [savingName, setSavingName] = useState(false);
 
   useEffect(() => {
     async function loadProfile() {
@@ -61,6 +68,7 @@ export default function ProfilePage() {
         };
 
         setProfile(userProf);
+        setNewName(userProf.name);
         setStudyMode(userProf.studyMode);
         setBatch(userProf.batchName === "Not set" ? "" : userProf.batchName);
       }
@@ -69,6 +77,20 @@ export default function ProfilePage() {
 
     loadProfile();
   }, []);
+
+  async function handleSaveName() {
+    if (!newName.trim() || !profile) return;
+    setSavingName(true);
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData?.user;
+    if (user) {
+      await supabase.from("users").update({ name: newName.trim() }).eq("uid", user.id);
+      await supabase.auth.updateUser({ data: { full_name: newName.trim() } });
+      setProfile((prev) => (prev ? { ...prev, name: newName.trim() } : null));
+      setEditingName(false);
+    }
+    setSavingName(false);
+  }
 
   async function saveEditable(nextMode: StudyMode, nextBatch: string) {
     setSaving(true);
@@ -101,7 +123,6 @@ export default function ProfilePage() {
   const classLabel =
     CLASS_OPTIONS.find((c) => c.value === profile.classLevel)?.label ?? profile.classLevel;
 
-  // Smart dynamic label based on class
   const schoolLabel =
     profile.classLevel === "11"
       ? "School exams prep"
@@ -118,23 +139,50 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen bg-paper pb-28">
-      <div className="max-w-md mx-auto px-5 py-8">
-        <h1 className="font-display text-2xl font-semibold mb-1">Your Profile</h1>
-        <p className="text-slate text-sm mb-6">
+      {/* Universal App Header */}
+      <AppHeader />
+
+      <div className="max-w-md mx-auto px-5 py-6">
+        <h1 className="font-display text-2xl font-bold mb-1 text-ink">My Profile</h1>
+        <p className="text-slate text-xs mb-6">
           Signed in as <span className="font-medium text-ink">{profile.email}</span>
         </p>
 
-        <SectionLabel text="Locked" pillText="Can't change" pillTone="locked" />
-        <LockedRow label="Name" value={profile.name} />
-        <LockedRow label="Class" value={classLabel} />
-        <LockedRow label="Target exam" value={profile.targetExam} />
-        <LockedRow label={schoolLabel} value={schoolValue} />
-        <p className="text-[11px] text-slate mt-3 mb-8 leading-relaxed">
-          Locked fields were set at signup. To change your class or target exam, contact support —
-          changing it mid-year would scramble your syllabus, streaks, and test history.
-        </p>
-
-        <SectionLabel text="Editable" pillText="Change anytime" pillTone="edit" />
+        {/* Editable Information Section */}
+        <SectionLabel text="Personal & Study Settings" pillText="Editable" pillTone="edit" />
+        
+        {/* Name (Now Editable!) */}
+        {editingName ? (
+          <div className="rounded-ticket border border-ink/15 p-3.5 mb-2 bg-white flex items-center gap-2">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className="flex-1 text-sm font-semibold border border-ink/20 rounded-lg p-2 focus:outline-none focus:border-teal"
+              placeholder="Enter your name"
+              autoFocus
+            />
+            <button
+              onClick={handleSaveName}
+              disabled={savingName}
+              className="bg-teal text-white text-xs font-bold px-3 py-2 rounded-lg"
+            >
+              {savingName ? "…" : "Save"}
+            </button>
+            <button
+              onClick={() => setEditingName(false)}
+              className="text-xs text-slate px-2 py-2"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <EditableRow
+            label="Full Name"
+            value={profile.name}
+            onClick={() => setEditingName(true)}
+          />
+        )}
 
         <EditableRow
           label="Study mode"
@@ -156,6 +204,16 @@ export default function ProfilePage() {
             onCancel={() => setEditingBatch(false)}
           />
         )}
+
+        {/* Locked Information Section */}
+        <SectionLabel text="Academic Track" pillText="Locked" pillTone="locked" className="mt-7" />
+        <LockedRow label="Class" value={classLabel} />
+        <LockedRow label="Target exam" value={profile.targetExam} />
+        <LockedRow label={schoolLabel} value={schoolValue} />
+
+        <p className="text-[11px] text-slate mt-3 leading-relaxed">
+          Class and Target Exam were locked during signup to keep your test streaks, syllabus progress, and countdown accurate.
+        </p>
       </div>
 
       <BottomNav />
@@ -181,7 +239,7 @@ function SectionLabel({
       </span>
       <span
         className={`text-[9.5px] font-bold px-2 py-0.5 rounded-full ${
-          pillTone === "locked" ? "bg-ink/10 text-slate" : "bg-marigold/20 text-marigold"
+          pillTone === "locked" ? "bg-ink/10 text-slate" : "bg-teal/15 text-teal"
         }`}
       >
         {pillText}
@@ -192,7 +250,7 @@ function SectionLabel({
 
 function LockedRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between rounded-ticket border border-ink/12 p-3.5 mb-2 bg-white">
+    <div className="flex items-center justify-between rounded-ticket border border-ink/12 p-3.5 mb-2 bg-white/70">
       <div>
         <div className="text-[10.5px] uppercase tracking-wide text-slate">{label}</div>
         <div className="text-sm font-semibold mt-0.5 text-ink">{value}</div>
@@ -214,13 +272,13 @@ function EditableRow({
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center justify-between rounded-ticket border border-ink/12 p-3.5 mb-2 text-left bg-white hover:border-ink/25 transition-colors"
+      className="w-full flex items-center justify-between rounded-ticket border border-ink/12 p-3.5 mb-2 text-left bg-white hover:border-ink/25 transition-colors shadow-xs"
     >
       <div>
         <div className="text-[10.5px] uppercase tracking-wide text-slate">{label}</div>
         <div className="text-sm font-semibold mt-0.5 text-ink">{value}</div>
       </div>
-      <span className="text-xs text-slate">✎</span>
+      <span className="text-xs text-teal font-semibold">Edit ✎</span>
     </button>
   );
 }
@@ -324,4 +382,4 @@ function BatchEditor({
       </div>
     </div>
   );
-}
+                                            }
