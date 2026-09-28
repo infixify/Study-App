@@ -11,10 +11,10 @@ const apiKey =
 
 export async function POST(req: Request) {
   try {
-    const { question, imageBase64 } = await req.json();
+    const { messages } = await req.json();
 
-    if (!question && !imageBase64) {
-      return NextResponse.json({ error: "No question or image provided" }, { status: 400 });
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return NextResponse.json({ error: "No messages provided" }, { status: 400 });
     }
 
     if (!apiKey) {
@@ -24,60 +24,71 @@ export async function POST(req: Request) {
       });
     }
 
-    // Prepare Gemini payload
-    const parts: any[] = [];
-
-    // System instruction prompt for Kota Doubt Faculty
     const systemPrompt = `
-You are an expert JEE (Mains & Advanced) and NEET Doubt Solving Faculty.
+You are an expert JEE (Mains & Advanced) and NEET Doubt Solving Faculty at a premier coaching institute.
 Your task is to solve student academic questions with extreme clarity, precision, and pedagogical rigor.
 
 Instructions:
-1. If an image is provided, perform precise OCR to extract the question and any diagram details.
-2. State the Given Data and the Core Concept/Formula being tested.
-3. Provide a clear, Step-by-Step Mathematical/Conceptual derivation without skipping crucial steps.
-4. Give the Final Answer clearly highlighted (including option letter if it is an MCQ).
-5. Add a 1-line "Pro Tip / Common Trap" (e.g. where students usually make calculation or sign mistakes).
-6. Language: Clean, student-friendly English (or polite Hinglish if asked).
+1. Remember previous conversation context: If an image was shared earlier, refer to that question.
+2. If an image is provided, perform precise OCR to extract the question and any diagram details.
+3. State the Given Data and the Core Concept/Formula being tested.
+4. Provide a clear, Step-by-Step Mathematical/Conceptual derivation without skipping crucial steps.
+5. Highlight the Final Answer clearly (including option letter if it is an MCQ).
+6. Add a 1-line "Pro Tip / Common Trap" (where students usually make calculation or sign mistakes).
+7. Language: Clean, student-friendly English (or polite Hinglish if asked).
 `;
 
-    parts.push({ text: systemPrompt });
+    // Convert chat history into Gemini contents format
+    const contents: any[] = [];
 
-    if (question && question.trim()) {
-      parts.push({ text: `Student Question: ${question.trim()}` });
-    }
+    // System turn
+    contents.push({
+      role: "user",
+      parts: [{ text: systemPrompt }],
+    });
+    contents.push({
+      role: "model",
+      parts: [{ text: "Understood. I am ready to solve JEE/NEET doubts step-by-step with full accuracy." }],
+    });
 
-    // Attach base64 image if present
-    if (imageBase64 && typeof imageBase64 === "string") {
-      // Extract pure base64 data and mime type (e.g. data:image/jpeg;base64,...)
-      const match = imageBase64.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) {
-        const mimeType = match[1];
-        const data = match[2];
-        parts.push({
-          inline_data: {
-            mime_type: mimeType,
-            data: data,
-          },
-        });
+    // Add recent conversation history (last 6 messages for context)
+    const recentMessages = messages.slice(-6);
+
+    for (const msg of recentMessages) {
+      const role = msg.role === "user" ? "user" : "model";
+      const parts: any[] = [];
+
+      if (msg.content && msg.content.trim()) {
+        parts.push({ text: msg.content.trim() });
+      }
+
+      // Check if this message had an image
+      if (msg.image && typeof msg.image === "string") {
+        const match = msg.image.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          parts.push({
+            inline_data: {
+              mime_type: match[1],
+              data: match[2],
+            },
+          });
+        }
+      }
+
+      if (parts.length > 0) {
+        contents.push({ role, parts });
       }
     }
 
-    // Call Gemini 1.5 Flash Vision API
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: parts,
-            },
-          ],
+          contents,
           generationConfig: {
-            temperature: 0.2, // Low temperature for high math accuracy
+            temperature: 0.2,
             maxOutputTokens: 2048,
           },
         }),
@@ -96,7 +107,7 @@ Instructions:
     const data = await response.json();
     const replyText =
       data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "Question ka solution generate nahi ho paya. Please clear photo dobara upload karein.";
+      "Question ka solution generate nahi ho paya. Please dobara try karein.";
 
     return NextResponse.json({ reply: replyText });
   } catch (error: any) {
