@@ -20,7 +20,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // Determine the latest question text and image
     let promptText = question || "";
     let rawImage = imageBase64 || null;
 
@@ -36,10 +35,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ reply: "Please provide a question or an image to solve." });
     }
 
-    // Build parts for Gemini API
     const parts: any[] = [];
 
-    // 1. System Prompt
     parts.push({
       text: `You are an expert Kota JEE & NEET Doubt Solving Faculty.
 Solve the following academic problem step-by-step.
@@ -50,14 +47,12 @@ Solve the following academic problem step-by-step.
 - Language: Clear, student-friendly English.`
     });
 
-    // 2. Question Text
     if (promptText && promptText.trim()) {
       parts.push({ text: `Question: ${promptText.trim()}` });
     } else {
       parts.push({ text: "Please solve the question in the attached image step-by-step." });
     }
 
-    // 3. Image Part (Strict Sanitization)
     if (rawImage && typeof rawImage === "string") {
       let mimeType = "image/jpeg";
       let base64Data = rawImage;
@@ -79,8 +74,9 @@ Solve the following academic problem step-by-step.
       }
     }
 
-    // Call Google Gemini 1.5 Flash
+    // Active official Google Gemini Flash model
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
     const response = await fetch(geminiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
