@@ -1,0 +1,416 @@
+export interface FormulaEntry {
+  subject: string;
+  classLevel: "10" | "11" | "12";
+  exam: "JEE" | "NEET" | "Boards";
+  chapter: string;
+  badge: string;
+  items: [string, string, string][];
+}
+
+export const MASTER_FORMULA_DATA: FormulaEntry[] = [
+  // ==========================================
+  // CLASS 10 (BOARDS & FOUNDATION)
+  // ==========================================
+  {
+    subject: "Science",
+    classLevel: "10",
+    exam: "Boards",
+    chapter: "Light – Reflection and Refraction",
+    badge: "Optics & Lens Mirror Formula",
+    items: [
+      ["Mirror Formula", "1/f = 1/v + 1/u", "f = R/2, focal length is negative for concave, positive for convex"],
+      ["Mirror Magnification", "m = h'/h = -v/u", "Negative m = Real & Inverted, Positive m = Virtual & Erect"],
+      ["Snell's Law of Refraction", "n = sin(i) / sin(r) = v1 / v2", "Refractive index n21 = n2 / n1 = v1 / v2"],
+      ["Lens Formula", "1/f = 1/v - 1/u", "Lens Magnification: m = h'/h = +v/u"],
+      ["Power of a Lens", "P = 1 / f (in metres)", "SI Unit: Dioptre (D). Convex has positive P, Concave has negative P"],
+    ],
+  },
+  {
+    subject: "Science",
+    classLevel: "10",
+    exam: "Boards",
+    chapter: "Electricity",
+    badge: "Current, Ohm's Law & Resistance",
+    items: [
+      ["Electric Current", "I = Q / t = (n * e) / t", "1 Ampere = 1 Coulomb / 1 second, e = 1.6 x 10^-19 C"],
+      ["Electric Potential", "V = W / Q", "1 Volt = 1 Joule / 1 Coulomb"],
+      ["Ohm's Law", "V = I * R", "V proportional to I at constant temperature"],
+      ["Resistance & Resistivity", "R = rho * (L / A)", "Thick wire has less R, long wire has more R"],
+      ["Resistors in Series & Parallel", "Series: R_s = R1 + R2 | Parallel: 1/R_p = 1/R1 + 1/R2", "In parallel, equivalent resistance is smaller than the smallest"],
+      ["Joule's Law of Heating & Power", "H = I^2 * R * t = V * I * t", "Power P = V * I = I^2 * R = V^2 / R (Watts)"],
+    ],
+  },
+  {
+    subject: "Science",
+    classLevel: "10",
+    exam: "Boards",
+    chapter: "Chemical Reactions and Equations",
+    badge: "Reaction Types & Balancing",
+    items: [
+      ["Combination Reaction", "A + B -> AB (e.g. CaO + H2O -> Ca(OH)2 + Heat)", "Quicklime to slaked lime is exothermic"],
+      ["Decomposition Reaction", "2FeSO4 -> Fe2O3 + SO2 + SO3 (Heat)", "Single reactant breaks down into simpler products"],
+      ["Displacement Reaction", "Fe + CuSO4 (blue) -> FeSO4 (green) + Cu", "More reactive metal displaces less reactive metal"],
+      ["Double Displacement (Precipitation)", "Na2SO4 + BaCl2 -> BaSO4(white ppt) + 2NaCl", "Exchange of ions between reactants"],
+      ["Redox (Oxidation & Reduction)", "ZnO + C -> Zn + CO (Zn reduced, C oxidized)", "Oxidation is gain of O / loss of H"],
+    ],
+  },
+  {
+    subject: "Science",
+    classLevel: "10",
+    exam: "Boards",
+    chapter: "Acids, Bases and Salts",
+    badge: "pH, Neutralisation & Important Salts",
+    items: [
+      ["pH Scale", "pH = -log[H+], Range: 0 to 14", "pH < 7 Acidic, pH = 7 Neutral, pH > 7 Basic"],
+      ["Neutralisation Reaction", "Acid + Base -> Salt + Water", "HCl + NaOH -> NaCl + H2O + Heat"],
+      ["Bleaching Powder", "Ca(OH)2 + Cl2 -> CaOCl2 + H2O", "Used for water disinfection and bleaching clothes"],
+      ["Baking Soda & Washing Soda", "Baking: NaHCO3 | Washing: Na2CO3.10H2O", "NaHCO3 releases CO2 on heating to make cakes fluffy"],
+      ["Plaster of Paris (POP)", "CaSO4.0.5H2O + 1.5H2O -> CaSO4.2H2O (Gypsum)", "Prepared by heating Gypsum at 373 K"],
+    ],
+  },
+  {
+    subject: "Science",
+    classLevel: "10",
+    exam: "Boards",
+    chapter: "Life Processes",
+    badge: "Bio Nutrition, Respiration & Excretion",
+    items: [
+      ["Photosynthesis Equation", "6CO2 + 12H2O -> C6H12O6 + 6O2 + 6H2O", "Occurs in chloroplasts containing chlorophyll"],
+      ["Aerobic vs Anaerobic Respiration", "Aerobic (Mitochondria): 36-38 ATP | Yeast: Ethanol+CO2+2ATP", "Muscle cramps caused by lactic acid accumulation"],
+      ["Human Heart Circulation", "Double circulation (Pulmonary & Systemic)", "Left ventricle pumps oxygenated blood via Aorta to body"],
+      ["Excretion Unit (Nephron)", "Glomerulus -> Bowman's Capsule -> Tubular Reabsorption", "Urine collected in urinary bladder via ureters"],
+    ],
+  },
+  {
+    subject: "Mathematics",
+    classLevel: "10",
+    exam: "Boards",
+    chapter: "Real Numbers",
+    badge: "HCF, LCM & Fundamental Theorem",
+    items: [
+      ["Fundamental Theorem of Arithmetic", "Composite number = Product of unique primes", "Every composite number can be uniquely factorized"],
+      ["HCF and LCM Relation", "HCF(a, b) * LCM(a, b) = a * b", "Valid for two positive integers a and b only"],
+      ["Irrationality Proof", "sqrt(2), sqrt(3), sqrt(5) are irrational", "Proved using contradiction: p/q where p, q are co-prime"],
+    ],
+  },
+  {
+    subject: "Mathematics",
+    classLevel: "10",
+    exam: "Boards",
+    chapter: "Quadratic Equations",
+    badge: "Discriminant & Nature of Roots",
+    items: [
+      ["Quadratic Formula", "x = [- b +/- sqrt(b^2 - 4ac)] / (2a)", "Standard form: ax^2 + bx + c = 0 (a != 0)"],
+      ["Discriminant (D)", "D = b^2 - 4ac", "D > 0: Two distinct real roots | D = 0: Two equal roots | D < 0: No real roots"],
+      ["Relation of Roots", "alpha + beta = -b/a,  alpha * beta = c/a", "Equation: x^2 - (alpha + beta)x + (alpha * beta) = 0"],
+    ],
+  },
+  {
+    subject: "Mathematics",
+    classLevel: "10",
+    exam: "Boards",
+    chapter: "Arithmetic Progressions",
+    badge: "nth Term & Sum of AP",
+    items: [
+      ["nth Term of AP", "a_n = a + (n - 1) * d", "a = first term, d = common difference = a_k - a_(k-1)"],
+      ["Sum of First n Terms", "S_n = (n / 2) * [2a + (n - 1)d] = (n / 2) * (a + l)", "l = last term of AP"],
+      ["Arithmetic Mean", "AM = (a + b) / 2", "Three numbers in AP: (a - d), a, (a + d)"],
+    ],
+  },
+  {
+    subject: "Mathematics",
+    classLevel: "10",
+    exam: "Boards",
+    chapter: "Introduction to Trigonometry",
+    badge: "Ratios, Values & Identities",
+    items: [
+      ["Trigonometric Identities", "sin^2 q + cos^2 q = 1", "1 + tan^2 q = sec^2 q | 1 + cot^2 q = cosec^2 q"],
+      ["Standard Values", "sin 30 = 1/2, sin 45 = 1/sqrt(2), sin 60 = sqrt(3)/2", "tan 30 = 1/sqrt(3), tan 45 = 1, tan 60 = sqrt(3)"],
+      ["Reciprocal Relations", "cosec q = 1/sin q, sec q = 1/cos q, cot q = 1/tan q", "tan q = sin q / cos q"],
+    ],
+  },
+  {
+    subject: "Mathematics",
+    classLevel: "10",
+    exam: "Boards",
+    chapter: "Coordinate Geometry",
+    badge: "Distance & Section Formula",
+    items: [
+      ["Distance Formula", "d = sqrt[(x2 - x1)^2 + (y2 - y1)^2]", "Distance from origin (0,0) = sqrt(x^2 + y^2)"],
+      ["Section Formula (Internal)", "x = (m1*x2 + m2*x1)/(m1+m2), y = (m1*y2 + m2*y1)/(m1+m2)", "Midpoint formula: [(x1+x2)/2, (y1+y2)/2]"],
+      ["Centroid of Triangle", "G = [(x1 + x2 + x3)/3,  (y1 + y2 + y3)/3]", "Intersection of three medians of triangle"],
+    ],
+  },
+
+  // ==========================================
+  // CLASS 11 (JEE & NEET SPECIFIC)
+  // ==========================================
+  {
+    subject: "Chemistry",
+    classLevel: "11",
+    exam: "JEE",
+    chapter: "Some Basic Concepts of Chemistry",
+    badge: "Mole Concept & Stoichiometry",
+    items: [
+      ["Mole Formulas", "Moles = Mass / Molar Mass = N / N_A = Volume (STP) / 22.4 L", "N_A = 6.022 x 10^23"],
+      ["Concentration Terms", "Molarity M = moles solute / L solution | Molality m = moles solute / kg solvent", "Molality does not change with temperature"],
+      ["Limiting Reagent", "Ratio = Moles / Stoichiometric Coefficient", "Smallest ratio determines maximum product formed"],
+      ["Equivalent Weight", "Eq. Wt = Molar Mass / n-factor (valency factor)", "Normality N = Molarity * n-factor"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "11",
+    exam: "NEET",
+    chapter: "Some Basic Concepts of Chemistry",
+    badge: "Mole Basics & Direct Conversions",
+    items: [
+      ["Number of Molecules", "N = (Given Mass / Molar Mass) * 6.022 x 10^23", "Volume at STP (1 mol ideal gas) = 22.4 Litres"],
+      ["Molarity Shortcut", "M = (10 * d * x) / M_solute", "d = density in g/mL, x = mass percentage (%)"],
+      ["Empirical Formula", "Simplest whole number ratio of atoms in compound", "Molecular Formula = n * Empirical Formula (n = Mol Mass / Emp Mass)"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "11",
+    exam: "JEE",
+    chapter: "Structure of Atom",
+    badge: "Quantum Mechanics & Spectra",
+    items: [
+      ["Bohr Orbit Energy & Radius", "E_n = -13.6 * (Z^2 / n^2) eV,  r_n = 0.529 * (n^2 / Z) Angstrom", "v_n = 2.18 x 10^6 * (Z / n) m/s"],
+      ["Rydberg Formula", "1 / lambda = R_H * Z^2 * (1/n1^2 - 1/n2^2)", "Lyman (UV, n1=1), Balmer (Visible, n1=2), Paschen (IR, n1=3)"],
+      ["de Broglie Wavelength", "lambda = h / p = h / (m * v) = h / sqrt(2 * m * K.E.)", "For electron: lambda = 12.27 / sqrt(V) Angstrom"],
+      ["Heisenberg Uncertainty", "Delta x * Delta p >= h / (4 * pi)", "Delta x * Delta v >= h / (4 * pi * m)"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "11",
+    exam: "NEET",
+    chapter: "Structure of Atom",
+    badge: "Quantum Numbers & Electronic Config",
+    items: [
+      ["Quantum Numbers", "n (Shell size), l (Subshell shape, 0 to n-1), m_l (-l to +l), m_s (+/- 1/2)", "l=0 (s), l=1 (p), l=2 (d), l=3 (f)"],
+      ["Max Electrons", "Subshell = 2(2l + 1),  Shell = 2n^2", "Total orbitals in a shell = n^2"],
+      ["Aufbau & Hund's Rule", "Energy order = (n + l) rule", "Electrons occupy orbitals singly with parallel spins first"],
+      ["Magnetic Moment (Spin Only)", "mu_s = sqrt[n * (n + 2)] Bohr Magnetons (BM)", "n = number of unpaired electrons"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "11",
+    exam: "JEE",
+    chapter: "Thermodynamics",
+    badge: "First & Second Law Enthalpy",
+    items: [
+      ["First Law & Enthalpy", "Delta U = q + w,  Delta H = Delta U + Delta n_g * R * T", "Delta n_g = Gaseous products - Gaseous reactants"],
+      ["Gibbs Free Energy & Spontaneity", "Delta G = Delta H - T * Delta S", "Spontaneous if Delta G < 0, Equilibrium if Delta G = 0"],
+      ["Standard Cell Potential", "Delta G_0 = - n * F * E_cell_0 = - 2.303 * R * T * log(K)", "F = 96500 C/mol"],
+      ["Entropy Change", "Delta S = n * C_v * ln(T2/T1) + n * R * ln(V2/V1)", "For phase change: Delta S_vap = Delta H_vap / T_bp"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "11",
+    exam: "NEET",
+    chapter: "Thermodynamics",
+    badge: "Spontaneity Criteria & Heat Laws",
+    items: [
+      ["Spontaneity Chart", "Delta H < 0 & Delta S > 0: Spontaneous at ALL temps", "Delta H > 0 & Delta S < 0: Non-spontaneous at ALL temps"],
+      ["Hess's Law of Constant Heat", "Total Delta H is identical whether in 1 step or multiple", "Delta H_rxn = Sum(Bond Energy reactants) - Sum(Bond Energy products)"],
+      ["State vs Path Functions", "State: U, H, S, G (path-independent) | Path: q, w", "Intensive: T, P, density, pH | Extensive: V, m, U, H"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "11",
+    exam: "JEE",
+    chapter: "Equilibrium",
+    badge: "Ionic & Chemical Equilibrium",
+    items: [
+      ["Kp and Kc Relation", "K_p = K_c * (R * T)^(Delta n_g)", "R = 0.0821 L atm / mol K"],
+      ["Ostwald's Dilution Law", "Ka = (C * alpha^2) / (1 - alpha) approx C * alpha^2", "Degree of dissociation alpha = sqrt(Ka / C) for weak electrolyte"],
+      ["Buffer Solution pH (Henderson)", "Acidic: pH = pKa + log([Salt] / [Acid]) | Basic: pOH = pKb + log([Salt] / [Base])", "pH + pOH = 14 at 298 K"],
+      ["Solubility Product (Ksp)", "Ksp for A_x B_y = (x^x) * (y^y) * S^(x + y)", "Precipitation occurs if Ionic Product Q > Ksp"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "11",
+    exam: "NEET",
+    chapter: "Equilibrium",
+    badge: "Le Chatelier & pH Calculations",
+    items: [
+      ["Le Chatelier's Principle", "Pressure increase shifts to side with FEWER gas moles", "In exothermic reaction, temperature increase decreases yield"],
+      ["pH of Strong vs Weak", "Strong: pH = -log[H+] | Weak Acid: pH = 0.5 * (pKa - log C)", "Pure water at 25 C: [H+] = 10^-7 M, pH = 7"],
+      ["Salt Hydrolysis pH", "Weak Acid + Strong Base: pH = 7 + 0.5(pKa + log C)", "Strong Acid + Weak Base: pH = 7 - 0.5(pKb + log C)"],
+    ],
+  },
+  {
+    subject: "Mathematics",
+    classLevel: "11",
+    exam: "JEE",
+    chapter: "Trigonometric Functions",
+    badge: "JEE Compound & Multiple Angles",
+    items: [
+      ["Compound Angle Formulas", "sin(A +/- B) = sin A cos B +/- cos A sin B", "cos(A +/- B) = cos A cos B -/+ sin A sin B"],
+      ["Multiple Angles", "sin 2A = 2 sin A cos A, cos 2A = cos^2 A - sin^2 A = 2 cos^2 A - 1", "tan 2A = (2 tan A) / (1 - tan^2 A)"],
+      ["Product to Sum Transforms", "2 sin A cos B = sin(A + B) + sin(A - B)", "2 cos A sin B = sin(A + B) - sin(A - B)"],
+      ["General Solutions", "sin q = sin a -> q = n pi + (-1)^n a", "cos q = cos a -> q = 2n pi +/- a | tan q = tan a -> q = n pi + a"],
+    ],
+  },
+  {
+    subject: "Mathematics",
+    classLevel: "11",
+    exam: "JEE",
+    chapter: "Conic Sections",
+    badge: "Parabola, Ellipse & Hyperbola",
+    items: [
+      ["Parabola (y^2 = 4ax)", "Focus (a, 0), Directrix x = -a, Latus Rectum = 4a", "Parametric: (a t^2, 2 a t). Tangent: y = m x + a / m"],
+      ["Ellipse (x^2/a^2 + y^2/b^2 = 1)", "e = sqrt(1 - b^2/a^2), Foci (+/- a e, 0), Latus Rectum = 2 b^2 / a", "Auxiliary circle: x^2 + y^2 = a^2. Tangent: y = m x +/- sqrt(a^2 m^2 + b^2)"],
+      ["Hyperbola (x^2/a^2 - y^2/b^2 = 1)", "e = sqrt(1 + b^2/a^2), Asymptotes: y = +/- (b/a) x", "Rectangular hyperbola (e = sqrt(2)): x^2 - y^2 = a^2 or x y = c^2"],
+    ],
+  },
+  {
+    subject: "Biology",
+    classLevel: "11",
+    exam: "NEET",
+    chapter: "Cell: The Unit of Life",
+    badge: "NEET Cytology & Organelles",
+    items: [
+      ["Prokaryotic vs Eukaryotic", "Prokaryote: 70S ribosomes (50S+30S), no membrane organelles", "Eukaryote: 80S ribosomes (60S+40S), true nucleus"],
+      ["Fluid Mosaic Model (Singer & Nicolson 1972)", "Lipid bilayer with embedded & peripheral proteins", "Phospholipids with polar head outside and hydrophobic tail inside"],
+      ["Mitochondria & Chloroplast", "Semi-autonomous organelles with own circular DNA & 70S ribosomes", "Inner mitochondrial folds = Cristae (increase surface area)"],
+      ["Endomembrane System", "Endoplasmic Reticulum, Golgi Apparatus, Lysosomes, Vacuoles", "Peroxisomes and Mitochondria are NOT part of endomembrane system"],
+    ],
+  },
+
+  // ==========================================
+  // CLASS 12 (JEE, NEET & BOARDS SPECIFIC)
+  // ==========================================
+  {
+    subject: "Physics",
+    classLevel: "12",
+    exam: "JEE",
+    chapter: "Electric Charges and Fields",
+    badge: "Coulomb Law & Gauss Theorem",
+    items: [
+      ["Coulomb's Law in Vector Form", "F = (1 / 4 pi eps_0) * (q1 q2 / r^2) * r_hat", "1 / (4 pi eps_0) = 9 x 10^9 N m^2 C^-2"],
+      ["Electric Field of Dipole", "Axial: E = 2 k p / r^3 | Equatorial: E = - k p / r^3", "Torque tau = p x E, Potential Energy U = - p . E"],
+      ["Gauss's Law", "Phi_E = Closed_Integral(E . dA) = Q_enclosed / eps_0", "Infinite wire: E = lambda / (2 pi eps_0 r) | Sheet: E = sigma / (2 eps_0)"],
+      ["Field of Charged Conducting Sphere", "Inside (r < R): E = 0 | Outside (r >= R): E = k Q / r^2", "Surface charge field: E = sigma / eps_0"],
+    ],
+  },
+  {
+    subject: "Physics",
+    classLevel: "12",
+    exam: "NEET",
+    chapter: "Electric Charges and Fields",
+    badge: "NEET Electric Traps & Proportionalities",
+    items: [
+      ["Dipole Field Ratio", "E_axial / E_equatorial = 2", "Both decrease inversely with cube of distance (E proportional to 1/r^3)"],
+      ["Electric Flux through Cube", "Charge at center: Phi = q / eps_0 | Through one face: Phi = q / (6 eps_0)", "Through corner: Phi = q / (8 eps_0)"],
+      ["Work Done on Dipole", "W = p * E * (cos theta1 - cos theta2)", "Stable: theta = 0 (U = -pE) | Unstable: theta = 180 (U = +pE)"],
+    ],
+  },
+  {
+    subject: "Physics",
+    classLevel: "12",
+    exam: "JEE",
+    chapter: "Current Electricity",
+    badge: "Kirchhoff Laws & Drift Dynamics",
+    items: [
+      ["Drift Velocity & Current", "v_d = e * E * tau / m,  I = n * e * A * v_d", "Mobility mu = v_d / E = e * tau / m"],
+      ["Kirchhoff's Laws", "KCL (Current Law): Sum(I) = 0 (Charge conservation)", "KVL (Voltage Law): Sum(Delta V) = 0 (Energy conservation)"],
+      ["Wheatstone Bridge Balance", "P / Q = R / S (Galvanometer current I_g = 0)", "Meter Bridge: R / S = l1 / (100 - l1)"],
+      ["Cell Combinations", "Series: E_eq = Sum(E_i), r_eq = Sum(r_i)", "Parallel: E_eq / r_eq = Sum(E_i / r_i),  1/r_eq = Sum(1/r_i)"],
+    ],
+  },
+  {
+    subject: "Physics",
+    classLevel: "12",
+    exam: "NEET",
+    chapter: "Current Electricity",
+    badge: "NEET Resistance & Potentiometer",
+    items: [
+      ["Wire Stretching Shortcut", "If wire is stretched by n times length: R' = n^2 * R", "If length increases by x% (small < 5%): R increases by 2x%"],
+      ["Internal Resistance Formula", "r = R * [(E / V) - 1] = R * [(l1 / l2) - 1]", "l1 = balance length for E, l2 = balance length for terminal voltage V"],
+      ["Temperature Dependence", "R_T = R_0 * (1 + alpha * Delta T)", "alpha is positive for metals, negative for semiconductors"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "12",
+    exam: "JEE",
+    chapter: "Solutions",
+    badge: "Colligative Properties & van't Hoff",
+    items: [
+      ["Raoult's Law (Relative Lowering)", "(P0 - P) / P0 = i * X_solute", "i = van't Hoff factor = 1 + (n - 1)*alpha"],
+      ["Boiling Elevation & Freezing Depression", "Delta T_b = i * K_b * m,  Delta T_f = i * K_f * m", "K_b = Ebullioscopic constant, K_f = Cryoscopic constant"],
+      ["Osmotic Pressure", "pi = i * C * R * T = i * (n / V) * R * T", "Isotonic solutions have equal osmotic pressure (pi1 = pi2)"],
+      ["Henry's Law", "p = K_H * x", "Higher K_H means LOWER solubility of gas in liquid"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "12",
+    exam: "NEET",
+    chapter: "Solutions",
+    badge: "NEET Solutions & Colligative Traps",
+    items: [
+      ["van't Hoff Factor Shortcuts", "Dissociation: i = 1 + (n - 1) * alpha (i > 1)", "Association (dimer): i = 1 - 0.5 * alpha (i < 1)"],
+      ["Ideal vs Non-Ideal Solutions", "Ideal: Delta H_mix = 0, Delta V_mix = 0 (e.g. Benzene+Toluene)", "Positive deviation: Ethanol+Acetone (Delta H > 0, min boiling azeotrope)"],
+      ["Colligative Definition", "Depends ONLY on number of solute particles, NOT on their identity", "1 M CaCl2 (i=3) has higher boiling point than 1 M NaCl (i=2)"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "12",
+    exam: "JEE",
+    chapter: "Electrochemistry",
+    badge: "Nernst Equation & Kohlrausch",
+    items: [
+      ["Nernst Equation (298 K)", "E_cell = E_cell_0 - (0.0591 / n) * log(Q)", "At equilibrium: E_cell = 0 -> E_cell_0 = (0.0591 / n) * log(K_c)"],
+      ["Kohlrausch's Law", "Lambda_m^0 = nu_+ * lambda_+^0 + nu_- * lambda_-^0", "Alpha for weak electrolyte = Lambda_m / Lambda_m^0"],
+      ["Faraday's Laws of Electrolysis", "m = Z * I * t = (Eq. Wt / 96500) * Q", "1 Faraday (96500 C) deposits 1 gram-equivalent of any substance"],
+    ],
+  },
+  {
+    subject: "Chemistry",
+    classLevel: "12",
+    exam: "NEET",
+    chapter: "Electrochemistry",
+    badge: "NEET Cell Potential & Batteries",
+    items: [
+      ["Standard EMF", "E_cell_0 = E_cathode_0 - E_anode_0 (both standard reduction potentials)", "More positive reduction potential = stronger oxidizing agent"],
+      ["Lead Storage Battery", "Discharging: Pb + PbO2 + 2H2SO4 -> 2PbSO4 + 2H2O", "Recharging: Reverse reaction, density of H2SO4 increases"],
+      ["Electrolytic Conductance", "Kappa = G * (l / A) = (1 / R) * Cell_Constant", "Molar conductivity Lambda_m = (Kappa * 1000) / Molarity"],
+    ],
+  },
+  {
+    subject: "Mathematics",
+    classLevel: "12",
+    exam: "JEE",
+    chapter: "Integrals",
+    badge: "JEE Indefinite & Definite Methods",
+    items: [
+      ["Integration by Parts (ILATE)", "Integral(u v dx) = u Integral(v dx) - Integral(u' Integral(v dx) dx)", "Choose u using: Inverse, Log, Algebra, Trig, Exponential"],
+      ["King's Property (Definite)", "Integral_a^b f(x) dx = Integral_a^b f(a + b - x) dx", "Integral_0^a f(x) dx = Integral_0^a f(a - x) dx"],
+      ["Leibniz Rule (Differentiating Integral)", "d/dx [Integral_u(x)^v(x) f(t) dt] = f(v) * v' - f(u) * u'", "Fundamental for limit of integral forms"],
+      ["Standard Trigonometric Integrals", "Integral(sec x dx) = ln|sec x + tan x|", "Integral(cosec x dx) = ln|cosec x - cot x| = ln|tan(x/2)|"],
+    ],
+  },
+  {
+    subject: "Biology",
+    classLevel: "12",
+    exam: "NEET",
+    chapter: "Principles of Inheritance and Variation",
+    badge: "NEET Genetics & Mendel Laws",
+    items: [
+      ["Monohybrid Ratios", "Phenotypic ratio = 3 : 1 | Genotypic ratio = 1 : 2 : 1", "Test Cross: Unknown dominant crossed with homozygous recessive (1 : 1)"],
+      ["Dihybrid Ratios", "Phenotypic ratio = 9 : 3 : 3 : 1", "Law of Independent Assortment applies to genes on different chromosomes"],
+      ["Incomplete vs Co-dominance", "Incomplete (Snapdragon): Phenotype & Genotype both 1:2:1", "Co-dominance: ABO Blood grouping (IA and IB are co-dominant, i is recessive)"],
+      ["Genetic Disorders", "Sex-linked recessive: Haemophilia, Colour blindness", "Autosomal recessive: Sickle cell anaemia (GAG -> GUG at 6th codon of beta chain)"],
+    ],
+  },
+];
