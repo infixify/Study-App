@@ -464,7 +464,7 @@ export default function DashboardPage() {
           <TaskWidget tasks={state.tasks} />
         </div>
 
-        {/* 📊 Syllabus Progress */}
+        {/* 📊 Syllabus Progress (Redirects to /library) */}
         {state.syllabusProgress.totalChapters > 0 && (
           <div className="rounded-ticket border border-ink/10 bg-white p-4">
             <div className="flex items-center justify-between mb-2">
@@ -483,10 +483,10 @@ export default function DashboardPage() {
               {state.syllabusProgress.doneChapters}/{state.syllabusProgress.totalChapters} chapters marked done
             </p>
             <Link
-              href="/resources"
-              className="mt-3 block text-center text-xs font-medium text-teal bg-teal/10 rounded-full py-2"
+              href="/library"
+              className="mt-3 block text-center text-xs font-semibold text-teal bg-teal/10 rounded-full py-2.5 hover:bg-teal/20 transition-all"
             >
-              Update chapter progress →
+              Update syllabus progress →
             </Link>
           </div>
         )}
