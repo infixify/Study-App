@@ -3,7 +3,7 @@
 import { createElement as e, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-interface ModuleData {
+interface ModuleBlock {
   badge: string;
   sections: {
     title: string;
@@ -12,220 +12,70 @@ interface ModuleData {
 }
 
 // ============================================================================
-// 1. DEEP COACHING KNOWLEDGE ENGINE (FORMULAS + SHORT NOTES)
+// AUTOMATIC EXAM-PERSONALISED KNOWLEDGE ENGINES
 // ============================================================================
-const MASTER_KNOWLEDGE: Record<string, { formulas: ModuleData; notes: ModuleData }> = {
-  // MOTION IN A STRAIGHT LINE
+
+const JEE_ENGINE: Record<string, { formulas: ModuleBlock; notes: ModuleBlock }> = {
   "motion in a straight line": {
     formulas: {
-      badge: "Kinematics 1D Equations & Numerical Shortcuts",
+      badge: "JEE Calculus Kinematics & Advanced Numerical Shortcuts",
       sections: [
         {
-          title: "Equations of Motion (Constant Acceleration)",
+          title: "Variable Acceleration Calculus Relations",
           rows: [
-            ["Equations of Motion", "v = u + a*t,  s = u*t + 0.5*a*t^2,  v^2 = u^2 + 2*a*s", "Vector form: v_vec = u_vec + a_vec*t, s_vec = u_vec*t + 0.5*a_vec*t^2. Valid ONLY for constant acceleration."],
-            ["Nth Second Distance", "S_n = u + 0.5 * a * (2*n - 1)", "Valid for constant acceleration. Gives distance covered in specific nth second."],
-            ["Galileo's Odd Ratio", "Distances in equal intervals: 1 : 3 : 5 : 7 : (2n - 1)", "Valid for body starting from rest under constant acceleration."],
-            ["Stopping Distance & Time", "s = u^2 / (2*a) ==> s proportional to u^2 | t = u / a", "Doubling initial velocity quadruples stopping distance but only doubles stopping time."],
-          ],
-        },
-        {
-          title: "Motion Under Gravity & Advanced Vertical Cases",
-          rows: [
-            ["Vertical Projection", "H_max = u^2 / (2*g) | Time of flight T = 2*u / g", "Time of ascent = Time of descent = u / g (in vacuum without air drag)."],
-            ["Effect of Air Resistance", "Ascent: t1 = sqrt[2h / (g + a)] | Descent: t2 = sqrt[2h / (g - a)]", "Velocity of projection v1 = sqrt[2(g+a)h], landing velocity v2 = sqrt[2(g-a)h]. t2 > t1."],
-            ["Crossing Same Point Twice", "Height h = 0.5 * g * t1 * t2 | H_max = 0.125 * g * (t1 + t2)^2", "Body crosses height h at t1 (going up) and t2 (coming down). Total T = t1 + t2."],
-            ["Variable Accel. Calculus", "a = v * (dv/dx) = dv/dt = d^2x/dt^2 | s = Integral(v dt)", "Slope of x-t is v. Slope of v-t is a. Area under v-t is displacement."],
+            ["Calculus Equations", "v = Integral(a dt),  s = Integral(v dt)", "a = v * (dv/ds) = d^2s/dt^2. Used when acceleration is variable."],
+            ["Stopping Distance Ratio", "s = u^2 / (2 * a) ==> s proportional to u^2", "Doubling initial velocity quadruples stopping distance; stopping time t = u/a."],
+            ["Crossing Same Height", "Height h = 0.5 * g * t1 * t2 | H_max = 0.125 * g * (t1 + t2)^2", "Crosses height h at t1 (ascending) and t2 (descending). Total T = t1 + t2."],
+            ["Air Resistance Drag", "Ascent: t1 = sqrt[2h/(g+a)] | Descent: t2 = sqrt[2h/(g-a)]", "Landing velocity v2 = sqrt[2(g-a)h]. Projection v1 = sqrt[2(g+a)h]. t2 > t1."],
           ],
         },
       ],
     },
     notes: {
-      badge: "1D Kinematics Concepts & Traps Checklist",
+      badge: "JEE Kinematics Multi-Concept Crux",
       sections: [
         {
-          title: "Core Conceptual Rules & Graph Insights",
+          title: "Non-Inertial Frames & Pseudo Forces",
           rows: [
-            ["Distance vs Displacement", "Distance >= |Displacement|. Average Speed >= |Average Velocity|.", "They are equal ONLY for unidirectional straight-line motion without turning back."],
-            ["Graph Interpretations", "x-t slope = velocity. v-t slope = acceleration. Area under a-t = change in velocity.", "Sharp corner in x-t graph means infinite acceleration (physically impossible)."],
-            ["Sign Convention Traps", "Fix positive upwards: then g = -9.8 m/s^2 ALWAYS (both for upward and downward motion!).", "Displacement can be negative if body lands below projection point."],
-          ],
-        },
-        {
-          title: "Coaching Exam Traps & Tricks",
-          rows: [
-            ["Ball Dropped from Lift", "Initial velocity of ball = velocity of lift at release moment.", "Acceleration after release is strictly g downward (independent of lift's acceleration!)."],
-            ["Tap Water Droplets", "When nth drop leaves, distance of (n-1)th, (n-2)th follow 1 : 4 : 9 : 16 ratios from top.", "Time interval between successive drops is constant."],
+            ["Pseudo Force Rule", "F_pseudo = - m * a_frame applied to all particles in accelerating frame.", "Always directed opposite to acceleration of observer's reference frame."],
+            ["Relative 1D Approach", "v_rel = vA - vB,  a_rel = aA - aB", "Collision condition: relative displacement becomes zero at same time t."],
           ],
         },
       ],
     },
   },
-
-  // STRUCTURE OF ATOM
-  "structure of atom": {
-    formulas: {
-      badge: "Bohr Model, Quantum Numbers & De-Broglie",
-      sections: [
-        {
-          title: "Bohr Model & Rydberg Transitions",
-          rows: [
-            ["Bohr Radius & Velocity", "r_n = 0.529 * (n^2 / Z) Angstrom | v_n = 2.18e6 * (Z / n) m/s", "Angular momentum quantization: m*v*r = n*h / (2*pi)."],
-            ["Bohr Energy Formula", "E_n = -13.6 * (Z^2 / n^2) eV = -2.18e-18 * (Z^2 / n^2) J", "Total Energy E = - K.E. = 0.5 * P.E."],
-            ["Rydberg Spectrum", "1 / lambda = R_H * Z^2 * [1/n1^2 - 1/n2^2]", "R_H = 109677 cm^-1. Lyman (UV, n1=1), Balmer (Visible, n1=2), Paschen (IR, n1=3)."],
-            ["Total Spectral Lines", "Total lines = n*(n - 1) / 2 [from level n to ground]", "Between n2 and n1: Total lines = (n2 - n1)*(n2 - n1 + 1) / 2."],
-          ],
-        },
-        {
-          title: "Quantum Mechanics, Nodes & Uncertainty",
-          rows: [
-            ["De-Broglie Wavelength", "lambda = h / p = h / (m * v) = h / sqrt(2 * m * K.E.)", "For electron accelerated through V volts: lambda = 12.27 / sqrt(V) Angstrom."],
-            ["Heisenberg Uncertainty", "Delta_x * Delta_p >= h / (4 * pi) | Delta_x * Delta_v >= h / (4*pi*m)", "Applicable only to microscopic particles. Inapplicable to macroscopic bodies."],
-            ["Nodes in Orbitals", "Radial Nodes = n - l - 1 | Angular Nodes = l | Total Nodes = n - 1", "For 4d orbital: n=4, l=2 -> Radial = 4-2-1 = 1, Angular = 2, Total = 3 nodes."],
-            ["Spin Magnetic Moment", "mu_s = sqrt[n * (n + 2)] Bohr Magnetons (B.M.)", "n = number of unpaired electrons."],
-          ],
-        },
-      ],
-    },
-    notes: {
-      badge: "Quantum Mechanics & Electronic Rules",
-      sections: [
-        {
-          title: "Aufbau, Hund's & Pauli Principles",
-          rows: [
-            ["Aufbau Principle", "Electrons occupy lowest energy orbitals first following (n + l) rule.", "If (n + l) is equal, orbital with lower n fills first (e.g. 3d vs 4s: 4s fills before 3d)."],
-            ["Hund's Multiplicity Rule", "Pairing in degenerate orbitals (p, d, f) does NOT occur until each is singly occupied with parallel spins.", "Max exchange energy stabilizes half-filled and fully-filled configurations (Cr: 3d5 4s1, Cu: 3d10 4s1)."],
-            ["Pauli Exclusion", "No two electrons in an atom can have the same set of all four quantum numbers.", "An orbital can hold at most 2 electrons with opposite spins (+1/2, -1/2)."],
-          ],
-        },
-        {
-          title: "Quantum Numbers & Shapes",
-          rows: [
-            ["Principal (n)", "Determines shell size & primary energy level. Total orbitals in shell = n^2, Max electrons = 2n^2.", "Distance from nucleus."],
-            ["Azimuthal (l)", "Subshell shape: l=0(s, spherical), l=1(p, dumbbell), l=2(d, double dumbbell), l=3(f, complex).", "Orbital angular momentum = [h / (2*pi)] * sqrt[l*(l + 1)]."],
-            ["Magnetic (m)", "Spatial orientation of orbital. Values from -l to +l (total 2l + 1 values).", "d_z^2 has doughnut (dough-ring) shape along z-axis."],
-          ],
-        },
-      ],
-    },
-  },
-
-  // ELECTRIC CHARGES AND FIELDS
   "electric charges and fields": {
     formulas: {
-      badge: "Electrostatic Laws & Complete Field Distributions",
+      badge: "JEE Advanced Electrostatics & Field Distributions",
       sections: [
         {
-          title: "Coulomb, Null Points & Equilibrium",
+          title: "Coulomb, Null Points & Equilibrium Formulations",
           rows: [
-            ["Coulomb's Law", "F = (1 / 4 pi eps0 eps_r) * (q1 q2 / r^2)", "In medium: F_med = F_air / eps_r. 1/(4 pi eps0) = 9e9 N m^2 C^-2."],
-            ["Null Point Formula", "x = [sqrt(Q1) * r] / [sqrt(Q1) +/- sqrt(Q2)]", "(+) for like charges (between), (-) for unlike charges (outside near smaller)."],
-            ["3 Charges Equilibrium", "q = - (Q1 * Q2) / [sqrt(Q1) + sqrt(Q2)]^2", "Q1, Q2 must be like, q placed at x = r * sqrt(Q1) / [sqrt(Q1) + sqrt(Q2)]."],
-            ["General Dipole Field", "E = [k p sqrt(1 + 3 cos^2 theta)] / r^3", "tan(alpha) = 0.5 tan(theta). Axial: 2kp/r^3, Equatorial: -kp/r^3."],
+            ["Vector Coulomb Form", "F_12 = (1 / 4 pi eps0) * (q1 q2 / r^2) * r_hat_12", "In dielectric: F = F0 / eps_r. Valid strictly for static point charges."],
+            ["Null Point Formulation", "x = [sqrt(Q1) * r] / [sqrt(Q1) +/- sqrt(Q2)]", "(+) for like charges (between them), (-) for unlike charges (outside near smaller)."],
+            ["3 Charges Equilibrium", "q = - (Q1 * Q2) / [sqrt(Q1) + sqrt(Q2)]^2", "Stable for displacement along line only if charges have appropriate signs."],
+            ["General Dipole Field", "E = [k p sqrt(1 + 3 cos^2 theta)] / r^3", "tan(alpha) = 0.5 tan(theta). Torque tau = p x E, Potential energy U = - p . E."],
           ],
         },
         {
-          title: "Complete Standard Field Distributions",
+          title: "Continuous Charge Distributions",
           rows: [
-            ["Infinite Line Charge", "E = lambda / (2 pi eps0 r) = 2 k lambda / r", "Radial field, decreases as 1/r."],
-            ["Infinite Thin Sheet", "E = sigma / (2 eps0) [Non-conducting] | sigma / eps0 [Conducting]", "Uniform field independent of distance r."],
-            ["Uniform Charged Ring", "E_axis = k Q x / (R^2 + x^2)^(3/2)", "E_center = 0. E_max occurs at x = R / sqrt(2)."],
-            ["Hollow / Conducting Sphere", "Outside (r >= R): E = k Q / r^2 | Inside (r < R): E = 0", "Acts like point charge for all outside points."],
-            ["Solid Insulating Sphere", "Inside (r <= R): E = k Q r / R^3 | Outside (r > R): k Q / r^2", "Inside field is directly proportional to r (E proportional to r)."],
-            ["Energy Density in Field", "u = 0.5 * eps0 * E^2 (Joules / m^3)", "Energy per unit volume stored in electrostatic field."],
+            ["Inf. Line & Sheet", "Line: E = 2 k lambda / r | Sheet: E = sigma / (2 eps0)", "Conducting sheet: E = sigma / eps0."],
+            ["Uniform Charged Ring", "E_axis = k Q x / (R^2 + x^2)^(3/2)", "E_max occurs strictly at x = R / sqrt(2). E_center = 0."],
+            ["Solid Insulating Sphere", "Inside (r <= R): E = k Q r / R^3 | Outside: k Q / r^2", "Inside field increases linearly with r (E proportional to r)."],
+            ["Energy Density in Field", "u = 0.5 * eps0 * E^2 (Joules / m^3)", "Total energy U = Integral(u dV) over entire space."],
           ],
         },
       ],
     },
     notes: {
-      badge: "Electrostatics Concept Rules & Traps",
+      badge: "JEE Field Symmetries & Boundary Conditions",
       sections: [
         {
-          title: "Field Lines & Gauss's Law Insights",
+          title: "Gauss Law & Conductor Electrostatics",
           rows: [
-            ["Electric Lines Properties", "Never intersect, never form closed loops, start from +ve and end at -ve.", "Crowded lines represent strong field, perpendicular to conductor surface."],
-            ["Gauss's Law Traps", "Flux = Q_enclosed / eps0. Independent of shape or size of Gaussian surface.", "Charges outside surface do NOT contribute to net flux, but DO contribute to local electric field E!"],
-            ["Conductor Electrostatics", "Electric field inside conductor is strictly ZERO in static equilibrium.", "All charge resides entirely on outer surface; potential is constant throughout body."],
-          ],
-        },
-      ],
-    },
-  },
-
-  // THE SOLID STATE
-  "solid state": {
-    formulas: {
-      badge: "Lattices, Packing Fractions & Void Coordinates",
-      sections: [
-        {
-          title: "Unit Cell Parameters (d, r, a & CN)",
-          rows: [
-            ["Simple Cubic (SC)", "d = a,  r = a / 2,  CN = 6,  Packing = 52.4%", "Z = 1 atom per unit cell."],
-            ["Body-Centred Cubic (BCC)", "d = (sqrt(3)/2) a,  r = (sqrt(3)/4) a,  CN = 8,  Packing = 68%", "Z = 2 atoms per unit cell."],
-            ["Face-Centred Cubic (FCC)", "d = a / sqrt(2),  r = a / (2 sqrt(2)),  CN = 12,  Packing = 74%", "Z = 4 atoms per unit cell."],
-            ["Density of Crystal", "rho = (Z * M) / (a^3 * N_A)", "a in cm, M in g/mol, N_A = 6.022e23."],
-          ],
-        },
-        {
-          title: "Radius Ratios, Voids & Compounds",
-          rows: [
-            ["Tetrahedral Voids", "Count = 2N, Distance from corner = (sqrt(3)/4) a", "Located at 1/4th of body diagonal from each corner (8 in FCC)."],
-            ["Octahedral Voids", "Count = N (1 at body centre, 12 at edge centres)", "Total = 1 + 12*(1/4) = 4 voids in FCC. Distance from centre = a/2."],
-            ["Radius Ratio Table", "0.155-0.225 (Trigonal, CN=3) | 0.225-0.414 (Tetrahedral, CN=4)", "0.414-0.732 (Octahedral, CN=6) | 0.732-1.0 (BCC Cubic, CN=8)."],
-            ["Standard Salts Structure", "NaCl (FCC 6:6) | CsCl (BCC 8:8) | ZnS (FCC 4:4) | CaF2 (FCC 8:4)", "Antifluorite Na2O (4:8)."],
-          ],
-        },
-      ],
-    },
-    notes: {
-      badge: "Crystal Imperfections & Electrical Properties",
-      sections: [
-        {
-          title: "Defects in Solids & F-Centres",
-          rows: [
-            ["Schottky Defect", "Equal numbers of cations and anions missing from lattice. Density DECREASES.", "Shown by ionic compounds with high CN and similar cation/anion sizes (NaCl, KCl, CsCl)."],
-            ["Frenkel Defect", "Cation dislocated from normal site to interstitial site. Density remains UNCHANGED.", "Shown by compounds with large size difference (ZnS, AgCl, AgBr). AgBr shows BOTH Schottky & Frenkel!"],
-            ["F-Centres (Farbe)", "Electrons trapped in anionic vacancies. Imparts colour to crystal.", "NaCl turns yellow, KCl turns violet, LiCl turns pink due to F-centres."],
-          ],
-        },
-      ],
-    },
-  },
-
-  // RELATIONS AND FUNCTIONS
-  "relations and functions": {
-    formulas: {
-      badge: "Counting Functions & Functional Equations",
-      sections: [
-        {
-          title: "Mapping Formulas (Domain A: m, Codomain B: n)",
-          rows: [
-            ["Total Relations & Functions", "Total Relations = 2^(m * n) | Total Functions = n^m", "A has m elements, B has n elements."],
-            ["Number of One-One", "n P m = n! / (n - m)! [if n >= m] | 0 [if n < m]", "No injection possible if domain has more elements than codomain."],
-            ["Number of Onto (Surjective)", "Sum_{r=0}^n (-1)^r * nCr * (n - r)^m", "If n = m: n! onto functions. If n > m: 0 onto functions."],
-            ["Number of Bijective", "n! [if m = n] | 0 [if m != n]", "Bijective requires both one-one and onto simultaneously."],
-          ],
-        },
-        {
-          title: "GIF Properties & Cauchy Functional Equations",
-          rows: [
-            ["Greatest Integer Function", "[x + n] = [x] + n (for integer n) | [-x] = -[x] (int), -[x]-1 (non-int)", "Fractional part {x} = x - [x]. Range of {x} is [0, 1)."],
-            ["Cauchy Equation 1", "f(x + y) = f(x) + f(y) ===> f(x) = k * x", "Linear additive function."],
-            ["Cauchy Equation 2", "f(x * y) = f(x) * f(y) ===> f(x) = x^n (or 0)", "Power multiplicative function."],
-            ["Cauchy Equation 3", "f(x + y) = f(x) * f(y) ===> f(x) = a^x", "Exponential functional equation."],
-            ["Cauchy Equation 4", "f(x * y) = f(x) + f(y) ===> f(x) = k * ln(x)", "Logarithmic functional equation."],
-          ],
-        },
-      ],
-    },
-    notes: {
-      badge: "Types of Relations & Equivalence Classes",
-      sections: [
-        {
-          title: "Relation Types & Invertibility",
-          rows: [
-            ["Reflexive, Symmetric, Transitive", "Reflexive: (a, a) in R. Symmetric: (a, b) in R => (b, a) in R. Transitive: (a,b), (b,c) in R => (a,c) in R.", "Equivalence relation is reflexive, symmetric and transitive simultaneously."],
-            ["Inverse Functions", "f^-1 exists IF AND ONLY IF f is bijective (both one-one and onto).", "Graph of f^-1 is reflection of graph of f about line y = x."],
+            ["Gauss Surface Symmetry", "Closed_Int(E . dA) = Q_enclosed / eps0", "Field outside contributes zero net flux, but determines local field distribution."],
+            ["Conductor Properties", "E_inside = 0, V_inside = constant = V_surface", "Charge resides exclusively on outer surface; local field E = sigma / eps0."],
           ],
         },
       ],
@@ -233,16 +83,131 @@ const MASTER_KNOWLEDGE: Record<string, { formulas: ModuleData; notes: ModuleData
   },
 };
 
-// ============================================================================
-// 2. VECTOR PDF BUILDER (SUPER CLEAN 3KB VECTOR COACHING FORMAT)
-// ============================================================================
-function buildCoachingPdf(
+const NEET_ENGINE: Record<string, { formulas: ModuleBlock; notes: ModuleBlock }> = {
+  "motion in a straight line": {
+    formulas: {
+      badge: "NEET High-Yield Kinematics & Proportionalities",
+      sections: [
+        {
+          title: "Direct Proportionality & NCERT Relations",
+          rows: [
+            ["Galileo's Odd Ratios", "Distances in equal successive seconds = 1 : 3 : 5 : 7 : 9", "Applicable for body dropped from rest (u = 0) under gravity."],
+            ["Stopping Distance Trick", "s proportional to u^2 (constant braking force)", "If car speed is tripled, stopping distance becomes 9 times!"],
+            ["Average Speed Shortcut", "v_avg = 2 * v1 * v2 / (v1 + v2) (Harmonic Mean)", "Valid when equal halves of total distance are traveled at speeds v1 and v2."],
+            ["Vertical Return Velocity", "v = u (magnitude), Time of ascent = u / g", "Total time of flight T = 2u / g. H_max = u^2 / 2g."],
+          ],
+        },
+      ],
+    },
+    notes: {
+      badge: "NEET Kinematics Traps & Common Mistakes",
+      sections: [
+        {
+          title: "NCERT Traps & Sign Rules",
+          rows: [
+            ["Acceleration at Top", "At highest point, velocity is ZERO, but acceleration is still 9.8 m/s^2 downwards!", "Never mark acceleration as zero at the top!"],
+            ["Distance in nth Second", "Sn = u + (a/2)(2n - 1). Sn has dimensions of velocity (distance per unit time).", "Always check units before calculating."],
+          ],
+        },
+      ],
+    },
+  },
+  "electric charges and fields": {
+    formulas: {
+      badge: "NEET Direct Electrostatics & Field Ratios",
+      sections: [
+        {
+          title: "High-Frequency NEET Formulae",
+          rows: [
+            ["Dipole Field Ratio", "E_axial / E_equatorial = 2 (at large distances)", "Both vary inversely with cube of distance: E proportional to 1/r^3."],
+            ["Electric Flux through Cube", "Charge at center: Phi = q / eps0 | Through 1 face: q / 6 eps0", "Charge at corner: Phi = q / 8 eps0."],
+            ["Work Done on Dipole", "W = p * E * (cos theta1 - cos theta2)", "Stable: theta = 0 (U = -pE). Unstable: theta = 180 (U = +pE)."],
+            ["Field of Spheres", "Hollow / Solid metal: E_inside = 0, E_outside = k Q / r^2", "Solid non-conducting: E_center = 0, E_surface = max = k Q / R^2."],
+          ],
+        },
+      ],
+    },
+    notes: {
+      badge: "NEET Electrostatic Traps & Lines of Force",
+      sections: [
+        {
+          title: "Electric Field Lines Rules",
+          rows: [
+            ["Lines of Force Properties", "Start from +ve and end at -ve. NEVER form closed loops.", "Tangent gives direction of E. Density of lines gives magnitude."],
+            ["Neutral Point Rule", "Neutral point is ALWAYS closer to the charge with smaller magnitude.", "Between two like charges, outside two unlike charges."],
+          ],
+        },
+      ],
+    },
+  },
+};
+
+const BOARDS_ENGINE: Record<string, { formulas: ModuleBlock; notes: ModuleBlock }> = {
+  "light – reflection and refraction": {
+    formulas: {
+      badge: "CBSE Class 10 Light Formulas & Sign Conventions",
+      sections: [
+        {
+          title: "Mirror & Lens Mathematical Equations",
+          rows: [
+            ["Mirror Formula", "1/f = 1/v + 1/u  (f = R / 2)", "Concave mirror: f is negative (-). Convex mirror: f is positive (+)."],
+            ["Linear Magnification", "m = h'/h = - v / u (Mirror) | m = + v / u (Lens)", "Negative m = Real & Inverted image. Positive m = Virtual & Erect."],
+            ["Lens Formula & Power", "1/f = 1/v - 1/u | Power P = 1 / f (in metres)", "SI Unit of Power is Dioptre (D). 1 D = 1 m^-1."],
+            ["Snell's Law of Refraction", "n = sin(i) / sin(r) = v1 / v2 = c / v", "Refractive index of medium 2 with respect to 1: n21 = n2 / n1."],
+          ],
+        },
+      ],
+    },
+    notes: {
+      badge: "CBSE Ray Diagrams & Important Rules",
+      sections: [
+        {
+          title: "Crucial CBSE Ray Diagram Checkpoints",
+          rows: [
+            ["Concave Mirror Virtual Case", "Object placed between Pole (P) and Focus (F) forms virtual, erect & magnified image behind mirror.", "Used in dentist mirrors and shaving mirrors."],
+            ["Convex Lens Real Images", "Object at 2F forms real, inverted image of same size at 2F on the other side.", "Object between F and 2F forms magnified image beyond 2F."],
+          ],
+        },
+      ],
+    },
+  },
+  "electricity": {
+    formulas: {
+      badge: "CBSE Electricity Laws & Heating Formulas",
+      sections: [
+        {
+          title: "Current, Ohm's Law & Resistance Combinations",
+          rows: [
+            ["Electric Current & Potential", "I = Q / t = (n * e) / t | V = W / Q", "1 Ampere = 1 C/s, 1 Volt = 1 J/C. e = 1.6 x 10^-19 C."],
+            ["Ohm's Law & Resistivity", "V = I * R | Resistance R = rho * (L / A)", "Thick wire has less resistance. Longer wire has more resistance."],
+            ["Series vs Parallel", "Series: R_s = R1 + R2 | Parallel: 1/R_p = 1/R1 + 1/R2", "In parallel, equivalent resistance is less than the smallest individual resistance."],
+            ["Joule's Heating & Power", "H = I^2 * R * t | Power P = V * I = I^2 * R = V^2 / R", "Commercial unit of electrical energy: 1 kWh = 3.6 x 10^6 Joules."],
+          ],
+        },
+      ],
+    },
+    notes: {
+      badge: "CBSE Definitions & Circuit Rules",
+      sections: [
+        {
+          title: "Standard Definitions & Safety",
+          rows: [
+            ["Ohm's Law Statement", "Potential difference across ends of conductor is directly proportional to current flowing through it, provided temperature remains constant.", "V-I graph is a straight line passing through origin."],
+            ["Domestic Electric Circuits", "Connected in parallel so that every appliance gets full 220V voltage and operates independently.", "Fuse wire is made of alloy of low melting point and connected in live wire."],
+          ],
+        },
+      ],
+    },
+  },
+};
+
+function buildVectorPdf(
   title: string,
   exam: string,
   cls: string,
   sub: string,
   modType: "formula_sheet" | "short_notes",
-  data: ModuleData
+  data: ModuleBlock
 ): Uint8Array {
   const clean = (t: string) => t.replace(/[\(\)\\]/g, "");
   const isJee = exam.toUpperCase() === "JEE";
@@ -259,7 +224,7 @@ function buildCoachingPdf(
   s += "BT /F2 9 Tf 0.85 0.92 1 rg 440 792 Td (prepwise.in) Tj ET\n";
 
   s += "BT /F1 15 Tf 0.1 0.15 0.35 rg 30 724 Td (" + clean(title) + ") Tj ET\n";
-  s += "BT /F2 10 Tf 0.35 0.45 0.55 rg 30 706 Td (Authentic Coaching Multi-Case & Distribution Module) Tj ET\n";
+  s += "BT /F2 10 Tf 0.35 0.45 0.55 rg 30 706 Td (Authentic Exam-Personalised Breakdown) Tj ET\n";
 
   let y = 675;
   for (let secIdx = 0; secIdx < data.sections.length; secIdx++) {
@@ -284,7 +249,7 @@ function buildCoachingPdf(
   }
 
   s += "0.93 0.95 0.97 rg 0 0 595 38 re f\n";
-  s += "BT /F2 9 Tf 0.45 0.5 0.55 rg 30 15 Td (PrepWise Official Coaching Module * Target: " + exam + ") Tj ET\n";
+  s += "BT /F2 9 Tf 0.45 0.5 0.55 rg 30 15 Td (PrepWise Official Coaching Content * Target: " + exam + ") Tj ET\n";
   s += "BT /F1 9 Tf 0.1 0.4 0.6 rg 490 15 Td (Page 1 of 1) Tj ET\n";
 
   const pdf =
@@ -313,127 +278,107 @@ async function uploadWithRetry(path: string, bytes: Uint8Array, retries = 3): Pr
 }
 
 // ============================================================================
-// 3. MASTER STUDIO ADMIN UI (WITH "GENERATE BOTH" 1-CLICK ENGINE)
+// SINGLE-CLICK MASTER CONTROLLER
 // ============================================================================
 export default function MasterGeneratorPage() {
   const [running, setRunning] = useState(false);
-  const [targetCategory, setTargetCategory] = useState<"formula_sheet" | "short_notes">("formula_sheet");
-  const [status, setStatus] = useState("Ready to publish Coaching Grade Content for all subjects");
+  const [status, setStatus] = useState("Click Master Button to Automatically Personalize the Entire App");
   const [pct, setPct] = useState(0);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function runBatch(cat: "formula_sheet" | "short_notes", filterClass?: string) {
-    const { data: existing } = await supabase
-      .from("resources")
-      .select("chapter_id")
-      .eq("category", cat);
-
-    const doneMap = new Set((existing || []).map((r) => r.chapter_id));
-
-    const { data: subs } = await supabase.from("subjects").select("id, name, class_level, target_exam");
-    if (!subs || subs.length === 0) throw new Error("No subjects found");
-
-    const filteredSubs = filterClass
-      ? subs.filter((s) => s.class_level === filterClass || (filterClass === "11" && s.class_level === "Dropper") || (filterClass === "12" && s.class_level === "Dropper"))
-      : subs;
-
-    const subIds = filteredSubs.map((s) => s.id);
-    const { data: chs } = await supabase.from("chapters").select("id, title, subject_id").in("subject_id", subIds);
-    if (!chs || chs.length === 0) throw new Error("No chapters found");
-
-    for (let i = 0; i < chs.length; i++) {
-      const ch = chs[i];
-      setPct(Math.round(((i + 1) / chs.length) * 100));
-
-      if (doneMap.has(ch.id)) continue;
-
-      setStatus("[" + (cat === "formula_sheet" ? "Formula Sheet" : "Short Note") + "] " + ch.title + " (" + (i + 1) + "/" + chs.length + ")");
-
-      const parentSub = filteredSubs.find((s) => s.id === ch.subject_id);
-      if (!parentSub) continue;
-
-      const cleanKey = ch.title.toLowerCase().trim();
-      const entry = MASTER_KNOWLEDGE[cleanKey];
-
-      const moduleData: ModuleData = (entry && (cat === "formula_sheet" ? entry.formulas : entry.notes)) || {
-        badge: cat === "formula_sheet" ? "High-Yield Mathematical Formulations" : "Coaching Concept & Problem Framework",
-        sections: [
-          {
-            title: cat === "formula_sheet" ? "Governing Equations & Vector Relations" : "Core Concepts & Governing Rules",
-            rows: [
-              ["Primary Formulation", "Conditions and standard definitions governing " + ch.title + ".", "Exam-tested critical criteria."],
-              ["Key Numerical Equations", "Mathematical representations, vector notations and unit constraints.", "Dimensionally consistent standard forms."],
-            ],
-          },
-          {
-            title: cat === "formula_sheet" ? "Calculation Shortcuts & Boundary Limits" : "Exceptions, Traps & High-Yield Insights",
-            rows: [
-              ["Boundary Conditions", "Behavior at limits (r -> 0, r -> inf, boundary conditions, resonance).", "High-frequency trick question area."],
-              ["Direct Numerical Shortcut", "Proportionalities, dimensional match, and elimination rules for MCQs.", "Reduces problem solving time significantly."],
-            ],
-          },
-        ],
-      };
-
-      try {
-        const pdfBytes = buildCoachingPdf(
-          ch.title,
-          parentSub.target_exam,
-          parentSub.class_level,
-          parentSub.name,
-          cat,
-          moduleData
-        );
-
-        const prefix = cat === "formula_sheet" ? "formula_" : "short_";
-        const fileName =
-          prefix +
-          parentSub.class_level.toLowerCase() +
-          "_" +
-          parentSub.target_exam.toLowerCase() +
-          "_" +
-          ch.title.toLowerCase().replace(/[^a-z0-9]/g, "_") +
-          ".pdf";
-        const path = cat + "/" + fileName;
-
-        await uploadWithRetry(path, pdfBytes);
-
-        const { data: pubData } = supabase.storage.from("resources").getPublicUrl(path);
-
-        await supabase.from("resources").delete().eq("chapter_id", ch.id).eq("category", cat);
-        await supabase.from("resources").insert({
-          chapter_id: ch.id,
-          subject_id: ch.subject_id,
-          resource_type: "pdf",
-          title: ch.title + " — " + parentSub.target_exam + " " + (cat === "formula_sheet" ? "Formula Sheet" : "Short Notes"),
-          url: pubData.publicUrl,
-          category: cat,
-          display_order: 0,
-        });
-
-        await new Promise((resolve) => setTimeout(resolve, 140));
-      } catch (innerErr) {
-        console.warn("Skipping chapter:", ch.title, innerErr);
-      }
-    }
-  }
-
-  async function runSingleOrBoth(mode: "single" | "both", filterClass?: string) {
+  async function run1ClickMaster() {
     setRunning(true);
     setErr(null);
     setDone(false);
 
     try {
-      if (mode === "both") {
-        setStatus("Phase 1: Publishing Formula Sheets for entire syllabus...");
-        await runBatch("formula_sheet", filterClass);
-        setStatus("Phase 2: Publishing Short Notes for entire syllabus...");
-        await runBatch("short_notes", filterClass);
-      } else {
-        await runBatch(targetCategory, filterClass);
+      setStatus("Analyzing entire curriculum & subjects from Supabase...");
+      const { data: subs } = await supabase.from("subjects").select("id, name, class_level, target_exam");
+      if (!subs || subs.length === 0) throw new Error("No subjects found in database");
+
+      const subIds = subs.map((s) => s.id);
+      const { data: chs } = await supabase.from("chapters").select("id, title, subject_id").in("subject_id", subIds);
+      if (!chs || chs.length === 0) throw new Error("No chapters found in database");
+
+      const categories: ("formula_sheet" | "short_notes")[] = ["formula_sheet", "short_notes"];
+
+      for (let i = 0; i < chs.length; i++) {
+        const ch = chs[i];
+        setPct(Math.round(((i + 1) / chs.length) * 100));
+
+        const parentSub = subs.find((s) => s.id === ch.subject_id);
+        if (!parentSub) continue;
+
+        const targetExam = parentSub.target_exam; // Automatically reads "JEE", "NEET", or "Boards"!
+        setStatus("Deploying [" + targetExam + " • " + parentSub.name + "] " + ch.title + " (" + (i + 1) + "/" + chs.length + ")");
+
+        const engine = targetExam === "JEE" ? JEE_ENGINE : targetExam === "NEET" ? NEET_ENGINE : BOARDS_ENGINE;
+        const cleanKey = ch.title.toLowerCase().trim();
+        const entry = engine[cleanKey];
+
+        for (const cat of categories) {
+          const isFormula = cat === "formula_sheet";
+          const moduleData: ModuleBlock = (entry && (isFormula ? entry.formulas : entry.notes)) || {
+            badge: targetExam + " " + (isFormula ? "High-Yield Equations & Shortcuts" : "Coaching Concept & Traps Framework"),
+            sections: [
+              {
+                title: isFormula ? "Core Equations & Boundary Values" : "Conceptual Principles & NCERT Rules",
+                rows: [
+                  ["Standard Formulation", "Essential definition, conditions and governing equations of " + ch.title + ".", "Exam-tested critical criteria."],
+                  ["Key Mathematical Relation", "Mathematical representations, vector notations and unit constraints.", "Dimensionally consistent standard forms."],
+                ],
+              },
+              {
+                title: isFormula ? "Numerical Shortcuts & Limits" : "Exceptions, Traps & Exam Checklist",
+                rows: [
+                  ["Boundary Conditions", "Behavior at limits (r -> 0, r -> inf, boundary conditions, resonance).", "High-frequency trick question area."],
+                  ["MCQ Shortcut Tactic", "Direct proportionalities and rapid elimination rules for " + targetExam + ".", "Reduces calculation time significantly."],
+                ],
+              },
+            ],
+          };
+
+          const pdfBytes = buildVectorPdf(
+            ch.title,
+            targetExam,
+            parentSub.class_level,
+            parentSub.name,
+            cat,
+            moduleData
+          );
+
+          const prefix = isFormula ? "formula_" : "short_";
+          const fileName =
+            prefix +
+            parentSub.class_level.toLowerCase() +
+            "_" +
+            targetExam.toLowerCase() +
+            "_" +
+            ch.title.toLowerCase().replace(/[^a-z0-9]/g, "_") +
+            ".pdf";
+          const path = cat + "/" + fileName;
+
+          await uploadWithRetry(path, pdfBytes);
+          const { data: pubData } = supabase.storage.from("resources").getPublicUrl(path);
+
+          // Force Overwrite: Purana sheet delete karke naya authentic coaching sheet insert
+          await supabase.from("resources").delete().eq("chapter_id", ch.id).eq("category", cat);
+          await supabase.from("resources").insert({
+            chapter_id: ch.id,
+            subject_id: ch.subject_id,
+            resource_type: "pdf",
+            title: ch.title + " — " + targetExam + " " + (isFormula ? "Formula Sheet" : "Short Notes"),
+            url: pubData.publicUrl,
+            category: cat,
+            display_order: 0,
+          });
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 110));
       }
-      setStatus("Success! All coaching-grade modules published cleanly!");
+
+      setStatus("Complete! 100% of all subjects, classes & exams are freshly deployed with personalized content!");
       setDone(true);
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -455,35 +400,8 @@ export default function MasterGeneratorPage() {
         e(
           "div",
           null,
-          e("h1", { className: "text-lg font-bold text-ink" }, "PrepWise Master Coaching Studio"),
-          e("p", { className: "text-xs text-slate" }, "Dedicated Formulas (Tables) + Dedicated Short Notes (Concepts)")
-        )
-      ),
-      // Mode Selection Tabs
-      e(
-        "div",
-        { className: "flex bg-ink/5 p-1 rounded-xl" },
-        e(
-          "button",
-          {
-            type: "button",
-            onClick: () => setTargetCategory("formula_sheet"),
-            className:
-              "flex-1 py-2 text-xs font-bold rounded-lg transition-all " +
-              (targetCategory === "formula_sheet" ? "bg-white text-teal shadow" : "text-slate hover:text-ink"),
-          },
-          "📐 Formula Sheets Mode"
-        ),
-        e(
-          "button",
-          {
-            type: "button",
-            onClick: () => setTargetCategory("short_notes"),
-            className:
-              "flex-1 py-2 text-xs font-bold rounded-lg transition-all " +
-              (targetCategory === "short_notes" ? "bg-white text-teal shadow" : "text-slate hover:text-ink"),
-          },
-          "📖 Short Notes Mode"
+          e("h1", { className: "text-lg font-bold text-ink" }, "PrepWise 1-Click Master Deployer"),
+          e("p", { className: "text-xs text-slate" }, "100% Automatic  *  JEE, NEET, Boards & Droppers  *  Force Overwrite ON")
         )
       ),
       running || done
@@ -501,64 +419,18 @@ export default function MasterGeneratorPage() {
       err ? e("p", { className: "text-xs text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200" }, "Error: " + err) : null,
       e(
         "div",
-        { className: "flex flex-col gap-2.5 pt-2" },
-        // 1-Click Both Button
+        { className: "flex flex-col gap-3 pt-2" },
+        // SINGLE MASTER BUTTON
         e(
           "button",
           {
             type: "button",
             disabled: running,
-            onClick: () => runSingleOrBoth("both"),
+            onClick: () => run1ClickMaster(),
             className:
-              "w-full py-4 rounded-xl bg-gradient-to-r from-teal to-blue-600 text-white font-bold text-sm shadow-xl hover:opacity-95 disabled:opacity-50 transition-all text-center flex items-center justify-center gap-2",
+              "w-full py-5 rounded-xl bg-teal text-white font-bold text-sm shadow-xl hover:bg-teal/90 disabled:opacity-50 transition-all text-center flex items-center justify-center gap-2",
           },
-          running ? "Publishing Everything..." : "🚀 1-Click Generate BOTH (Formulas + Short Notes)"
-        ),
-        e(
-          "button",
-          {
-            type: "button",
-            disabled: running,
-            onClick: () => runSingleOrBoth("single"),
-            className:
-              "w-full py-3 rounded-xl bg-white border-2 border-teal text-teal font-bold text-xs shadow hover:bg-teal/5 disabled:opacity-50 transition-all text-center",
-          },
-          "Generate Selected Only: " + (targetCategory === "formula_sheet" ? "Formula Sheets" : "Short Notes")
-        ),
-        // Class Filters
-        e(
-          "div",
-          { className: "grid grid-cols-3 gap-2 pt-1" },
-          e(
-            "button",
-            {
-              type: "button",
-              disabled: running,
-              onClick: () => runSingleOrBoth("single", "10"),
-              className: "py-2 rounded-lg bg-paper border border-ink/10 text-xs font-semibold text-ink hover:bg-ink/5 disabled:opacity-50",
-            },
-            "Class 10"
-          ),
-          e(
-            "button",
-            {
-              type: "button",
-              disabled: running,
-              onClick: () => runSingleOrBoth("single", "11"),
-              className: "py-2 rounded-lg bg-paper border border-ink/10 text-xs font-semibold text-ink hover:bg-ink/5 disabled:opacity-50",
-            },
-            "Class 11 + Drop"
-          ),
-          e(
-            "button",
-            {
-              type: "button",
-              disabled: running,
-              onClick: () => runSingleOrBoth("single", "12"),
-              className: "py-2 rounded-lg bg-paper border border-ink/10 text-xs font-semibold text-ink hover:bg-ink/5 disabled:opacity-50",
-            },
-            "Class 12 + Drop"
-          )
+          running ? "Personalizing & Overwriting..." : "🚀 1-Click Auto-Personalize Entire App (All Classes & Exams)"
         )
       ),
       done
@@ -568,7 +440,7 @@ export default function MasterGeneratorPage() {
               href: "/resources",
               className: "w-full py-3 text-center bg-teal text-white rounded-xl text-xs font-semibold shadow hover:bg-teal/90 transition-all",
             },
-            "Go to App & Test All Resources"
+            "Go to App & Test Updated Resources"
           )
         : null
     )
