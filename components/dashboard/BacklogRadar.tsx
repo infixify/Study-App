@@ -44,7 +44,6 @@ export function BacklogRadar({ userId }: { userId: string }) {
   }, [userId]);
 
   if (loading || backlogs.length === 0) {
-    // Agar koi backlog nahi hai toh clean congratulations message
     return e(
       "div",
       { className: "w-full p-4 bg-emerald-50/60 border border-emerald-200/70 rounded-2xl flex items-center justify-between" },
@@ -56,12 +55,12 @@ export function BacklogRadar({ userId }: { userId: string }) {
           "div",
           null,
           e("h4", { className: "text-xs font-bold text-emerald-900" }, "Zero Backlogs!"),
-          e("p", { className: "text-[11px] text-emerald-700" }, "You are on track with your coaching syllabus.")
+          e("p", { className: "text-[11px] text-emerald-700" }, "You are fully on track with your syllabus.")
         )
       ),
       e(
         "a",
-        { href: "/resources", className: "text-[11px] font-bold text-emerald-700 hover:underline" },
+        { href: "/library", className: "text-[11px] font-bold text-emerald-700 hover:underline" },
         "Syllabus →"
       )
     );
@@ -83,7 +82,7 @@ export function BacklogRadar({ userId }: { userId: string }) {
         e("h3", { className: "text-sm font-bold text-ink" }, "Backlog Radar"),
         e("span", { className: "px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700" }, backlogs.length + " pending")
       ),
-      e("a", { href: "/resources", className: "text-xs font-bold text-teal hover:underline" }, "Clear in Library →")
+      e("a", { href: "/library", className: "text-xs font-bold text-teal hover:underline" }, "Clear in Syllabus →")
     ),
 
     // List of backlogs
