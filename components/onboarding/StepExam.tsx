@@ -20,10 +20,27 @@ export default function StepExam({
   onBack,
 }: StepExamProps) {
   const [exam, setExam] = useState<TargetExam | null>(selectedExam);
+  
+  // Droppers don't have school exams; 11th and 12th default to true
+  const isDropper = classLevel === "Dropper";
+  const [includeSchool, setIncludeSchool] = useState<boolean>(
+    isDropper ? false : wantsBoards ?? true
+  );
 
-  // Boards tracking is always on now — no per-user toggle.
-  void wantsBoards;
-  void classLevel;
+  // Dynamic naming based on student's class
+  const schoolExamTitle =
+    classLevel === "11"
+      ? "Class 11 School Exams"
+      : classLevel === "12"
+      ? "Class 12 Board Exams"
+      : classLevel === "10"
+      ? "Class 10 Board Exams"
+      : "School / Board Exams";
+
+  const schoolExamSubtitle =
+    classLevel === "11"
+      ? "Include CBSE/State annual exams and NCERT coverage alongside competitive prep"
+      : "Track Board countdown, subjective practice & NCERT alongside competitive prep";
 
   return (
     <div>
@@ -31,33 +48,67 @@ export default function StepExam({
       <h2 className="font-display text-2xl font-semibold mt-4">
         What are you targeting?
       </h2>
-      <p className="text-slate text-sm mt-1 mb-8">
-        We'll build your countdown and mock test library around this. Boards tracking is included automatically.
+      <p className="text-slate text-sm mt-1 mb-6">
+        We'll build your countdown, syllabus, and test tracker around your target.
       </p>
 
+      {/* Target Exam Selection (JEE / NEET) */}
       <div className="flex flex-col gap-3">
         {(["JEE", "NEET"] as TargetExam[]).map((e) => (
           <button
             key={e}
+            type="button"
             onClick={() => setExam(e)}
-            className={`text-left rounded-ticket border p-4 transition-colors ${
+            className={`text-left rounded-ticket border p-4 transition-all ${
               exam === e
-                ? "border-marigold bg-marigold/10"
+                ? "border-marigold bg-marigold/10 shadow-xs"
                 : "border-ink/12 bg-white hover:border-ink/25"
             }`}
           >
-            <div className="font-display text-lg font-semibold">{e}</div>
+            <div className="font-display text-lg font-semibold text-ink">{e}</div>
             <div className="text-xs text-slate mt-0.5">
-              {e === "JEE" ? "Mains + Advanced tracking" : "NEET-UG tracking"}
+              {e === "JEE" ? "JEE Mains + Advanced tracking" : "NEET-UG tracking"}
             </div>
           </button>
         ))}
       </div>
 
+      {/* School / Board Exam Toggle (Only for Class 10, 11, 12 — hidden for Droppers) */}
+      {!isDropper && (
+        <div className="mt-6 rounded-ticket border border-ink/10 bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-ink">{schoolExamTitle}</p>
+              <p className="text-xs text-slate mt-0.5 leading-relaxed">
+                {schoolExamSubtitle}
+              </p>
+            </div>
+            
+            {/* Clean iOS-style Toggle Switch */}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={includeSchool}
+              onClick={() => setIncludeSchool(!includeSchool)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                includeSchool ? "bg-teal" : "bg-ink/20"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                  includeSchool ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Continue Button */}
       <button
         disabled={!exam}
-        onClick={() => exam && onContinue(exam, true)}
-        className="w-full mt-8 bg-ink text-paper rounded-ticket py-3.5 font-medium disabled:opacity-30 disabled:cursor-not-allowed hover:bg-ink-100 transition-colors"
+        onClick={() => exam && onContinue(exam, isDropper ? false : includeSchool)}
+        className="w-full mt-8 bg-ink text-paper rounded-ticket py-3.5 font-medium disabled:opacity-30 disabled:cursor-not-allowed hover:bg-ink-100 transition-colors shadow-md"
       >
         Continue
       </button>
