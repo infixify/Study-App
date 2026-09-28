@@ -3,6 +3,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import AppHeader from "@/components/dashboard/AppHeader";
+import BottomNav from "@/components/dashboard/BottomNav";
 
 type Scope = "chapter" | "subject" | "full_syllabus";
 type View = "log" | "schedule";
@@ -25,6 +27,9 @@ type TestLogRow = {
   unattempted_count: number;
   marks_scored: number | null;
   max_marks: number | null;
+  physics_marks?: number;
+  chemistry_marks?: number;
+  maths_marks?: number;
   accuracy: number | null;
   test_date: string;
   subject_id: string | null;
@@ -55,16 +60,19 @@ export default function TestsPage() {
   const [error, setError] = useState<string | null>(null);
 
   // --- log-a-test form state ---
-  const [scope, setScope] = useState<Scope>("chapter");
+  const [scope, setScope] = useState<Scope>("full_syllabus");
   const [subjectKey, setSubjectKey] = useState("");
   const [chapterId, setChapterId] = useState("");
   const [testName, setTestName] = useState("");
-  const [totalQuestions, setTotalQuestions] = useState("");
+  const [pMarks, setPMarks] = useState("");
+  const [cMarks, setCMarks] = useState("");
+  const [mMarks, setMMarks] = useState("");
+  const [totalQuestions, setTotalQuestions] = useState("75");
   const [correct, setCorrect] = useState("");
   const [wrong, setWrong] = useState("");
   const [unattempted, setUnattempted] = useState("");
   const [marksScored, setMarksScored] = useState("");
-  const [maxMarks, setMaxMarks] = useState("");
+  const [maxMarks, setMaxMarks] = useState("300");
   const [testDate, setTestDate] = useState(new Date().toISOString().slice(0, 10));
 
   // --- schedule-a-test form state ---
@@ -112,7 +120,7 @@ export default function TestsPage() {
       supabase
         .from("test_logs")
         .select(
-          "id, scope, test_name, total_questions, correct_count, wrong_count, unattempted_count, marks_scored, max_marks, accuracy, test_date, subject_id, chapter_id"
+          "id, scope, test_name, total_questions, correct_count, wrong_count, unattempted_count, marks_scored, max_marks, physics_marks, chemistry_marks, maths_marks, accuracy, test_date, subject_id, chapter_id"
         )
         .eq("user_id", user.id)
         .order("test_date", { ascending: false })
@@ -184,7 +192,6 @@ export default function TestsPage() {
     if (scope === "chapter") loadChapters();
   }, [subjectKey, scope, subjects, isPureDropper]);
 
-  // Same chapter-loading logic, but for the schedule form's independent subject/scope state.
   useEffect(() => {
     async function loadSchedChapters() {
       const subject = subjects.find((s) => s.key === schedSubjectKey);
@@ -223,12 +230,15 @@ export default function TestsPage() {
 
   function resetForm() {
     setTestName("");
-    setTotalQuestions("");
+    setTotalQuestions("75");
     setCorrect("");
     setWrong("");
     setUnattempted("");
     setMarksScored("");
-    setMaxMarks("");
+    setMaxMarks("300");
+    setPMarks("");
+    setCMarks("");
+    setMMarks("");
     setChapterId("");
   }
 
@@ -240,10 +250,9 @@ export default function TestsPage() {
   async function handleSave() {
     setError(null);
 
-    if (!testName.trim()) return setError("Give the test a name.");
-    if (!totalQuestions) return setError("Total questions is required.");
-    if (scope === "chapter" && !chapterId) return setError("Pick a chapter.");
-    if (scope === "subject" && !subjectKey) return setError("Pick a subject.");
+    if (!testName.trim()) return setError("Please enter the test name.");
+    if (scope === "chapter" && !chapterId) return setError("Please pick a chapter.");
+    if (scope === "subject" && !subjectKey) return setError("Please pick a subject.");
 
     setSaving(true);
     const { data: authData } = await supabase.auth.getUser();
@@ -257,6 +266,14 @@ export default function TestsPage() {
     const subject = subjects.find((s) => s.key === subjectKey);
     const representativeSubjectId = subject?.sources[0]?.id ?? null;
 
+    // Calculate marks from subject breakdown if provided
+    const calculatedMarks =
+      pMarks || cMarks || mMarks
+        ? (Number(pMarks) || 0) + (Number(cMarks) || 0) + (Number(mMarks) || 0)
+        : marksScored
+        ? Number(marksScored)
+        : null;
+
     const { error: insertError } = await supabase.from("test_logs").insert({
       user_id: user.id,
       scope,
@@ -264,12 +281,15 @@ export default function TestsPage() {
       subject_id: scope === "chapter" || scope === "subject" ? representativeSubjectId : null,
       test_name: testName.trim(),
       target_exam: targetExam,
-      total_questions: Number(totalQuestions),
+      total_questions: Number(totalQuestions) || 75,
       correct_count: Number(correct) || 0,
       wrong_count: Number(wrong) || 0,
       unattempted_count: Number(unattempted) || 0,
-      marks_scored: marksScored ? Number(marksScored) : null,
-      max_marks: maxMarks ? Number(maxMarks) : null,
+      marks_scored: calculatedMarks,
+      max_marks: maxMarks ? Number(maxMarks) : 300,
+      physics_marks: pMarks ? Number(pMarks) : null,
+      chemistry_marks: cMarks ? Number(cMarks) : null,
+      maths_marks: mMarks ? Number(mMarks) : null,
       test_date: testDate,
     });
 
@@ -338,7 +358,7 @@ export default function TestsPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-paper flex items-center justify-center">
-        <p className="text-ink/60 text-sm">Loading…</p>
+        <p className="text-ink/60 text-sm">Loading test data…</p>
       </div>
     );
   }
@@ -349,57 +369,137 @@ export default function TestsPage() {
   const doneRows = scheduleRows.filter((r) => r.is_done);
 
   function scopeLabel(s: Scope) {
-    return s === "chapter" ? "Chapter test" : s === "subject" ? "Subject test" : "Full syllabus";
+    return s === "chapter" ? "Chapter test" : s === "subject" ? "Subject test" : "Full syllabus mock";
   }
 
-  return (
-    <div className="min-h-screen bg-paper pb-24">
-      <div className="max-w-md mx-auto px-5 pt-8">
-        <h1 className="font-display text-2xl font-semibold mb-1">Tests</h1>
+  // Calculate high-level metrics for the analytics banner
+  const validAccuracies = logs.map((l) => l.accuracy).filter((a): a is number => a != null);
+  const avgAccuracy = validAccuracies.length
+    ? Math.round(validAccuracies.reduce((sum, a) => sum + a, 0) / validAccuracies.length)
+    : 0;
 
-        <div className="flex gap-2 mb-6 mt-3">
+  const validScores = logs.map((l) => l.marks_scored).filter((s): s is number => s != null);
+  const avgScore = validScores.length
+    ? Math.round(validScores.reduce((sum, s) => sum + s, 0) / validScores.length)
+    : 0;
+
+  const chronologicalLogs = [...logs].reverse();
+
+  return (
+    <div className="min-h-screen bg-paper pb-28 font-sans">
+      {/* Sleek AppHeader */}
+      <AppHeader />
+
+      <main className="max-w-md mx-auto px-5 pt-4">
+        {/* Top Header */}
+        <div className="mb-4">
+          <h1 className="text-2xl font-black text-ink">Test Analytics & Tracker</h1>
+          <p className="text-xs text-slate mt-0.5">
+            Log mock scores, track accuracy & visualize your JEE/NEET rank readiness
+          </p>
+        </div>
+
+        {/* 📈 JEETrack-Style Summary & Score Progression Curve */}
+        {logs.length > 0 && (
+          <div className="rounded-ticket border border-ink/10 bg-white p-5 shadow-xs mb-5">
+            <div className="grid grid-cols-3 gap-2 pb-4 border-b border-ink/8 text-center">
+              <div>
+                <p className="text-[10px] font-bold text-slate uppercase tracking-wider">Tests Given</p>
+                <p className="text-xl font-black text-ink mt-0.5">{logs.length}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate uppercase tracking-wider">Avg Score</p>
+                <p className="text-xl font-black text-teal mt-0.5">{avgScore}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate uppercase tracking-wider">Avg Accuracy</p>
+                <p className="text-xl font-black text-emerald-600 mt-0.5">{avgAccuracy}%</p>
+              </div>
+            </div>
+
+            {/* Score Trend Curve */}
+            {chronologicalLogs.length > 1 && (
+              <div className="pt-4">
+                <div className="flex justify-between items-center text-[10px] text-slate font-bold uppercase mb-2">
+                  <span>Score Progression Trend</span>
+                  <span>Latest: {logs[0]?.marks_scored ?? "-"}</span>
+                </div>
+                <div className="flex items-end gap-2 h-24 pt-2">
+                  {chronologicalLogs.slice(-8).map((t, idx) => {
+                    const heightPct = Math.max(12, Math.round(((t.marks_scored || 0) / (t.max_marks || 300)) * 100));
+                    return (
+                      <div key={t.id || idx} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end">
+                        <span className="text-[9px] font-bold text-ink font-mono">{t.marks_scored ?? "-"}</span>
+                        <div className="w-full flex items-end justify-center h-16">
+                          <div
+                            className="w-full max-w-[20px] rounded-t-md bg-gradient-to-t from-teal to-emerald-400 transition-all shadow-xs"
+                            style={{ height: `${heightPct}%` }}
+                            title={`${t.test_name}: ${t.marks_scored}/${t.max_marks}`}
+                          />
+                        </div>
+                        <span className="text-[8.5px] font-semibold text-slate truncate w-full text-center">
+                          {new Date(t.test_date).toLocaleDateString("en-IN", { day: "numeric", month: "narrow" })}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* View Switcher Tabs */}
+        <div className="flex gap-2 mb-5">
           <button
             onClick={() => setView("log")}
-            className={`flex-1 text-xs rounded-full py-2.5 font-medium border ${
-              view === "log" ? "bg-marigold/15 border-marigold text-ink" : "border-ink/12 text-slate"
+            className={`flex-1 text-xs rounded-xl py-2.5 font-bold transition-all border ${
+              view === "log"
+                ? "bg-teal text-white border-teal shadow-xs"
+                : "bg-white text-slate border-ink/10 hover:text-ink"
             }`}
           >
-            Log Scores
+            📊 Log Mock Scores
           </button>
           <button
             onClick={() => setView("schedule")}
-            className={`flex-1 text-xs rounded-full py-2.5 font-medium border ${
-              view === "schedule" ? "bg-marigold/15 border-marigold text-ink" : "border-ink/12 text-slate"
+            className={`flex-1 text-xs rounded-xl py-2.5 font-bold transition-all border ${
+              view === "schedule"
+                ? "bg-teal text-white border-teal shadow-xs"
+                : "bg-white text-slate border-ink/10 hover:text-ink"
             }`}
           >
-            Schedule Tests
+            📅 Schedule Tests
           </button>
         </div>
 
+        {/* ========================================================================= */}
+        {/* VIEW 1: LOG SCORES                                                        */}
+        {/* ========================================================================= */}
         {view === "log" && (
           <>
-            <p className="text-slate text-sm mb-6">
-              Log scores from tests you've already taken — chapter-wise, subject-wise, or full
-              syllabus mocks. This isn't a test engine — just your record, tracked over time.
-            </p>
+            {/* Log Form Card */}
+            <div className="rounded-ticket border border-ink/10 bg-white p-5 mb-6 shadow-xs">
+              <h3 className="text-sm font-bold text-ink mb-3">Record New Test Score</h3>
 
-            <div className="rounded-ticket border border-ink/10 bg-white p-4 mb-8">
-              <p className="text-sm font-medium mb-3">Log a test</p>
-
-              <div className="flex gap-2 mb-3">
-                {(["chapter", "subject", "full_syllabus"] as Scope[]).map((s) => (
+              {/* Scope Selector */}
+              <div className="flex gap-1.5 mb-3.5">
+                {(["full_syllabus", "subject", "chapter"] as Scope[]).map((s) => (
                   <button
                     key={s}
+                    type="button"
                     onClick={() => {
                       setScope(s);
                       setSubjectKey("");
                       setChapterId("");
                     }}
-                    className={`flex-1 text-xs rounded-full py-2 font-medium border ${
-                      scope === s ? "bg-marigold/15 border-marigold text-ink" : "border-ink/12 text-slate"
+                    className={`flex-1 text-[11px] rounded-xl py-2 font-bold transition-all border ${
+                      scope === s
+                        ? "bg-marigold/15 border-marigold text-ink shadow-2xs"
+                        : "border-ink/10 bg-paper/50 text-slate hover:border-ink/25"
                     }`}
                   >
-                    {s === "chapter" ? "Chapter" : s === "subject" ? "Subject" : "Full syllabus"}
+                    {s === "full_syllabus" ? "Full Syllabus" : s === "subject" ? "Subject" : "Chapter"}
                   </button>
                 ))}
               </div>
@@ -408,7 +508,7 @@ export default function TestsPage() {
                 <select
                   value={subjectKey}
                   onChange={(e) => setSubjectKey(e.target.value)}
-                  className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
+                  className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold mb-2.5 bg-white"
                 >
                   <option value="">Select subject…</option>
                   {subjects.map((s) => (
@@ -423,7 +523,7 @@ export default function TestsPage() {
                 <select
                   value={chapterId}
                   onChange={(e) => setChapterId(e.target.value)}
-                  className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
+                  className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold mb-2.5 bg-white"
                 >
                   <option value="">Select chapter…</option>
                   {chapters.map((c) => (
@@ -436,135 +536,208 @@ export default function TestsPage() {
 
               <input
                 type="text"
-                placeholder="Test name (e.g. Allen Weekly Test #6)"
+                placeholder="Test name (e.g. Allen Major Test 04 / FIITJEE AITS)"
                 value={testName}
                 onChange={(e) => setTestName(e.target.value)}
-                className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
+                className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold mb-3 bg-white focus:outline-none focus:border-teal"
               />
 
-              <div className="grid grid-cols-2 gap-2 mb-2">
-                <input
-                  type="number"
-                  placeholder="Total questions"
-                  value={totalQuestions}
-                  onChange={(e) => setTotalQuestions(e.target.value)}
-                  className="rounded-lg border border-ink/15 p-2.5 text-sm"
-                />
+              {/* Subject-Wise Marks Breakdown (For JEE/NEET Mocks) */}
+              <div className="p-3 rounded-xl bg-paper/60 border border-ink/8 mb-3">
+                <p className="text-[11px] font-bold text-ink mb-1.5">Subject Marks (Optional Breakdown)</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <span className="text-[9.5px] font-bold text-slate block mb-0.5">Physics</span>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={pMarks}
+                      onChange={(e) => setPMarks(e.target.value)}
+                      className="w-full text-center text-xs font-bold p-2 rounded-lg border border-ink/15 bg-white focus:outline-none focus:border-teal"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[9.5px] font-bold text-slate block mb-0.5">Chemistry</span>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={cMarks}
+                      onChange={(e) => setCMarks(e.target.value)}
+                      className="w-full text-center text-xs font-bold p-2 rounded-lg border border-ink/15 bg-white focus:outline-none focus:border-teal"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[9.5px] font-bold text-slate block mb-0.5">Maths / Bio</span>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={mMarks}
+                      onChange={(e) => setMMarks(e.target.value)}
+                      className="w-full text-center text-xs font-bold p-2 rounded-lg border border-ink/15 bg-white focus:outline-none focus:border-teal"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Question counts */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate block mb-0.5">Correct (+)</label>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    value={correct}
+                    onChange={(e) => setCorrect(e.target.value)}
+                    className="w-full rounded-xl border border-ink/15 p-2 text-xs font-bold text-emerald-700 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate block mb-0.5">Wrong (-)</label>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    value={wrong}
+                    onChange={(e) => setWrong(e.target.value)}
+                    className="w-full rounded-xl border border-ink/15 p-2 text-xs font-bold text-rose-700 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate block mb-0.5">Skipped</label>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    value={unattempted}
+                    onChange={(e) => setUnattempted(e.target.value)}
+                    className="w-full rounded-xl border border-ink/15 p-2 text-xs font-bold text-slate bg-white"
+                  />
+                </div>
+              </div>
+
+              {/* Overall Score & Date */}
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate block mb-0.5">Total Marks Scored</label>
+                  <input
+                    type="number"
+                    placeholder={
+                      pMarks || cMarks || mMarks
+                        ? String((Number(pMarks) || 0) + (Number(cMarks) || 0) + (Number(mMarks) || 0))
+                        : "e.g. 185"
+                    }
+                    value={marksScored}
+                    onChange={(e) => setMarksScored(e.target.value)}
+                    className="w-full rounded-xl border border-ink/15 p-2 text-xs font-bold bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate block mb-0.5">Max Marks</label>
+                  <input
+                    type="number"
+                    value={maxMarks}
+                    onChange={(e) => setMaxMarks(e.target.value)}
+                    className="w-full rounded-xl border border-ink/15 p-2 text-xs font-bold bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="mb-3">
+                <label className="text-[10px] font-bold text-slate block mb-0.5">Test Date</label>
                 <input
                   type="date"
                   value={testDate}
                   onChange={(e) => setTestDate(e.target.value)}
-                  className="rounded-lg border border-ink/15 p-2.5 text-sm"
+                  className="w-full rounded-xl border border-ink/15 p-2 text-xs font-semibold bg-white"
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-2 mb-2">
-                <input
-                  type="number"
-                  placeholder="Correct"
-                  value={correct}
-                  onChange={(e) => setCorrect(e.target.value)}
-                  className="rounded-lg border border-ink/15 p-2.5 text-sm"
-                />
-                <input
-                  type="number"
-                  placeholder="Wrong"
-                  value={wrong}
-                  onChange={(e) => setWrong(e.target.value)}
-                  className="rounded-lg border border-ink/15 p-2.5 text-sm"
-                />
-                <input
-                  type="number"
-                  placeholder="Skipped"
-                  value={unattempted}
-                  onChange={(e) => setUnattempted(e.target.value)}
-                  className="rounded-lg border border-ink/15 p-2.5 text-sm"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <input
-                  type="number"
-                  placeholder="Marks scored (optional)"
-                  value={marksScored}
-                  onChange={(e) => setMarksScored(e.target.value)}
-                  className="rounded-lg border border-ink/15 p-2.5 text-sm"
-                />
-                <input
-                  type="number"
-                  placeholder="Max marks (optional)"
-                  value={maxMarks}
-                  onChange={(e) => setMaxMarks(e.target.value)}
-                  className="rounded-lg border border-ink/15 p-2.5 text-sm"
-                />
-              </div>
-
-              {error && <p className="text-xs text-coral mb-2">{error}</p>}
+              {error && <p className="text-xs text-rose-600 mb-2 font-medium">{error}</p>}
 
               <button
+                type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="w-full bg-ink text-paper rounded-ticket py-3 text-sm font-medium disabled:opacity-40"
+                className="w-full bg-ink text-paper rounded-2xl py-3.5 text-xs font-bold shadow-md hover:bg-ink-100 disabled:opacity-40 transition-all"
               >
-                {saving ? "Saving…" : "Save score"}
+                {saving ? "Saving…" : "✓ Save Test Score"}
               </button>
             </div>
 
-            <p className="text-sm font-medium mb-3">Your test history</p>
-            {logs.length === 0 && (
-              <p className="text-sm text-slate">No tests logged yet — add your first one above.</p>
-            )}
-            <div className="flex flex-col gap-2.5">
-              {logs.map((log) => (
-                <div key={log.id} className="rounded-ticket border border-ink/10 bg-white p-4">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm font-medium">{log.test_name}</p>
-                      <p className="text-xs text-slate mt-0.5">
-                        {new Date(log.test_date).toLocaleDateString("en-IN", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })}{" "}
-                        · {scopeLabel(log.scope)}
-                      </p>
+            {/* Test History List */}
+            <div className="mb-4">
+              <h3 className="text-sm font-bold text-ink mb-2.5">Your Test History</h3>
+              {logs.length === 0 ? (
+                <p className="text-xs text-slate py-4 text-center">No tests logged yet. Add your first score above!</p>
+              ) : (
+                <div className="flex flex-col gap-2.5">
+                  {logs.map((log) => (
+                    <div
+                      key={log.id}
+                      className="rounded-ticket border border-ink/10 bg-white p-4 shadow-2xs hover:border-ink/20 transition-all"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="text-xs font-bold text-ink">{log.test_name}</p>
+                          <p className="text-[10px] text-slate mt-0.5">
+                            {new Date(log.test_date).toLocaleDateString("en-IN", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })}{" "}
+                            · {scopeLabel(log.scope)}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleDelete(log.id)}
+                          className="text-[10px] font-bold text-rose-500 hover:text-rose-700"
+                        >
+                          Remove
+                        </button>
+                      </div>
+
+                      {/* Marks & Accuracy Pill */}
+                      <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-ink/5">
+                        <div>
+                          {log.marks_scored != null ? (
+                            <span className="text-sm font-black font-mono text-teal">
+                              {log.marks_scored}
+                              <span className="text-[10px] text-slate font-normal">/{log.max_marks || 300}</span>
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate">Score not logged</span>
+                          )}
+                        </div>
+
+                        {log.accuracy != null && (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                            {log.accuracy}% Accuracy
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Detailed stats */}
+                      <div className="flex gap-3 mt-2 text-[10px]">
+                        <span className="text-emerald-600 font-semibold">{log.correct_count} correct</span>
+                        <span className="text-rose-600 font-semibold">{log.wrong_count} wrong</span>
+                        <span className="text-slate">{log.unattempted_count} skipped</span>
+                      </div>
                     </div>
-                    <button onClick={() => handleDelete(log.id)} className="text-xs text-coral">
-                      Remove
-                    </button>
-                  </div>
-
-                  <div className="flex gap-4 mt-3 text-xs">
-                    <span className="text-teal font-medium">{log.correct_count} correct</span>
-                    <span className="text-coral font-medium">{log.wrong_count} wrong</span>
-                    <span className="text-slate">{log.unattempted_count} skipped</span>
-                    {log.accuracy != null && (
-                      <span className="ml-auto font-medium">{log.accuracy}% accuracy</span>
-                    )}
-                  </div>
-
-                  {log.marks_scored != null && log.max_marks != null && (
-                    <p className="text-xs text-slate mt-1">
-                      {log.marks_scored} / {log.max_marks} marks
-                    </p>
-                  )}
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           </>
         )}
 
+        {/* ========================================================================= */}
+        {/* VIEW 2: SCHEDULE TESTS                                                    */}
+        {/* ========================================================================= */}
         {view === "schedule" && (
           <>
-            <p className="text-slate text-sm mb-6">
-              Plan a future test — chapter, subject, or full syllabus — and mark it done once
-              taken. Reminders show up here only (no push notifications).
-            </p>
+            <div className="rounded-ticket border border-ink/10 bg-white p-5 mb-6 shadow-xs">
+              <h3 className="text-sm font-bold text-ink mb-1">Schedule an Upcoming Test</h3>
+              <p className="text-[11px] text-slate mb-3">Plan your mock tests or chapter-wise tests in advance</p>
 
-            <div className="rounded-ticket border border-ink/10 bg-white p-4 mb-8">
-              <p className="text-sm font-medium mb-3">Schedule a test</p>
-
-              <div className="flex gap-2 mb-3">
+              <div className="flex gap-1.5 mb-3">
                 {(["chapter", "subject", "full_syllabus"] as Scope[]).map((s) => (
                   <button
                     key={s}
@@ -573,8 +746,10 @@ export default function TestsPage() {
                       setSchedSubjectKey("");
                       setSchedChapterId("");
                     }}
-                    className={`flex-1 text-xs rounded-full py-2 font-medium border ${
-                      schedScope === s ? "bg-marigold/15 border-marigold text-ink" : "border-ink/12 text-slate"
+                    className={`flex-1 text-[11px] rounded-xl py-2 font-bold transition-all border ${
+                      schedScope === s
+                        ? "bg-marigold/15 border-marigold text-ink"
+                        : "border-ink/10 bg-paper/50 text-slate"
                     }`}
                   >
                     {s === "chapter" ? "Chapter" : s === "subject" ? "Subject" : "Full syllabus"}
@@ -586,7 +761,7 @@ export default function TestsPage() {
                 <select
                   value={schedSubjectKey}
                   onChange={(e) => setSchedSubjectKey(e.target.value)}
-                  className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
+                  className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold mb-2.5 bg-white"
                 >
                   <option value="">Select subject…</option>
                   {subjects.map((s) => (
@@ -601,7 +776,7 @@ export default function TestsPage() {
                 <select
                   value={schedChapterId}
                   onChange={(e) => setSchedChapterId(e.target.value)}
-                  className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
+                  className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold mb-2.5 bg-white"
                 >
                   <option value="">Select chapter…</option>
                   {schedChapters.map((c) => (
@@ -614,27 +789,28 @@ export default function TestsPage() {
 
               <input
                 type="text"
-                placeholder="Title (e.g. Kinematics revision test)"
+                placeholder="Title (e.g. Modern Physics full revision test)"
                 value={schedTitle}
                 onChange={(e) => setSchedTitle(e.target.value)}
-                className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
+                className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold mb-2.5 bg-white focus:outline-none focus:border-teal"
               />
 
               <input
                 type="date"
                 value={schedDate}
                 onChange={(e) => setSchedDate(e.target.value)}
-                className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-3"
+                className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold mb-3 bg-white"
               />
 
-              {schedError && <p className="text-xs text-coral mb-2">{schedError}</p>}
+              {schedError && <p className="text-xs text-rose-600 mb-2">{schedError}</p>}
 
               <button
+                type="button"
                 onClick={handleScheduleSave}
                 disabled={schedSaving}
-                className="w-full bg-ink text-paper rounded-ticket py-3 text-sm font-medium disabled:opacity-40"
+                className="w-full bg-ink text-paper rounded-2xl py-3.5 text-xs font-bold shadow-md hover:bg-ink-100 disabled:opacity-40 transition-all"
               >
-                {schedSaving ? "Saving…" : "Schedule test"}
+                {schedSaving ? "Saving…" : "✓ Schedule Test"}
               </button>
             </div>
 
@@ -645,7 +821,7 @@ export default function TestsPage() {
                 onToggle={toggleScheduleDone}
                 onDelete={deleteScheduleRow}
                 scopeLabel={scopeLabel}
-                accent="text-coral"
+                accent="text-rose-600"
               />
             )}
             <ScheduleGroup
@@ -658,7 +834,7 @@ export default function TestsPage() {
             />
             {doneRows.length > 0 && (
               <ScheduleGroup
-                title="Done"
+                title="Completed"
                 rows={doneRows}
                 onToggle={toggleScheduleDone}
                 onDelete={deleteScheduleRow}
@@ -668,7 +844,10 @@ export default function TestsPage() {
             )}
           </>
         )}
-      </div>
+      </main>
+
+      {/* Persistent Bottom Nav */}
+      <BottomNav />
     </div>
   );
 }
@@ -690,33 +869,42 @@ function ScheduleGroup({
 }) {
   return (
     <div className="mb-6">
-      <p className={`text-sm font-medium mb-3 ${accent}`}>
+      <p className={`text-xs font-bold mb-2.5 uppercase tracking-wider ${accent}`}>
         {title} ({rows.length})
       </p>
-      {rows.length === 0 && <p className="text-sm text-slate">Nothing here.</p>}
-      <div className="flex flex-col gap-2.5">
+      {rows.length === 0 && <p className="text-xs text-slate">Nothing scheduled here.</p>}
+      <div className="flex flex-col gap-2">
         {rows.map((row) => (
-          <div key={row.id} className="rounded-ticket border border-ink/10 bg-white p-4 flex items-center justify-between">
+          <div
+            key={row.id}
+            className="rounded-ticket border border-ink/10 bg-white p-3.5 flex items-center justify-between shadow-2xs"
+          >
             <div>
-              <p className="text-sm font-medium">{row.title}</p>
-              <p className="text-xs text-slate mt-0.5">
+              <p className="text-xs font-bold text-ink">{row.title}</p>
+              <p className="text-[10px] text-slate mt-0.5">
                 {new Date(row.scheduled_date).toLocaleDateString("en-IN", {
                   day: "numeric",
                   month: "short",
-                  year: "numeric",
                 })}{" "}
                 · {scopeLabel(row.scope)}
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               <button
                 onClick={() => onToggle(row)}
-                className={`text-xs font-medium ${row.is_done ? "text-slate" : "text-teal"}`}
+                className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                  row.is_done
+                    ? "bg-ink/5 text-slate"
+                    : "bg-teal/10 text-teal hover:bg-teal/20"
+                }`}
               >
-                {row.is_done ? "Undo" : "Mark done"}
+                {row.is_done ? "Undo" : "Mark Done"}
               </button>
-              <button onClick={() => onDelete(row.id)} className="text-xs text-coral">
-                Remove
+              <button
+                onClick={() => onDelete(row.id)}
+                className="text-[11px] font-bold text-rose-500 hover:text-rose-700"
+              >
+                ✕
               </button>
             </div>
           </div>
