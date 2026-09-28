@@ -48,22 +48,27 @@ export async function POST(req: Request) {
       supabase.from("chapter_progress").select("status").eq("user_id", userId),
     ]);
 
-    const totalStudyMins = (recentLogs ?? []).reduce((acc, l) => acc + (l.study_time_minutes || 0), 0);
-    const theoryMins = (recentLogs ?? []).reduce((acc, l) => acc + (l.theory_minutes || 0), 0);
-    const practiceMins = (recentLogs ?? []).reduce((acc, l) => acc + (l.practice_minutes || 0), 0);
-    const revisionMins = (recentLogs ?? []).reduce((acc, l) => acc + (l.revision_minutes || 0), 0);
-    const avgDailyHours = recentLogs?.length ? (totalStudyMins / recentLogs.length / 60).toFixed(1) : "0";
+    const safeBacklogs = backlogs ?? [];
+    const safeRecentLogs = recentLogs ?? [];
+    const safeTestLogs = testLogs ?? [];
+    const safeChapterProgress = chapterProgress ?? [];
 
-    const doneChapters = (chapterProgress ?? []).filter((c) => c.status === "done").length;
-    const isNewUser = (recentLogs?.length || 0) === 0 && (testLogs?.length || 0) === 0;
+    const totalStudyMins = safeRecentLogs.reduce((acc, l) => acc + (l.study_time_minutes || 0), 0);
+    const theoryMins = safeRecentLogs.reduce((acc, l) => acc + (l.theory_minutes || 0), 0);
+    const practiceMins = safeRecentLogs.reduce((acc, l) => acc + (l.practice_minutes || 0), 0);
+    const revisionMins = safeRecentLogs.reduce((acc, l) => acc + (l.revision_minutes || 0), 0);
+    const avgDailyHours = safeRecentLogs.length ? (totalStudyMins / safeRecentLogs.length / 60).toFixed(1) : "0";
+
+    const doneChapters = safeChapterProgress.filter((c) => c.status === "done").length;
+    const isNewUser = safeRecentLogs.length === 0 && safeTestLogs.length === 0;
 
     // JEETrack Efficiency Metric: Practice to Theory Ratio (Optimal is >= 1.5)
     const ptRatio = theoryMins > 0 ? (practiceMins / theoryMins).toFixed(2) : practiceMins > 0 ? "2.0" : "0.0";
 
     // Latest Test Breakdown
-    const latestTest = testLogs?.[0] || null;
-    const avgAccuracy = testLogs?.length
-      ? Math.round(testLogs.reduce((acc, t) => acc + (t.accuracy || 0), 0) / testLogs.length)
+    const latestTest = safeTestLogs[0] || null;
+    const avgAccuracy = safeTestLogs.length
+      ? Math.round(safeTestLogs.reduce((acc, t) => acc + (t.accuracy || 0), 0) / safeTestLogs.length)
       : null;
 
     let aiReportData: any = null;
@@ -80,9 +85,9 @@ TELEMETRY AUDIT:
 - Average Logged Study: ${avgDailyHours} hours/day
 - Practice to Theory (P:T) Ratio: ${ptRatio} (Standard: 1.5 minimum required)
 - Time Distribution: ${theoryMins}m Theory vs ${practiceMins}m Practice vs ${revisionMins}m Revision
-- Test History: ${testLogs?.length || 0} mock tests logged
+- Test History: ${safeTestLogs.length} mock tests logged
 - Latest Test Score: ${latestTest ? `${latestTest.total_marks}/${latestTest.max_marks} (Acc: ${latestTest.accuracy}%)` : "No test records"}
-- Pending Backlogs: ${backlogs?.length || 0} unresolved (${(backlogs ?? []).map((b) => b.title).join(", ")})
+- Pending Backlogs: ${safeBacklogs.length} unresolved (${safeBacklogs.map((b) => b.title).join(", ")})
 - Syllabus Completion: ${doneChapters} chapters completed
 
 INSTRUCTIONS FOR KOTA MENTOR TONE:
@@ -93,7 +98,7 @@ INSTRUCTIONS FOR KOTA MENTOR TONE:
 
 Return ONLY a valid JSON object matching this schema:
 {
-  "overall_status": "${isNewUser ? "Kickstart Phase" : backlogs?.length ? "Needs Attention" : "On Track"}",
+  "overall_status": "${isNewUser ? "Kickstart Phase" : safeBacklogs.length ? "Needs Attention" : "On Track"}",
   "score_prediction": "Short 1-line benchmark (e.g. 'Projected AIR Potential: Top 1.5% with current pace')",
   "strengths": ["string", "string"],
   "weaknesses": ["string", "string"],
@@ -159,7 +164,7 @@ Return ONLY a valid JSON object matching this schema:
         };
       } else {
         const isLowPractice = Number(ptRatio) < 1.0;
-        const hasBacklogs = (backlogs?.length || 0) > 0;
+        const hasBacklogs = safeBacklogs.length > 0;
 
         aiReportData = {
           overall_status: hasBacklogs ? "Needs Attention" : "On Track",
@@ -170,9 +175,9 @@ Return ONLY a valid JSON object matching this schema:
           ],
           weaknesses: [
             isLowPractice ? `Severe Theory Imbalance (P:T Ratio is ${ptRatio}). You are spending too much time passively watching.` : "Speed per question needs optimization.",
-            hasBacklogs ? `${backlogs.length} pending backlog items accumulating psychological burden.` : "Negative marking control required.",
+            hasBacklogs ? `${safeBacklogs.length} pending backlog items accumulating psychological burden.` : "Negative marking control required.",
           ],
-          diagnostic_summary: `${profile?.name || "Aspirant"}, your study logs reveal that ${isLowPractice ? `your Practice-to-Theory ratio is ${ptRatio}. Top rankers maintain a ratio of 1.5 to 2.0. You must stop over-consuming lectures and start fighting with numericals directly.` : "you are putting in sincere effort."} ${hasBacklogs ? `Your ${backlogs.length} pending backlogs are a compounding liability. Clear them in the 6:30 AM morning slot before starting your regular coaching lectures.` : "Keep your momentum steady and analyze your mock errors."}`,
+          diagnostic_summary: `${profile?.name || "Aspirant"}, your study logs reveal that ${isLowPractice ? `your Practice-to-Theory ratio is ${ptRatio}. Top rankers maintain a ratio of 1.5 to 2.0. You must stop over-consuming lectures and start fighting with numericals directly.` : "you are putting in sincere effort."} ${hasBacklogs ? `Your ${safeBacklogs.length} pending backlogs are a compounding liability. Clear them in the 6:30 AM morning slot before starting your regular coaching lectures.` : "Keep your momentum steady and analyze your mock errors."}`,
           seven_day_plan: [
             { day: "Day 1-2", focus: "Aggressive Backlog Blitz", target: "Clear 2 pending backlog topics in high-priority morning blocks" },
             { day: "Day 3-4", focus: "Timed PYQ Sprints", target: "Solve 50 previous year questions with 2.5 min/question stopwatch limit" },
