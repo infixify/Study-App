@@ -62,10 +62,9 @@ export async function POST(req: Request) {
     const doneChapters = safeChapterProgress.filter((c) => c.status === "done").length;
     const isNewUser = safeRecentLogs.length === 0 && safeTestLogs.length === 0;
 
-    // JEETrack Efficiency Metric: Practice to Theory Ratio (Optimal is >= 1.5)
+    // Practice to Theory Ratio
     const ptRatio = theoryMins > 0 ? (practiceMins / theoryMins).toFixed(2) : practiceMins > 0 ? "2.0" : "0.0";
 
-    // Latest Test Breakdown
     const latestTest = safeTestLogs[0] || null;
     const avgAccuracy = safeTestLogs.length
       ? Math.round(safeTestLogs.reduce((acc, t) => acc + (t.accuracy || 0), 0) / safeTestLogs.length)
@@ -76,25 +75,25 @@ export async function POST(req: Request) {
     if (apiKey) {
       try {
         const prompt = `
-You are the Chief Academic Director at a Top 100 AIR JEE/NEET Coaching Institute in Kota (think Allen/Resonance HOD).
-You are conducting a strict, data-driven academic review for: ${profile?.name || "Aspirant"}.
+You are the Chief Academic Director at a Top 100 AIR JEE/NEET Coaching Institute in Kota.
+Conduct a strict, data-driven academic review for student: ${profile?.name || "Aspirant"}.
 Target Exam: ${profile?.target_exam || "JEE"} ${profile?.target_year || 2027} (${profile?.class_level || "11th/12th"}).
 
 TELEMETRY AUDIT:
 - Account Status: ${isNewUser ? "Brand New (0 logs recorded yet)" : "Active Student"}
 - Average Logged Study: ${avgDailyHours} hours/day
-- Practice to Theory (P:T) Ratio: ${ptRatio} (Standard: 1.5 minimum required)
+- Practice to Theory (P:T) Ratio: ${ptRatio} (Target: 1.5+)
 - Time Distribution: ${theoryMins}m Theory vs ${practiceMins}m Practice vs ${revisionMins}m Revision
 - Test History: ${safeTestLogs.length} mock tests logged
 - Latest Test Score: ${latestTest ? `${latestTest.total_marks}/${latestTest.max_marks} (Acc: ${latestTest.accuracy}%)` : "No test records"}
 - Pending Backlogs: ${safeBacklogs.length} unresolved (${safeBacklogs.map((b) => b.title).join(", ")})
 - Syllabus Completion: ${doneChapters} chapters completed
 
-INSTRUCTIONS FOR KOTA MENTOR TONE:
-1. Speak directly to ${profile?.name || "the student"}. Be sharp, realistic, analytical, and highly motivating.
-2. If new user: Give a rigorous 'Kota Day 1 Protocol' (why 99% of students fail by watching too many lectures and not solving questions, and how to build a 6-hour baseline).
-3. If active user: Analyze their P:T ratio, point out subject weaknesses or backlog compounding risks, and give exact remedial targets.
-4. Provide an exact 7-Day Execution Blueprint with daily hour targets.
+INSTRUCTIONS:
+1. Address ${profile?.name || "the student"} directly. Speak like an elite Kota faculty: honest, analytical, inspiring.
+2. If new user: Provide a strict 'Kota Day 1 Protocol' (why 95% of students fail in theory trap and how to build a 6-hour baseline).
+3. If active user: Dissect their P:T ratio and backlog compounding risks.
+4. Give a daily 7-Day Action Plan with specific targets.
 
 Return ONLY a valid JSON object matching this schema:
 {
@@ -102,7 +101,7 @@ Return ONLY a valid JSON object matching this schema:
   "score_prediction": "Short 1-line benchmark (e.g. 'Projected AIR Potential: Top 1.5% with current pace')",
   "strengths": ["string", "string"],
   "weaknesses": ["string", "string"],
-  "diagnostic_summary": "Comprehensive 2-3 paragraph Kota HOD review dissecting their study efficiency, backlog weight, and strategic recommendations.",
+  "diagnostic_summary": "Comprehensive 2-3 paragraph Kota HOD review.",
   "seven_day_plan": [
     {"day": "Day 1-2", "focus": "string", "target": "string"},
     {"day": "Day 3-4", "focus": "string", "target": "string"},
@@ -114,7 +113,7 @@ Return ONLY a valid JSON object matching this schema:
 `;
 
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -131,11 +130,11 @@ Return ONLY a valid JSON object matching this schema:
           if (rawText) aiReportData = JSON.parse(rawText);
         }
       } catch (e) {
-        console.error("Gemini failed:", e);
+        console.error("Gemini mentor failed, using fallback:", e);
       }
     }
 
-    // JEETrack Kota Fallback Engine (Zero generic text!)
+    // JEETrack Kota Fallback Engine
     if (!aiReportData) {
       if (isNewUser) {
         aiReportData = {
@@ -149,7 +148,7 @@ Return ONLY a valid JSON object matching this schema:
             "No active study logs recorded yet. Consistency must be established immediately.",
             "No diagnostic test on record to gauge subject baseline.",
           ],
-          diagnostic_summary: `Listen carefully, ${profile?.name || "Aspirant"}: The single biggest reason 95% of ${profile?.target_exam || "JEE"} students fail isn't lack of intelligence — it's the 'Passive Video Trap'. They spend 6 hours watching YouTube/coaching lectures and 30 minutes solving questions. In the real exam, no one asks you to explain theory; you must solve numericals in under 2.5 minutes.\n\nFrom today, your non-negotiable rule is the Kota 1:1.5 Rule: For every 60 minutes of lecture you attend, you MUST solve DPPs and PYQs for at least 90 minutes. Turn on your timer in the Study tab and log your first 2-hour problem block today!`,
+          diagnostic_summary: `Listen carefully, ${profile?.name || "Aspirant"}: The single biggest reason 95% of ${profile?.target_exam || "JEE"} students fail isn't lack of intelligence — it's the 'Passive Video Trap'. They spend 6 hours watching coaching lectures and 30 minutes solving questions. In the real exam, you must solve numericals in under 2.5 minutes.\n\nFrom today, your non-negotiable rule is the Kota 1:1.5 Rule: For every 60 minutes of lecture you attend, you MUST solve DPPs and PYQs for at least 90 minutes. Turn on your timer in the Study tab and log your first problem block today!`,
           seven_day_plan: [
             { day: "Day 1-2", focus: "Baseline Setup & Focus Test", target: "Log 4 hours of pure study with 45 numericals solved across Physics & Maths" },
             { day: "Day 3-4", focus: "Self-Solving Discipline", target: "Solve 30 DPP questions strictly without opening hints or video solutions" },
@@ -193,7 +192,7 @@ Return ONLY a valid JSON object matching this schema:
       }
     }
 
-    // Save to cache in DB
+    // Save report in DB
     await supabase.from("ai_mentor_reports").insert({
       user_id: userId,
       overall_status: aiReportData.overall_status,
