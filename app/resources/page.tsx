@@ -1,23 +1,11 @@
 "use client";
 
-import { useEffect, useState, createElement } from "react";
+import { createElement as e, useEffect, useState } from "react";
 import { supabase, classLevelsForContent } from "@/lib/supabase";
 import SubjectTabs from "@/components/library/SubjectTabs";
-import ResourceChapterList, {
-  RESOURCE_TYPES,
-  Resource,
-} from "@/components/resources/ResourceChapterList";
 import BottomNav from "@/components/dashboard/BottomNav";
-
-const e = createElement;
-
-const RESOURCE_COLUMNS = "id, title, url, category, chapter_id, subject_id";
-
-interface ChapterItem {
-  id: string;
-  title: string;
-  classTag: string;
-}
+import ResourceChapterList, { RESOURCE_TYPES } from "@/components/resources/ResourceChapterList";
+import type { ChapterItem, Resource } from "@/components/resources/ResourceChapterList";
 
 interface SubjectItem {
   id: string;
@@ -28,10 +16,10 @@ interface SubjectItem {
 
 export default function ResourcesPage() {
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
-  const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
   const [resources, setResources] = useState<Resource[]>([]);
-  const [activeType, setActiveType] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeType, setActiveType] = useState<string | null>(null);
+  const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,7 +28,7 @@ export default function ResourcesPage() {
       const { data: authData } = await supabase.auth.getUser();
       const user = authData?.user;
       if (!user) {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
         return;
       }
 
@@ -51,20 +39,22 @@ export default function ResourcesPage() {
         .maybeSingle();
 
       if (!profile?.class_level || !profile?.target_exam) {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
         return;
       }
 
       const classLevels = classLevelsForContent(profile.class_level as any);
 
-      const { data: subjectRows } = await supabase
+      const { data: subjectData } = await supabase
         .from("subjects")
         .select("id, name, class_level, display_order")
         .eq("target_exam", profile.target_exam)
         .in("class_level", classLevels)
         .order("display_order", { ascending: true });
 
-      if (!subjectRows || subjectRows.length === 0) {
+      const subjectRows: any[] = subjectData ?? [];
+
+      if (subjectRows.length === 0) {
         if (!cancelled) {
           setSubjects([]);
           setLoading(false);
@@ -72,62 +62,64 @@ export default function ResourcesPage() {
         return;
       }
 
-      const subjectRowIds = subjectRows.map((s) => s.id);
+      const subjectRowIds: string[] = subjectRows.map((s) => s.id);
 
-      const { data: chapterRows } = await supabase
-        .from("chapters")
-        .select("id, subject_id, title, display_order")
-        .in("subject_id", subjectRowIds)
-        .order("display_order", { ascending: true });
+      const [chapterRes, chapterResourceRes, subjectResourceRes] = await Promise.all([
+        supabase
+          .from("chapters")
+          .select("id, subject_id, title, display_order, in_competitive_syllabus")
+          .in("subject_id", subjectRowIds)
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("resources")
+          .select("id, title, url, category, chapter_id, subject_id, display_order, chapters!inner(subject_id)")
+          .in("chapters.subject_id", subjectRowIds)
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("resources")
+          .select("id, title, url, category, chapter_id, subject_id, display_order")
+          .in("subject_id", subjectRowIds)
+          .is("chapter_id", null)
+          .order("display_order", { ascending: true }),
+      ]);
+
+      const chapterRows: any[] = chapterRes.data ?? [];
+      const allResources: Resource[] = [
+        ...((chapterResourceRes.data ?? []) as any[]),
+        ...((subjectResourceRes.data ?? []) as any[]),
+      ].map((r) => ({
+        id: r.id,
+        title: r.title,
+        url: r.url,
+        category: r.category,
+        chapter_id: r.chapter_id ?? null,
+        subject_id: r.subject_id ?? null,
+      }));
 
       const grouped = new Map<string, SubjectItem>();
-
       const sortedSubjectRows = [...subjectRows].sort((a, b) =>
         a.class_level < b.class_level ? -1 : a.class_level > b.class_level ? 1 : 0
       );
 
       for (const s of sortedSubjectRows) {
-        const key = s.name;
-        if (!grouped.has(key)) {
-          grouped.set(key, { id: key, name: s.name, subjectRowIds: [], chapters: [] });
+        if (!grouped.has(s.name)) {
+          grouped.set(s.name, { id: s.name, name: s.name, subjectRowIds: [], chapters: [] });
         }
-        const entry = grouped.get(key)!;
+        const entry = grouped.get(s.name)!;
         entry.subjectRowIds.push(s.id);
-        const chaptersForThisRow = (chapterRows ?? [])
+        const chaptersForRow: ChapterItem[] = chapterRows
           .filter((c) => c.subject_id === s.id)
-          .map((c) => ({
-            id: c.id,
-            title: c.title,
-            classTag: s.class_level,
-          }));
-        entry.chapters.push(...chaptersForThisRow);
+          .filter((c) => {
+            if (s.class_level !== "Dropper") return true;
+            return c.in_competitive_syllabus !== false;
+          })
+          .map((c) => ({ id: c.id, title: c.title, classTag: s.class_level }));
+        entry.chapters.push(...chaptersForRow);
       }
 
-      const finalSubjects = Array.from(grouped.values());
-
-      // Fetch resources once, per subject (keeps each query's id list short),
-      // so the type tiles can show accurate counts before any tap.
-      const perSubject = await Promise.all(
-        finalSubjects.map(async (s) => {
-          const chapterIds = s.chapters.map((c) => c.id);
-          const [chapterRes, bundleRes] = await Promise.all([
-            chapterIds.length > 0
-              ? supabase.from("resources").select(RESOURCE_COLUMNS).in("chapter_id", chapterIds)
-              : Promise.resolve({ data: [] as Resource[] }),
-            supabase
-              .from("resources")
-              .select(RESOURCE_COLUMNS)
-              .in("subject_id", s.subjectRowIds)
-              .is("chapter_id", null),
-          ]);
-          return [...(chapterRes.data ?? []), ...(bundleRes.data ?? [])] as Resource[];
-        })
-      );
-
       if (!cancelled) {
-        setSubjects(finalSubjects);
-        setActiveSubjectId(finalSubjects[0]?.id ?? null);
-        setResources(perSubject.flat());
+        setSubjects(Array.from(grouped.values()));
+        setResources(allResources);
         setLoading(false);
       }
     }
@@ -137,6 +129,23 @@ export default function ResourcesPage() {
       cancelled = true;
     };
   }, []);
+
+  function subjectHasFiles(subj: SubjectItem, category: string): boolean {
+    return resources.some(
+      (r) =>
+        r.category === category &&
+        ((r.chapter_id !== null && subj.chapters.some((c) => c.id === r.chapter_id)) ||
+          (r.chapter_id === null &&
+            r.subject_id !== null &&
+            subj.subjectRowIds.indexOf(r.subject_id) !== -1))
+    );
+  }
+
+  function openType(key: string) {
+    const firstWithFiles = subjects.find((s) => subjectHasFiles(s, key));
+    setActiveSubjectId((firstWithFiles ?? subjects[0]).id);
+    setActiveType(key);
+  }
 
   if (loading) {
     return e(
@@ -153,70 +162,56 @@ export default function ResourcesPage() {
       e(
         "div",
         { className: "max-w-md mx-auto px-5 pt-8" },
-        e("h1", { className: "font-display text-2xl text-ink mb-4" }, "Resources"),
-        e(
-          "p",
-          { className: "text-ink/60 text-sm" },
-          "No subjects found yet for your class/exam. Check back soon."
-        )
+        e("h1", { className: "font-display text-3xl text-ink mb-2" }, "Resources"),
+        e("p", { className: "text-ink/60 text-sm" }, "No subjects found yet for your class/exam. Check back soon.")
       ),
       e(BottomNav)
     );
   }
 
+  const activeTypeDef = RESOURCE_TYPES.find((t) => t.key === activeType);
   const activeSubject = subjects.find((s) => s.id === activeSubjectId) ?? subjects[0];
-  const activeTypeDef = RESOURCE_TYPES.find((t) => t.key === activeType) ?? null;
 
-  function countForType(key: string) {
-    return resources.filter((r) => r.category === key).length;
-  }
+  let body;
 
-  function renderTypeGrid() {
-    return e(
+  if (!activeTypeDef) {
+    body = e(
       "div",
       null,
-      e("h1", { className: "font-display text-2xl text-ink mb-1" }, "Resources"),
+      e("h1", { className: "font-display text-3xl text-ink mb-1" }, "Resources"),
       e("p", { className: "text-slate text-sm mb-6" }, "Pick what you're looking for."),
       e(
         "div",
         { className: "grid grid-cols-3 gap-3" },
         RESOURCE_TYPES.map((t) => {
-          const count = countForType(t.key);
-          const available = count > 0;
+          const has = resources.some((r) => r.category === t.key);
           return e(
             "button",
             {
               key: t.key,
-              onClick: () => setActiveType(t.key),
-              disabled: !available,
-              className: `flex flex-col items-center gap-2 rounded-ticket border p-3 text-center transition-transform ${
-                available
-                  ? "border-ink/10 bg-white active:scale-95"
-                  : "border-ink/5 bg-ink/5 opacity-50"
-              }`,
+              disabled: !has,
+              onClick: () => openType(t.key),
+              className: has
+                ? "bg-white rounded-ticket border border-ink/10 p-3 flex flex-col items-center gap-2 text-center"
+                : "bg-ink/5 rounded-ticket border border-ink/5 p-3 flex flex-col items-center gap-2 text-center opacity-70",
             },
             e(
-              "span",
+              "div",
               {
                 className:
-                  "w-14 h-14 rounded-2xl bg-ink flex items-center justify-center text-2xl",
+                  "w-12 h-12 rounded-2xl flex items-center justify-center text-2xl " +
+                  (has ? "bg-ink" : "bg-ink/40"),
               },
               t.icon
             ),
-            e("span", { className: "text-xs font-medium text-ink leading-tight" }, t.label),
-            e(
-              "span",
-              { className: "text-[10px] text-slate" },
-              available ? `${count} file${count === 1 ? "" : "s"}` : "Coming soon"
-            )
+            e("span", { className: "text-xs font-medium " + (has ? "text-ink" : "text-ink/50") }, t.label),
+            has ? null : e("span", { className: "text-[10px] text-ink/30" }, "Coming soon")
           );
         })
       )
     );
-  }
-
-  function renderTypeView() {
-    return e(
+  } else {
+    body = e(
       "div",
       null,
       e(
@@ -224,36 +219,26 @@ export default function ResourcesPage() {
         { onClick: () => setActiveType(null), className: "text-sm text-slate mb-3" },
         "← All types"
       ),
-      e(
-        "h1",
-        { className: "font-display text-2xl text-ink mb-4" },
-        activeTypeDef ? activeTypeDef.label : ""
-      ),
+      e("h1", { className: "font-display text-3xl text-ink mb-4" }, activeTypeDef.label),
       e(SubjectTabs, {
-        subjects,
+        subjects: subjects,
         activeId: activeSubject.id,
         onChange: setActiveSubjectId,
       }),
-      activeTypeDef
-        ? e(ResourceChapterList, {
-            key: activeSubject.id + activeTypeDef.key,
-            chapters: activeSubject.chapters,
-            subjectRowIds: activeSubject.subjectRowIds,
-            category: activeTypeDef.key,
-            resources,
-          })
-        : null
+      e(ResourceChapterList, {
+        key: activeSubject.id + "-" + activeTypeDef.key,
+        chapters: activeSubject.chapters,
+        subjectRowIds: activeSubject.subjectRowIds,
+        category: activeTypeDef.key,
+        resources: resources,
+      })
     );
   }
 
   return e(
     "div",
     { className: "min-h-screen bg-paper pb-28" },
-    e(
-      "div",
-      { className: "max-w-md mx-auto px-5 pt-8" },
-      activeTypeDef ? renderTypeView() : renderTypeGrid()
-    ),
+    e("div", { className: "max-w-md mx-auto px-5 pt-8" }, body),
     e(BottomNav)
   );
 }
