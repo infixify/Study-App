@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import ResourceUploader from "@/components/admin/ResourceUploader";
 
 type ExamScheduleRow = {
   id: string;
@@ -30,28 +31,6 @@ type Stats = {
   boardsOnly: number;
 };
 
-type SubjectRow = { id: string; name: string; class_level: string; target_exam: string };
-type ChapterRow = { id: string; title: string; subject_id: string };
-
-type ResourceRow = {
-  id: string;
-  title: string;
-  url: string;
-  category: string;
-  resource_type: string;
-  chapter_title: string;
-};
-
-type ResScope = "chapter" | "subject";
-
-const RESOURCE_CATEGORIES = [
-  { key: "full_notes", label: "Notes" },
-  { key: "short_notes", label: "Short Notes" },
-  { key: "formula_sheet", label: "Formula Sheet" },
-  { key: "pyq", label: "PYQ" },
-  { key: "mock_test", label: "Mock Test" },
-];
-
 export default function AdminPage() {
   const [checking, setChecking] = useState(true);
   const [session, setSession] = useState<boolean>(false);
@@ -77,20 +56,6 @@ export default function AdminPage() {
   const [newShiftTime, setNewShiftTime] = useState("");
   const [addingShift, setAddingShift] = useState(false);
 
-  // --- resources upload state ---
-  const [allSubjects, setAllSubjects] = useState<SubjectRow[]>([]);
-  const [resChapters, setResChapters] = useState<ChapterRow[]>([]);
-  const [resScope, setResScope] = useState<ResScope>("chapter");
-  const [resCategory, setResCategory] = useState(RESOURCE_CATEGORIES[0].key);
-  const [resSubjectId, setResSubjectId] = useState("");
-  const [resChapterId, setResChapterId] = useState("");
-  const [resTitle, setResTitle] = useState("");
-  const [resUrl, setResUrl] = useState("");
-  const [resType, setResType] = useState<"pdf" | "micro_video">("pdf");
-  const [resSaving, setResSaving] = useState(false);
-  const [resError, setResError] = useState<string | null>(null);
-  const [recentResources, setRecentResources] = useState<ResourceRow[]>([]);
-
   const checkAccess = useCallback(async () => {
     try {
       const { data: authData } = await supabase.auth.getUser();
@@ -109,7 +74,6 @@ export default function AdminPage() {
       } else if (adminCheck) {
         setIsAdmin(true);
         await loadAdminData();
-        await loadResourceContext();
       }
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Could not verify admin access.");
@@ -241,87 +205,6 @@ export default function AdminPage() {
   async function deleteShift(id: string) {
     await supabase.from("exam_shifts").delete().eq("id", id);
     await loadShifts(selectedScheduleId);
-  }
-
-  // ---------------- Resources upload logic ----------------
-
-  const loadResourceContext = useCallback(async () => {
-    const { data: subjectRows } = await supabase
-      .from("subjects")
-      .select("id, name, class_level, target_exam")
-      .order("class_level", { ascending: true })
-      .order("name", { ascending: true });
-
-    setAllSubjects((subjectRows as SubjectRow[] | null) ?? []);
-    await loadRecentResources();
-  }, []);
-
-  async function loadRecentResources() {
-    const { data } = await supabase
-      .from("resources")
-      .select("id, title, url, category, resource_type, chapter_id, chapters(title)")
-      .neq("category", "ncert")
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    const mapped: ResourceRow[] = (data ?? []).map((r: any) => ({
-      id: r.id,
-      title: r.title,
-      url: r.url,
-      category: r.category,
-      resource_type: r.resource_type,
-      chapter_title: r.chapters?.title ?? "Whole subject",
-    }));
-    setRecentResources(mapped);
-  }
-
-  useEffect(() => {
-    async function loadResChapters() {
-      if (!resSubjectId) {
-        setResChapters([]);
-        return;
-      }
-      const { data } = await supabase
-        .from("chapters")
-        .select("id, title, subject_id")
-        .eq("subject_id", resSubjectId)
-        .order("display_order", { ascending: true });
-      setResChapters((data as ChapterRow[] | null) ?? []);
-    }
-    loadResChapters();
-  }, [resSubjectId]);
-
-  async function handleResourceSave() {
-    setResError(null);
-
-    if (!resSubjectId) return setResError("Pick a subject.");
-    if (resScope === "chapter" && !resChapterId) return setResError("Pick a chapter.");
-    if (!resTitle.trim()) return setResError("Give the resource a title.");
-    if (!resUrl.trim()) return setResError("Paste the resource URL.");
-
-    setResSaving(true);
-    const { error: insertError } = await supabase.from("resources").insert({
-      chapter_id: resScope === "chapter" ? resChapterId : null,
-      subject_id: resScope === "subject" ? resSubjectId : null,
-      category: resCategory,
-      resource_type: resType,
-      title: resTitle.trim(),
-      url: resUrl.trim(),
-    });
-
-    if (insertError) {
-      setResError(insertError.message);
-    } else {
-      setResTitle("");
-      setResUrl("");
-      await loadRecentResources();
-    }
-    setResSaving(false);
-  }
-
-  async function deleteResource(id: string) {
-    await supabase.from("resources").delete().eq("id", id);
-    await loadRecentResources();
   }
 
   // ---------------- Render states ----------------
@@ -553,139 +436,10 @@ export default function AdminPage() {
         <section>
           <h2 className="font-display text-lg font-semibold mb-3">Resources</h2>
           <p className="text-xs text-slate mb-3">
-            Upload Notes, Short Notes, Formula Sheets, PYQs, and Mock Tests here (NCERT links are
-            already seeded and don't need this — this is only for the 5 other categories).
+            Upload Notes, Short Notes, Formula Sheets, PYQs, and Mock Tests directly as files
+            (NCERT links are already seeded and don't need this).
           </p>
-
-          <div className="rounded-ticket border border-ink/10 bg-white p-4 mb-4">
-            <div className="flex gap-2 mb-3">
-              <button
-                onClick={() => {
-                  setResScope("chapter");
-                  setResChapterId("");
-                }}
-                className={`flex-1 text-xs rounded-full py-2 font-medium border ${
-                  resScope === "chapter" ? "bg-marigold/15 border-marigold text-ink" : "border-ink/12 text-slate"
-                }`}
-              >
-                This chapter
-              </button>
-              <button
-                onClick={() => {
-                  setResScope("subject");
-                  setResChapterId("");
-                }}
-                className={`flex-1 text-xs rounded-full py-2 font-medium border ${
-                  resScope === "subject" ? "bg-marigold/15 border-marigold text-ink" : "border-ink/12 text-slate"
-                }`}
-              >
-                Whole subject (combined bundle)
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <select
-                value={resCategory}
-                onChange={(e) => setResCategory(e.target.value)}
-                className="rounded-lg border border-ink/15 p-2.5 text-sm"
-              >
-                {RESOURCE_CATEGORIES.map((c) => (
-                  <option key={c.key} value={c.key}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={resType}
-                onChange={(e) => setResType(e.target.value as "pdf" | "micro_video")}
-                className="rounded-lg border border-ink/15 p-2.5 text-sm"
-              >
-                <option value="pdf">PDF</option>
-                <option value="micro_video">Micro video</option>
-              </select>
-            </div>
-
-            <select
-              value={resSubjectId}
-              onChange={(e) => {
-                setResSubjectId(e.target.value);
-                setResChapterId("");
-              }}
-              className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
-            >
-              <option value="">Select subject…</option>
-              {allSubjects.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} — Class {s.class_level} ({s.target_exam})
-                </option>
-              ))}
-            </select>
-
-            {resScope === "chapter" && resSubjectId && (
-              <select
-                value={resChapterId}
-                onChange={(e) => setResChapterId(e.target.value)}
-                className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
-              >
-                <option value="">Select chapter…</option>
-                {resChapters.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            <input
-              type="text"
-              placeholder="Resource title (e.g. Allen Kinematics Notes)"
-              value={resTitle}
-              onChange={(e) => setResTitle(e.target.value)}
-              className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
-            />
-
-            <input
-              type="text"
-              placeholder="URL (Google Drive link, etc.)"
-              value={resUrl}
-              onChange={(e) => setResUrl(e.target.value)}
-              className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-3"
-            />
-
-            {resError && <p className="text-xs text-coral mb-2">{resError}</p>}
-
-            <button
-              onClick={handleResourceSave}
-              disabled={resSaving}
-              className="w-full bg-ink text-paper rounded-ticket py-3 text-sm font-medium disabled:opacity-40"
-            >
-              {resSaving ? "Saving…" : "Add resource"}
-            </button>
-          </div>
-
-          <p className="text-sm font-medium mb-2">Recently added</p>
-          {recentResources.length === 0 && (
-            <p className="text-sm text-slate">Nothing uploaded yet.</p>
-          )}
-          <div className="flex flex-col gap-2">
-            {recentResources.map((r) => (
-              <div
-                key={r.id}
-                className="rounded-ticket border border-ink/10 bg-white p-3 flex items-center justify-between"
-              >
-                <div>
-                  <p className="text-sm font-medium">{r.title}</p>
-                  <p className="text-xs text-slate mt-0.5">
-                    {r.chapter_title} · {r.category} · {r.resource_type}
-                  </p>
-                </div>
-                <button onClick={() => deleteResource(r.id)} className="text-xs text-coral">
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
+          <ResourceUploader />
         </section>
       </div>
     </div>
@@ -699,4 +453,4 @@ function StatCard({ label, value }: { label: string; value: number }) {
       <p className="text-xs text-slate mt-0.5">{label}</p>
     </div>
   );
-}
+                        }
