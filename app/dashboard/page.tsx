@@ -4,6 +4,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { supabase, classLevelsForContent } from "@/lib/supabase";
+import AppHeader from "@/components/dashboard/AppHeader";
 import GreetingHeader from "@/components/dashboard/GreetingHeader";
 import CountdownCard from "@/components/dashboard/CountdownCard";
 import StudyTimeTracker from "@/components/dashboard/StudyTimeTracker";
@@ -368,7 +369,10 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-paper pb-28">
-      <div className="max-w-md mx-auto px-5 pt-8 flex flex-col gap-4">
+      {/* 🚀 Sleek Header with Hamburger Drawer, Logo & Profile Popup */}
+      <AppHeader />
+
+      <div className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-4">
         <GreetingHeader name={state.name} streak={state.streak} />
 
         {state.targetExam && (
