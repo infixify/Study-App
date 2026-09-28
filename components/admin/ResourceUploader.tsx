@@ -171,7 +171,16 @@ export default function ResourceUploader() {
     const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
     const publicUrl = pub.publicUrl;
 
-    const rows =
+        type NewResource = {
+      chapter_id: string | null;
+      subject_id: string | null;
+      category: string;
+      resource_type: "pdf" | "micro_video";
+      title: string;
+      url: string;
+    };
+
+    const rows: NewResource[] =
       scope === "chapter"
         ? targetChapterIds.map((id) => ({
             chapter_id: id,
@@ -189,7 +198,7 @@ export default function ResourceUploader() {
             title: title.trim(),
             url: publicUrl,
           }));
-
+    
     const { error: insertError } = await supabase.from("resources").insert(rows);
 
     if (insertError) {
