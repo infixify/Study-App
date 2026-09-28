@@ -12,6 +12,7 @@ import TaskWidget from "@/components/dashboard/TaskWidget";
 import TestScoreTrend from "@/components/dashboard/TestScoreTrend";
 import BottomNav from "@/components/dashboard/BottomNav";
 import AiChatSheet from "@/components/dashboard/AiChatSheet";
+import AiMentorCard from "@/components/dashboard/AiMentorCard";
 import { ActivityHeatmap } from "@/components/dashboard/ActivityHeatmap";
 import { BacklogRadar } from "@/components/dashboard/BacklogRadar";
 
@@ -369,11 +370,15 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-paper pb-28">
-      {/* 🚀 Header with Hamburger Drawer & Logo */}
+      {/* 🚀 Sleek Header with Hamburger Drawer & Logo */}
       <AppHeader />
 
       <div className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-4">
+        {/* Student Greeting & Streak */}
         <GreetingHeader name={state.name} streak={state.streak} />
+
+        {/* 🧠 AI Personal Mentor & Diagnostic Card */}
+        {state.userId && <AiMentorCard userId={state.userId} />}
 
         {state.targetExam && (
           <div className="flex items-center justify-between text-xs">
@@ -468,7 +473,7 @@ export default function DashboardPage() {
           <TaskWidget tasks={state.tasks} />
         </div>
 
-        {/* 📊 Syllabus Progress (Redirects to /library) */}
+        {/* 📊 Syllabus Progress */}
         {state.syllabusProgress.totalChapters > 0 && (
           <div className="rounded-ticket border border-ink/10 bg-white p-4">
             <div className="flex items-center justify-between mb-2">
@@ -499,9 +504,10 @@ export default function DashboardPage() {
         {state.userId && <TestScoreTrend userId={state.userId} />}
       </div>
 
+      {/* Floating Doubt Solver Button */}
       <button
         onClick={() => setChatOpen(true)}
-        aria-label="Open AI study mentor"
+        aria-label="Open AI doubt solver"
         className="fixed bottom-24 right-5 w-14 h-14 rounded-full bg-ink text-paper shadow-lg shadow-ink/20 flex items-center justify-center text-xl hover:scale-105 active:scale-95 transition-transform z-30"
       >
         ✨
@@ -509,6 +515,7 @@ export default function DashboardPage() {
 
       <AiChatSheet open={chatOpen} onClose={() => setChatOpen(false)} />
 
+      {/* Persistent Bottom Nav (Home - Resources - Study - Test - Profile) */}
       <BottomNav />
     </div>
   );
