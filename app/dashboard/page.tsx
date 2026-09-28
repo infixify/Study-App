@@ -9,7 +9,7 @@ import GreetingHeader from "@/components/dashboard/GreetingHeader";
 import CountdownCard from "@/components/dashboard/CountdownCard";
 import StudyTimeTracker from "@/components/dashboard/StudyTimeTracker";
 import TaskWidget from "@/components/dashboard/TaskWidget";
-import AnalyticsRadar from "@/components/dashboard/AnalyticsRadar";
+import TestScoreTrend from "@/components/dashboard/TestScoreTrend";
 import BottomNav from "@/components/dashboard/BottomNav";
 import AiChatSheet from "@/components/dashboard/AiChatSheet";
 import { ActivityHeatmap } from "@/components/dashboard/ActivityHeatmap";
@@ -369,7 +369,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-paper pb-28">
-      {/* 🚀 Sleek Header with Hamburger Drawer, Logo & Profile Popup */}
+      {/* 🚀 Header with Hamburger Drawer & Logo */}
       <AppHeader />
 
       <div className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-4">
@@ -444,10 +444,10 @@ export default function DashboardPage() {
           )
         )}
 
-        {/* 🚨 Backlog Radar Widget */}
+        {/* 🚨 Dedicated Backlog Tracker Widget */}
         {state.userId && <BacklogRadar userId={state.userId} />}
 
-        {/* ⏱️ Study Tracker */}
+        {/* ⏱️ Study Hours Tracker (JEETrack 3-color distribution) */}
         <StudyTimeTracker
           studiedMinutes={state.studiedMinutesToday}
           targetMinutes={state.targetMinutesToday}
@@ -495,11 +495,8 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* 🎯 Analytics Radar */}
-        <AnalyticsRadar
-          accuracy={state.accuracy}
-          consistency={state.consistency}
-        />
+        {/* 📊 Test Performance & Score Trend (JEETrack Style) */}
+        {state.userId && <TestScoreTrend userId={state.userId} />}
       </div>
 
       <button
