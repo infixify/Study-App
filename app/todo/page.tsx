@@ -4,13 +4,13 @@ import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import BottomNav from "@/components/dashboard/BottomNav";
 
-type TaskType = "todo" | "backlog";
+type TaskPriority = "high" | "medium" | "low";
 type TaskStatus = "pending" | "completed";
 
 interface Task {
   id: string;
   title: string;
-  task_type: TaskType;
+  priority: TaskPriority;
   status: TaskStatus;
   due_date: string;
 }
@@ -19,14 +19,20 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+const PRIORITY_BADGES: Record<TaskPriority, { label: string; style: string; dot: string }> = {
+  high: { label: "High", style: "bg-rose-50 text-rose-700 border-rose-200", dot: "bg-rose-500" },
+  medium: { label: "Medium", style: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" },
+  low: { label: "Low", style: "bg-blue-50 text-blue-700 border-blue-200", dot: "bg-blue-500" },
+};
+
 export default function TodoPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | TaskType>("all");
+  const [priorityFilter, setPriorityFilter] = useState<"all" | TaskPriority>("all");
   const [showCompleted, setShowCompleted] = useState(false);
 
   const [newTitle, setNewTitle] = useState("");
-  const [newType, setNewType] = useState<TaskType>("todo");
+  const [newPriority, setNewPriority] = useState<TaskPriority>("medium");
   const [newDueDate, setNewDueDate] = useState(todayISO());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +47,7 @@ export default function TodoPage() {
 
     const { data } = await supabase
       .from("tasks")
-      .select("id, title, task_type, status, due_date")
+      .select("id, title, priority, status, due_date")
       .eq("user_id", user.id)
       .order("due_date", { ascending: true });
 
@@ -56,7 +62,7 @@ export default function TodoPage() {
   async function handleAdd() {
     setError(null);
     if (!newTitle.trim()) {
-      setError("Give the task a title.");
+      setError("Please write what you need to do.");
       return;
     }
 
@@ -72,7 +78,7 @@ export default function TodoPage() {
     const { error: insertError } = await supabase.from("tasks").insert({
       user_id: user.id,
       title: newTitle.trim(),
-      task_type: newType,
+      priority: newPriority,
       due_date: newDueDate,
       status: "pending",
     });
@@ -81,7 +87,7 @@ export default function TodoPage() {
       setError(insertError.message);
     } else {
       setNewTitle("");
-      setNewType("todo");
+      setNewPriority("medium");
       setNewDueDate(todayISO());
       await load();
     }
@@ -91,7 +97,6 @@ export default function TodoPage() {
   async function toggleStatus(task: Task) {
     const nextStatus: TaskStatus = task.status === "completed" ? "pending" : "completed";
 
-    // Optimistic update
     setTasks((prev) =>
       prev.map((t) => (t.id === task.id ? { ...t, status: nextStatus } : t))
     );
@@ -110,18 +115,20 @@ export default function TodoPage() {
     await supabase.from("tasks").delete().eq("id", id);
   }
 
-  async function moveToBacklog(id: string) {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, task_type: "backlog" } : t))
-    );
-    await supabase.from("tasks").update({ task_type: "backlog" }).eq("id", id);
-  }
+  // Priority sort order: High (0) -> Medium (1) -> Low (2)
+  const priorityWeights: Record<TaskPriority, number> = { high: 0, medium: 1, low: 2 };
 
-  const filtered = tasks.filter((t) => {
-    if (!showCompleted && t.status === "completed") return false;
-    if (filter === "all") return true;
-    return t.task_type === filter;
-  });
+  const filtered = tasks
+    .filter((t) => {
+      if (!showCompleted && t.status === "completed") return false;
+      if (priorityFilter === "all") return true;
+      return (t.priority ?? "medium") === priorityFilter;
+    })
+    .sort((a, b) => {
+      const pA = priorityWeights[a.priority ?? "medium"];
+      const pB = priorityWeights[b.priority ?? "medium"];
+      return pA - pB;
+    });
 
   const overdue = filtered.filter(
     (t) => t.status === "pending" && t.due_date < todayISO()
@@ -132,50 +139,51 @@ export default function TodoPage() {
   );
 
   function TaskRow({ task }: { task: Task }) {
+    const p = PRIORITY_BADGES[task.priority ?? "medium"];
     return (
-      <div className="bg-white rounded-ticket border border-ink/10 px-4 py-3 flex items-center gap-3">
-        <button
-          onClick={() => toggleStatus(task)}
-          className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-            task.status === "completed" ? "bg-teal border-teal" : "border-ink/25"
-          }`}
-        >
-          {task.status === "completed" && (
-            <span className="text-paper text-[10px]">✓</span>
-          )}
-        </button>
-
-        <div className="flex-1 min-w-0">
-          <p
-            className={`text-sm font-medium truncate ${
-              task.status === "completed" ? "line-through text-ink/40" : "text-ink"
+      <div className="bg-white rounded-ticket border border-ink/10 px-4 py-3 flex items-center justify-between gap-3 shadow-xs">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <button
+            onClick={() => toggleStatus(task)}
+            className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
+              task.status === "completed" ? "bg-teal border-teal" : "border-ink/25 hover:border-teal"
             }`}
           >
-            {task.title}
-          </p>
-          <p className="text-[11px] text-slate mt-0.5">
-            {task.task_type === "backlog" ? "Backlog" : "To-do"} ·{" "}
-            {new Date(task.due_date).toLocaleDateString("en-IN", {
-              day: "numeric",
-              month: "short",
-            })}
-          </p>
-        </div>
-
-        {task.task_type === "todo" && task.status === "pending" && (
-          <button
-            onClick={() => moveToBacklog(task.id)}
-            className="shrink-0 text-[11px] text-slate underline"
-          >
-            To backlog
+            {task.status === "completed" && (
+              <span className="text-paper text-[10px] font-bold">✓</span>
+            )}
           </button>
-        )}
+
+          <div className="min-w-0 flex-1">
+            <p
+              className={`text-sm font-medium truncate ${
+                task.status === "completed" ? "line-through text-ink/40" : "text-ink"
+              }`}
+            >
+              {task.title}
+            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${p.style}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${p.dot}`} />
+                {p.label}
+              </span>
+              <span className="text-[11px] text-slate">
+                {new Date(task.due_date).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                })}
+              </span>
+            </div>
+          </div>
+        </div>
 
         <button
           onClick={() => handleDelete(task.id)}
-          className="shrink-0 text-[11px] text-coral"
+          className="shrink-0 text-xs text-rose-500 hover:text-rose-700 px-2 py-1 rounded"
         >
-          Remove
+          ✕
         </button>
       </div>
     );
@@ -192,70 +200,78 @@ export default function TodoPage() {
   return (
     <div className="min-h-screen bg-paper pb-28">
       <div className="max-w-md mx-auto px-5 pt-8">
-        <h1 className="font-display text-2xl font-semibold mb-4">To-do</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="font-display text-2xl font-bold text-ink">Daily Tasks</h1>
+          <span className="text-xs text-slate font-medium">Prioritized To-Do</span>
+        </div>
 
-        {/* Add task */}
-        <div className="rounded-ticket border border-ink/10 bg-white p-4 mb-6">
+        {/* Add Task Box */}
+        <div className="rounded-ticket border border-ink/10 bg-white p-4 mb-5 shadow-xs">
           <input
             type="text"
-            placeholder="What do you need to do?"
+            placeholder="e.g. Solve 30 Qs in Optics, Revise Chemical Bonding"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
-            className="w-full rounded-lg border border-ink/15 p-2.5 text-sm mb-2"
+            className="w-full rounded-xl border border-ink/15 p-3 text-sm mb-2.5 focus:outline-none focus:border-teal"
           />
           <div className="grid grid-cols-2 gap-2 mb-3">
             <select
-              value={newType}
-              onChange={(e) => setNewType(e.target.value as TaskType)}
-              className="rounded-lg border border-ink/15 p-2.5 text-sm"
+              value={newPriority}
+              onChange={(e) => setNewPriority(e.target.value as TaskPriority)}
+              className="rounded-xl border border-ink/15 p-2.5 text-xs font-semibold bg-white"
             >
-              <option value="todo">To-do</option>
-              <option value="backlog">Backlog</option>
+              <option value="high">🔴 High Priority</option>
+              <option value="medium">🟡 Medium Priority</option>
+              <option value="low">🟢 Low Priority</option>
             </select>
             <input
               type="date"
               value={newDueDate}
               onChange={(e) => setNewDueDate(e.target.value)}
-              className="rounded-lg border border-ink/15 p-2.5 text-sm"
+              className="rounded-xl border border-ink/15 p-2.5 text-xs font-medium bg-white"
             />
           </div>
-          {error && <p className="text-xs text-coral mb-2">{error}</p>}
+          {error && <p className="text-xs text-rose-500 mb-2">{error}</p>}
           <button
             onClick={handleAdd}
             disabled={saving}
-            className="w-full bg-ink text-paper rounded-ticket py-2.5 text-sm font-medium disabled:opacity-40"
+            className="w-full bg-ink text-paper rounded-xl py-2.5 text-xs font-bold shadow-md hover:bg-ink/90 disabled:opacity-40 transition-all"
           >
-            {saving ? "Adding…" : "Add task"}
+            {saving ? "Adding…" : "+ Add Task"}
           </button>
         </div>
 
-        {/* Filters */}
-        <div className="flex gap-2 mb-2">
-          {(["all", "todo", "backlog"] as const).map((f) => (
+        {/* Priority Filter Pills */}
+        <div className="flex gap-1.5 mb-3">
+          {(["all", "high", "medium", "low"] as const).map((p) => (
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`flex-1 text-xs rounded-full py-2 font-medium border ${
-                filter === f ? "bg-marigold/15 border-marigold text-ink" : "border-ink/12 text-slate"
+              key={p}
+              onClick={() => setPriorityFilter(p)}
+              className={`flex-1 text-xs rounded-full py-1.5 font-bold border capitalize transition-all ${
+                priorityFilter === p
+                  ? "bg-teal text-white border-teal shadow-xs"
+                  : "bg-white border-ink/10 text-slate hover:bg-ink/5"
               }`}
             >
-              {f === "all" ? "All" : f === "todo" ? "To-do" : "Backlog"}
+              {p}
             </button>
           ))}
         </div>
-        <label className="flex items-center gap-2 text-xs text-slate mb-5">
+
+        <label className="flex items-center gap-2 text-xs text-slate mb-5 cursor-pointer">
           <input
             type="checkbox"
             checked={showCompleted}
             onChange={(e) => setShowCompleted(e.target.checked)}
+            className="rounded border-ink/20 text-teal focus:ring-teal"
           />
-          Show completed
+          Show completed tasks
         </label>
 
-        {/* Sections */}
+        {/* Overdue Section */}
         {overdue.length > 0 && (
           <div className="mb-5">
-            <p className="text-xs font-semibold text-coral mb-2">Overdue</p>
+            <p className="text-xs font-bold text-rose-600 mb-2">⚠️ Overdue</p>
             <div className="flex flex-col gap-2">
               {overdue.map((t) => (
                 <TaskRow key={t.id} task={t} />
@@ -264,10 +280,13 @@ export default function TodoPage() {
           </div>
         )}
 
+        {/* Today Section */}
         <div className="mb-5">
-          <p className="text-xs font-semibold text-ink/60 mb-2">Today</p>
+          <p className="text-xs font-bold text-ink mb-2">Today's Focus</p>
           {today.length === 0 ? (
-            <p className="text-sm text-slate">Nothing due today.</p>
+            <div className="p-4 bg-white rounded-2xl border border-ink/5 text-center text-xs text-slate">
+              No tasks due today. Add one above!
+            </div>
           ) : (
             <div className="flex flex-col gap-2">
               {today.map((t) => (
@@ -277,21 +296,20 @@ export default function TodoPage() {
           )}
         </div>
 
-        <div>
-          <p className="text-xs font-semibold text-ink/60 mb-2">Upcoming</p>
-          {upcoming.length === 0 ? (
-            <p className="text-sm text-slate">Nothing else scheduled.</p>
-          ) : (
+        {/* Upcoming Section */}
+        {upcoming.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-slate mb-2">Upcoming</p>
             <div className="flex flex-col gap-2">
               {upcoming.map((t) => (
                 <TaskRow key={t.id} task={t} />
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <BottomNav />
     </div>
   );
-}
+        }
