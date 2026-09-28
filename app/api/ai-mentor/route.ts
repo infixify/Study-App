@@ -33,7 +33,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2. FETCH REAL TELEMETRY
+    // 2. FETCH REAL STUDENT TELEMETRY
     const [
       { data: profile },
       { data: recentLogs },
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
       { data: chapterProgress },
     ] = await Promise.all([
       supabase.from("users").select("name, target_exam, target_year, class_level").eq("uid", userId).maybeSingle(),
-      supabase.from("daily_logs").select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes").eq("user_id", userId).limit(14),
+      supabase.from("daily_logs").select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, streak_count").eq("user_id", userId).limit(14),
       supabase.from("test_logs").select("test_name, total_marks, max_marks, accuracy, physics_marks, chemistry_marks, maths_marks, test_date").eq("user_id", userId).order("test_date", { ascending: false }).limit(6),
       supabase.from("tasks").select("title, priority").eq("user_id", userId).eq("task_type", "backlog").neq("status", "completed"),
       supabase.from("chapter_progress").select("status").eq("user_id", userId),
@@ -51,42 +51,58 @@ export async function POST(req: Request) {
     const totalStudyMins = (recentLogs ?? []).reduce((acc, l) => acc + (l.study_time_minutes || 0), 0);
     const theoryMins = (recentLogs ?? []).reduce((acc, l) => acc + (l.theory_minutes || 0), 0);
     const practiceMins = (recentLogs ?? []).reduce((acc, l) => acc + (l.practice_minutes || 0), 0);
+    const revisionMins = (recentLogs ?? []).reduce((acc, l) => acc + (l.revision_minutes || 0), 0);
     const avgDailyHours = recentLogs?.length ? (totalStudyMins / recentLogs.length / 60).toFixed(1) : "0";
 
     const doneChapters = (chapterProgress ?? []).filter((c) => c.status === "done").length;
     const isNewUser = (recentLogs?.length || 0) === 0 && (testLogs?.length || 0) === 0;
+
+    // JEETrack Efficiency Metric: Practice to Theory Ratio (Optimal is >= 1.5)
+    const ptRatio = theoryMins > 0 ? (practiceMins / theoryMins).toFixed(2) : practiceMins > 0 ? "2.0" : "0.0";
+
+    // Latest Test Breakdown
+    const latestTest = testLogs?.[0] || null;
+    const avgAccuracy = testLogs?.length
+      ? Math.round(testLogs.reduce((acc, t) => acc + (t.accuracy || 0), 0) / testLogs.length)
+      : null;
 
     let aiReportData: any = null;
 
     if (apiKey) {
       try {
         const prompt = `
-You are the Head Academic Director & Super-30/Kota Mentor at an elite institute. Mentoring student: ${profile?.name || "Aspirant"}, preparing for ${profile?.target_exam || "JEE"} ${profile?.target_year || 2027}.
+You are the Chief Academic Director at a Top 100 AIR JEE/NEET Coaching Institute in Kota (think Allen/Resonance HOD).
+You are conducting a strict, data-driven academic review for: ${profile?.name || "Aspirant"}.
+Target Exam: ${profile?.target_exam || "JEE"} ${profile?.target_year || 2027} (${profile?.class_level || "11th/12th"}).
 
-Telemetry Data:
-- Is New User / Fresh Profile: ${isNewUser}
-- Total Logged Study Time: ${avgDailyHours} hours/day average
-- Theory to Practice Ratio: ${theoryMins}m theory vs ${practiceMins}m question practice
-- Mock Tests Logged: ${testLogs?.length || 0} tests
-- Latest Mock Result: ${testLogs?.[0] ? `${testLogs[0].total_marks}/${testLogs[0].max_marks} (Acc: ${testLogs[0].accuracy}%)` : "No mocks taken yet"}
-- Unresolved Backlogs: ${backlogs?.length || 0} (${(backlogs ?? []).map((b) => b.title).join(", ")})
-- Syllabus Progress: ${doneChapters} chapters completed
+TELEMETRY AUDIT:
+- Account Status: ${isNewUser ? "Brand New (0 logs recorded yet)" : "Active Student"}
+- Average Logged Study: ${avgDailyHours} hours/day
+- Practice to Theory (P:T) Ratio: ${ptRatio} (Standard: 1.5 minimum required)
+- Time Distribution: ${theoryMins}m Theory vs ${practiceMins}m Practice vs ${revisionMins}m Revision
+- Test History: ${testLogs?.length || 0} mock tests logged
+- Latest Test Score: ${latestTest ? `${latestTest.total_marks}/${latestTest.max_marks} (Acc: ${latestTest.accuracy}%)` : "No test records"}
+- Pending Backlogs: ${backlogs?.length || 0} unresolved (${(backlogs ?? []).map((b) => b.title).join(", ")})
+- Syllabus Completion: ${doneChapters} chapters completed
 
-Task:
-${isNewUser ? "The student just joined and has not logged study sessions or mocks yet. Provide a rigorous, inspiring 'Day 1 Launch Diagnostic' tailored to their target exam and year, explaining the mandatory daily study splits and how to avoid early backlogs." : "Analyze their study split, mock scores, and backlog count with deep personalization."}
+INSTRUCTIONS FOR KOTA MENTOR TONE:
+1. Speak directly to ${profile?.name || "the student"}. Be sharp, realistic, analytical, and highly motivating.
+2. If new user: Give a rigorous 'Kota Day 1 Protocol' (why 99% of students fail by watching too many lectures and not solving questions, and how to build a 6-hour baseline).
+3. If active user: Analyze their P:T ratio, point out subject weaknesses or backlog compounding risks, and give exact remedial targets.
+4. Provide an exact 7-Day Execution Blueprint with daily hour targets.
 
-Return ONLY this JSON schema:
+Return ONLY a valid JSON object matching this schema:
 {
   "overall_status": "${isNewUser ? "Kickstart Phase" : backlogs?.length ? "Needs Attention" : "On Track"}",
-  "score_prediction": "${profile?.target_exam || "JEE"} ${profile?.target_year || 2027} Benchmark: Target 99+ %ile",
+  "score_prediction": "Short 1-line benchmark (e.g. 'Projected AIR Potential: Top 1.5% with current pace')",
   "strengths": ["string", "string"],
   "weaknesses": ["string", "string"],
-  "diagnostic_summary": "Deep paragraph addressing ${profile?.name || "the student"} directly by name, analyzing their exact numbers.",
+  "diagnostic_summary": "Comprehensive 2-3 paragraph Kota HOD review dissecting their study efficiency, backlog weight, and strategic recommendations.",
   "seven_day_plan": [
     {"day": "Day 1-2", "focus": "string", "target": "string"},
     {"day": "Day 3-4", "focus": "string", "target": "string"},
     {"day": "Day 5-6", "focus": "string", "target": "string"},
-    {"day": "Day 7", "focus": "Weekly Revision & Mock", "target": "string"}
+    {"day": "Day 7", "focus": "string", "target": "string"}
   ],
   "action_tips": ["string", "string", "string"]
 }
@@ -114,62 +130,65 @@ Return ONLY this JSON schema:
       }
     }
 
-    // Intelligent Fallback (Tailored for New or Active Students)
+    // JEETrack Kota Fallback Engine (Zero generic text!)
     if (!aiReportData) {
       if (isNewUser) {
         aiReportData = {
           overall_status: "Kickstart Phase",
-          score_prediction: `Targeting ${profile?.target_exam || "JEE"} ${profile?.target_year || 2027}: Path to 99+ %ile`,
+          score_prediction: `Targeting ${profile?.target_exam || "JEE"} ${profile?.target_year || 2027} • Target: 99.2+ Percentile`,
           strengths: [
-            "Early preparation start gives you massive leverage over the competition.",
-            "Fresh dashboard ready for disciplined tracking from Day 1.",
+            "Early onboarding gives you a massive 8-month strategic buffer over competitors.",
+            "Fresh system ready to establish a rigid 1:1.5 Theory-to-Practice routine from Day 1.",
           ],
           weaknesses: [
-            "Zero study hours logged yet — momentum needs to start today.",
-            "No diagnostic mock score recorded yet.",
+            "No active study logs recorded yet. Consistency must be established immediately.",
+            "No diagnostic test on record to gauge subject baseline.",
           ],
-          diagnostic_summary: `Welcome Sarthak! Right now, your dashboard has a clean slate. To reach the top 1% in ${profile?.target_exam || "JEE"} ${profile?.target_year || 2027}, Kota's rule is non-negotiable: for every 1 hour of lecture, you must solve questions for 2 hours. Start by logging your first 60-minute study session in the Study tab and record your chapter test scores!`,
+          diagnostic_summary: `Listen carefully, ${profile?.name || "Aspirant"}: The single biggest reason 95% of ${profile?.target_exam || "JEE"} students fail isn't lack of intelligence — it's the 'Passive Video Trap'. They spend 6 hours watching YouTube/coaching lectures and 30 minutes solving questions. In the real exam, no one asks you to explain theory; you must solve numericals in under 2.5 minutes.\n\nFrom today, your non-negotiable rule is the Kota 1:1.5 Rule: For every 60 minutes of lecture you attend, you MUST solve DPPs and PYQs for at least 90 minutes. Turn on your timer in the Study tab and log your first 2-hour problem block today!`,
           seven_day_plan: [
-            { day: "Day 1-2", focus: "Foundation & Baseline", target: "Log minimum 4 hours of focused study with 40 questions solved" },
-            { day: "Day 3-4", focus: "Active Question Solving", target: "Dedicate 2 hours exclusively to DPPs without touching solution sheets" },
-            { day: "Day 5-6", focus: "Concept Consolidation", target: "Make 1-page formula short notes for your current running chapters" },
-            { day: "Day 7", focus: "Diagnostic Test", target: "Log your first 25-question chapter test in the Test tab" },
+            { day: "Day 1-2", focus: "Baseline Setup & Focus Test", target: "Log 4 hours of pure study with 45 numericals solved across Physics & Maths" },
+            { day: "Day 3-4", focus: "Self-Solving Discipline", target: "Solve 30 DPP questions strictly without opening hints or video solutions" },
+            { day: "Day 5-6", focus: "Backlog Defense & Formulas", target: "Create 1-page condensed formula sheets for current running topics" },
+            { day: "Day 7", focus: "First Diagnostic Mock", target: "Attempt a 1-hour chapter test and log accuracy in the Test tab" },
           ],
           action_tips: [
-            "Use the Study tab stopwatch/timer for every study block to build genuine focus.",
-            "Never let a pending homework DPP slide into a backlog.",
-            "Review your formula sheets every night for 15 minutes before sleeping.",
+            "Never open solution PDFs before attempting a question at least 3 times.",
+            "Condition your brain: Study in 90-minute uninterrupted slots with phone on airplane mode.",
+            "Keep an Error Log: Every silly mistake in mock tests must be written in a physical notebook.",
           ],
         };
       } else {
+        const isLowPractice = Number(ptRatio) < 1.0;
+        const hasBacklogs = (backlogs?.length || 0) > 0;
+
         aiReportData = {
-          overall_status: backlogs?.length ? "Needs Attention" : "On Track",
-          score_prediction: `Projected ${profile?.target_exam || "JEE"}: 94.0 - 96.5 %ile (Needs Question Practice)`,
+          overall_status: hasBacklogs ? "Needs Attention" : "On Track",
+          score_prediction: `Current Projected Trajectory: ~${avgAccuracy ? Math.min(99, Math.max(90, Math.round(avgAccuracy * 1.1))) : 94.5} %ile`,
           strengths: [
-            `Logged ${avgDailyHours} hours of average study across sessions.`,
-            doneChapters > 0 ? `${doneChapters} chapters completed in syllabus.` : "Consistent daily check-ins.",
+            `Demonstrated study habit with ${avgDailyHours}h daily average.`,
+            doneChapters > 0 ? `${doneChapters} chapters completed in target syllabus.` : "Consistent daily tracking check-ins.",
           ],
           weaknesses: [
-            practiceMins < theoryMins ? "More time spent watching theory than solving questions." : "Need higher mock frequency.",
-            backlogs?.length ? `${backlogs.length} pending backlogs waiting to be resolved.` : "Speed per question needs improvement.",
+            isLowPractice ? `Severe Theory Imbalance (P:T Ratio is ${ptRatio}). You are spending too much time passively watching.` : "Speed per question needs optimization.",
+            hasBacklogs ? `${backlogs.length} pending backlog items accumulating psychological burden.` : "Negative marking control required.",
           ],
-          diagnostic_summary: `Sarthak, your daily tracking shows initial consistency, but competitive exams are won by problem-solving volume. Shift your daily allocation to at least 65% practice. Clear pending backlogs in the morning before starting new lectures.`,
+          diagnostic_summary: `${profile?.name || "Aspirant"}, your study logs reveal that ${isLowPractice ? `your Practice-to-Theory ratio is ${ptRatio}. Top rankers maintain a ratio of 1.5 to 2.0. You must stop over-consuming lectures and start fighting with numericals directly.` : "you are putting in sincere effort."} ${hasBacklogs ? `Your ${backlogs.length} pending backlogs are a compounding liability. Clear them in the 6:30 AM morning slot before starting your regular coaching lectures.` : "Keep your momentum steady and analyze your mock errors."}`,
           seven_day_plan: [
-            { day: "Day 1-2", focus: "Clear Pending Backlog", target: "Finish pending DPPs in your Backlog Tracker" },
-            { day: "Day 3-4", focus: "PYQ Drill", target: "Solve 50 previous year questions from high-weightage chapters" },
-            { day: "Day 5-6", focus: "Timed Solving", target: "Solve 30 questions in 60 minutes strictly under a timer" },
-            { day: "Day 7", focus: "Mock Test", target: "Take a full test and log your accuracy" },
+            { day: "Day 1-2", focus: "Aggressive Backlog Blitz", target: "Clear 2 pending backlog topics in high-priority morning blocks" },
+            { day: "Day 3-4", focus: "Timed PYQ Sprints", target: "Solve 50 previous year questions with 2.5 min/question stopwatch limit" },
+            { day: "Day 5-6", focus: "Weak Subject Reinforcement", target: "Target your lowest accuracy subject with 40 direct problem solves" },
+            { day: "Day 7", focus: "Full Proctored Mock Test", target: "Take a full 3-hour test, log marks in Test Hub, and review errors" },
           ],
           action_tips: [
-            "Maintain a strict 1:2 Theory to Practice ratio.",
-            "Mark all unsolved DPP questions directly in your Backlog Tracker.",
-            "Revise error notebook questions weekly.",
+            "Maintain a strict 1:1.5 Theory-to-Practice ratio every single day.",
+            "Clear backlogs in the morning; never let them spill into the next week.",
+            "Review your formula sheets every night for 15 minutes before sleeping.",
           ],
         };
       }
     }
 
-    // Save to cache
+    // Save to cache in DB
     await supabase.from("ai_mentor_reports").insert({
       user_id: userId,
       overall_status: aiReportData.overall_status,
