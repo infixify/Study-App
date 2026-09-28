@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 interface Task {
   id: string;
   title: string;
-  type: "todo" | "backlog";
+  priority?: "high" | "medium" | "low";
   done: boolean;
 }
 
@@ -15,63 +16,49 @@ interface TaskWidgetProps {
 
 export default function TaskWidget({ tasks: initialTasks }: TaskWidgetProps) {
   const [tasks, setTasks] = useState(initialTasks);
-  const [tab, setTab] = useState<"todo" | "backlog">("todo");
 
   function toggle(id: string) {
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
   }
 
-  const filtered = tasks.filter((t) => t.type === tab);
-  const backlogCount = tasks.filter((t) => t.type === "backlog" && !t.done).length;
+  const priorityDot: Record<string, string> = {
+    high: "bg-rose-500",
+    medium: "bg-amber-500",
+    low: "bg-blue-500",
+  };
 
   return (
-    <div className="mt-4 rounded-ticket border border-ink/10 bg-white p-5">
-      <div className="flex gap-4 border-b border-ink/8">
-        <button
-          onClick={() => setTab("todo")}
-          className={`pb-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            tab === "todo" ? "border-marigold text-ink" : "border-transparent text-slate"
-          }`}
-        >
-          Today
-        </button>
-        <button
-          onClick={() => setTab("backlog")}
-          className={`pb-2.5 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
-            tab === "backlog" ? "border-coral text-ink" : "border-transparent text-slate"
-          }`}
-        >
-          Backlog
-          {backlogCount > 0 && (
-            <span className="text-[10px] bg-coral/15 text-coral rounded-full px-1.5 py-0.5 font-semibold">
-              {backlogCount}
-            </span>
-          )}
-        </button>
-      </div>
-
-      <ul className="mt-3 flex flex-col gap-2.5">
-        {filtered.length === 0 && (
-          <li className="text-sm text-slate py-4 text-center">
-            Nothing here — you're caught up.
+    <div className="rounded-ticket border border-ink/10 bg-white p-4">
+      <ul className="flex flex-col gap-2">
+        {tasks.length === 0 && (
+          <li className="text-xs text-slate py-4 text-center">
+            No pending tasks. You are all caught up!
           </li>
         )}
-        {filtered.map((task) => (
-          <li key={task.id} className="flex items-start gap-3">
-            <button
-              onClick={() => toggle(task.id)}
-              aria-label={task.done ? "Mark incomplete" : "Mark complete"}
-              className={`mt-0.5 w-5 h-5 rounded-full border-2 flex-shrink-0 transition-colors ${
-                task.done ? "bg-teal border-teal" : "border-ink/20"
-              }`}
-            />
-            <span
-              className={`text-sm leading-snug ${
-                task.done ? "line-through text-slate" : "text-ink"
-              }`}
-            >
-              {task.title}
-            </span>
+        {tasks.map((task) => (
+          <li key={task.id} className="flex items-center justify-between gap-3 p-1.5 rounded-lg hover:bg-ink/5 transition-all">
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <button
+                onClick={() => toggle(task.id)}
+                aria-label={task.done ? "Mark incomplete" : "Mark complete"}
+                className={`w-4 h-4 rounded-full border-2 shrink-0 transition-colors ${
+                  task.done ? "bg-teal border-teal" : "border-ink/20"
+                }`}
+              />
+              <span
+                className={`text-xs truncate ${
+                  task.done ? "line-through text-slate" : "text-ink font-medium"
+                }`}
+              >
+                {task.title}
+              </span>
+            </div>
+            {task.priority && (
+              <span
+                title={`${task.priority} priority`}
+                className={`w-2 h-2 rounded-full shrink-0 ${priorityDot[task.priority] || "bg-amber-500"}`}
+              />
+            )}
           </li>
         ))}
       </ul>
