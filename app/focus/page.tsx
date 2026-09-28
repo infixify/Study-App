@@ -1,192 +1,253 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createElement as e, useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import BottomNav from "@/components/dashboard/BottomNav";
-import {
-  loadAndReconcileStreak,
-  saveFocusSession,
-  MIN_STREAK_SECONDS,
-} from "@/lib/focus";
-
-function formatTime(totalSeconds: number) {
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
-}
-
-type ModalState =
-  | { type: "none" }
-  | { type: "streak_reset_on_load" }
-  | { type: "session_too_short"; seconds: number }
-  | { type: "session_saved"; streak: number };
 
 export default function FocusPage() {
+  const [seconds, setSeconds] = useState(0);
+  const [isActive, setIsActive] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [savedDuration, setSavedDuration] = useState(0);
 
-  const [isRunning, setIsRunning] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const startedAtRef = useRef<Date | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Question log form state
+  const [qCount, setQCount] = useState<number>(0);
+  const [selectedSub, setSelectedSub] = useState<string>("General");
+  const [saving, setSaving] = useState(false);
 
-  const [currentStreak, setCurrentStreak] = useState(0);
-  const [longestStreak, setLongestStreak] = useState(0);
-  const [modal, setModal] = useState<ModalState>({ type: "none" });
+  const timerRef = useRef<any>(null);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function init() {
-      const { data: authData } = await supabase.auth.getUser();
-      const user = authData?.user;
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-      if (!cancelled) setUserId(user.id);
-
-      const streakInfo = await loadAndReconcileStreak(user.id);
-      if (cancelled) return;
-
-      setCurrentStreak(streakInfo.currentStreak);
-      setLongestStreak(streakInfo.longestStreak);
-      if (streakInfo.streakWasReset) {
-        setModal({ type: "streak_reset_on_load" });
-      }
-      setLoading(false);
-    }
-
-    init();
-    return () => {
-      cancelled = true;
-    };
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user) setUserId(data.user.id);
+    });
   }, []);
 
   useEffect(() => {
-    if (isRunning) {
-      intervalRef.current = setInterval(() => {
-        setElapsedSeconds((prev) => prev + 1);
+    if (isActive) {
+      timerRef.current = setInterval(() => {
+        setSeconds((prev) => prev + 1);
       }, 1000);
-    } else if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [isRunning]);
-
-  function handleStart() {
-    startedAtRef.current = new Date();
-    setElapsedSeconds(0);
-    setIsRunning(true);
-  }
-
-  async function handleStop() {
-    setIsRunning(false);
-    const startedAt = startedAtRef.current;
-    if (!startedAt || !userId) return;
-
-    const endedAt = new Date();
-    const result = await saveFocusSession(userId, startedAt, endedAt);
-
-    if (!result.countedForStreak) {
-      setModal({ type: "session_too_short", seconds: elapsedSeconds });
     } else {
-      setCurrentStreak(result.newStreak);
-      setLongestStreak(result.newLongest);
-      setModal({ type: "session_saved", streak: result.newStreak });
+      clearInterval(timerRef.current);
     }
+    return () => clearInterval(timerRef.current);
+  }, [isActive]);
 
-    startedAtRef.current = null;
-    setElapsedSeconds(0);
-  }
+  const formatTime = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    const h = Math.floor(m / 60);
+    const remM = m % 60;
+    if (h > 0) {
+      return (
+        (h < 10 ? "0" + h : h) +
+        ":" +
+        (remM < 10 ? "0" + remM : remM) +
+        ":" +
+        (s < 10 ? "0" + s : s)
+      );
+    }
+    return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s);
+  };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-paper flex items-center justify-center">
-        <p className="text-ink/60 text-sm">Loading Focus Mode…</p>
-      </div>
-    );
-  }
+  const handleStopSession = () => {
+    if (seconds >= 30) {
+      setIsActive(false);
+      setSavedDuration(seconds);
+      setShowModal(true);
+    } else {
+      setIsActive(false);
+      setSeconds(0);
+    }
+  };
 
-  return (
-    <div className="min-h-screen bg-paper pb-28">
-      <div className="max-w-md mx-auto px-5 pt-8 flex flex-col items-center">
-        <h1 className="font-display text-2xl text-ink mb-1 self-start">Focus Mode</h1>
-        <p className="text-ink/60 text-sm mb-8 self-start">
-          🔥 {currentStreak} day streak · Best: {longestStreak}
-        </p>
+  const handleFinishAndSave = async (onlyTheory: boolean) => {
+    setSaving(true);
+    try {
+      if (userId && savedDuration >= 120) {
+        // 1. Save focus session
+        await supabase.from("focus_sessions").insert({
+          user_id: userId,
+          duration_seconds: savedDuration,
+          started_at: new Date(Date.now() - savedDuration * 1000).toISOString(),
+          ended_at: new Date().toISOString(),
+          counts_for_streak: true,
+        });
 
-        <div className="w-full flex flex-col items-center bg-white rounded-ticket border border-ink/10 py-12 px-6">
-          <span className="font-display text-5xl text-ink tabular-nums mb-8">
-            {formatTime(elapsedSeconds)}
-          </span>
+        // 2. Save question logs if questions were entered
+        if (!onlyTheory && qCount > 0) {
+          await supabase.from("question_logs").insert({
+            user_id: userId,
+            question_count: qCount,
+            log_date: new Date().toISOString().split("T")[0],
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Save session error:", err);
+    } finally {
+      setSaving(false);
+      setShowModal(false);
+      setSeconds(0);
+      setQCount(0);
+    }
+  };
 
-          {!isRunning ? (
-            <button
-              onClick={handleStart}
-              className="w-full py-3 rounded-ticket bg-coral text-white font-semibold text-sm"
-            >
-              Start Session
-            </button>
-          ) : (
-            <button
-              onClick={handleStop}
-              className="w-full py-3 rounded-ticket bg-ink text-white font-semibold text-sm"
-            >
-              Stop Session
-            </button>
-          )}
+  return e(
+    "div",
+    { className: "min-h-screen bg-paper flex flex-col items-center justify-between p-6 pb-24 font-sans" },
+    
+    // Header
+    e(
+      "div",
+      { className: "w-full max-w-sm flex items-center justify-between pt-4" },
+      e(
+        "div",
+        null,
+        e("h1", { className: "text-xl font-black text-ink" }, "Focus Mode"),
+        e("p", { className: "text-xs text-slate" }, "Deep study stopwatch & practice tracker")
+      ),
+      e("a", { href: "/dashboard", className: "text-xs font-bold text-teal px-3 py-1.5 rounded-xl bg-teal/10" }, "Dashboard")
+    ),
 
-          <p className="text-ink/40 text-xs mt-4 text-center">
-            Study at least {Math.floor(MIN_STREAK_SECONDS / 60)} minutes to count toward your streak.
-          </p>
-        </div>
-      </div>
+    // Timer Circle
+    e(
+      "div",
+      { className: "flex flex-col items-center justify-center my-auto" },
+      e(
+        "div",
+        {
+          className:
+            "w-64 h-64 rounded-full border-4 flex flex-col items-center justify-center bg-white shadow-xl transition-all " +
+            (isActive ? "border-teal shadow-teal/10 animate-pulse" : "border-ink/10"),
+        },
+        e("span", { className: "text-5xl font-black tracking-tight text-ink font-mono" }, formatTime(seconds)),
+        e("span", { className: "text-xs font-semibold text-slate mt-2 uppercase tracking-widest" }, isActive ? "Studying Now" : "Paused")
+      )
+    ),
 
-      <BottomNav />
+    // Controls
+    e(
+      "div",
+      { className: "w-full max-w-sm flex flex-col gap-3" },
+      !isActive
+        ? e(
+            "button",
+            {
+              type: "button",
+              onClick: () => setIsActive(true),
+              className: "w-full py-4 rounded-2xl bg-teal text-white font-bold text-base shadow-lg shadow-teal/20 hover:bg-teal/90 transition-all",
+            },
+            seconds === 0 ? "🚀 Start Studying" : "▶ Resume Session"
+          )
+        : e(
+            "button",
+            {
+              type: "button",
+              onClick: handleStopSession,
+              className: "w-full py-4 rounded-2xl bg-rose-500 text-white font-bold text-base shadow-lg shadow-rose-500/20 hover:bg-rose-600 transition-all",
+            },
+            "⏹ End Session & Log Questions"
+          ),
+      seconds > 0 && !isActive
+        ? e(
+            "button",
+            {
+              type: "button",
+              onClick: () => setSeconds(0),
+              className: "w-full py-2.5 rounded-xl text-xs font-bold text-slate hover:bg-ink/5 transition-all text-center",
+            },
+            "Reset Timer"
+          )
+        : null
+    ),
 
-      {modal.type !== "none" && (
-        <div className="fixed inset-0 bg-ink/40 flex items-end sm:items-center justify-center z-50 px-5 pb-8 sm:pb-0">
-          <div className="bg-white rounded-ticket p-6 w-full max-w-sm">
-            {modal.type === "streak_reset_on_load" && (
-              <>
-                <h2 className="font-display text-lg text-ink mb-2">Streak reset 😔</h2>
-                <p className="text-ink/60 text-sm mb-5">
-                  You missed a day, so your streak is back to 0. Start a session now to begin a new one.
-                </p>
-              </>
-            )}
-            {modal.type === "session_too_short" && (
-              <>
-                <h2 className="font-display text-lg text-ink mb-2">Too short to count</h2>
-                <p className="text-ink/60 text-sm mb-5">
-                  That session was {formatTime(modal.seconds)} — sessions need to be at
-                  least {Math.floor(MIN_STREAK_SECONDS / 60)} minutes to count toward your streak. It's still fine, just try a longer one next time.
-                </p>
-              </>
-            )}
-            {modal.type === "session_saved" && (
-              <>
-                <h2 className="font-display text-lg text-ink mb-2">Nice work! 🔥</h2>
-                <p className="text-ink/60 text-sm mb-5">
-                  Session saved. Your streak is now {modal.streak} day{modal.streak === 1 ? "" : "s"}.
-                </p>
-              </>
-            )}
-            <button
-              onClick={() => setModal({ type: "none" })}
-              className="w-full py-3 rounded-ticket bg-ink text-white font-semibold text-sm"
-            >
-              Got it
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+    // Question Log Modal (Popup)
+    showModal
+      ? e(
+          "div",
+          { className: "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" },
+          e(
+            "div",
+            { className: "w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl flex flex-col gap-5 border border-ink/10" },
+            
+            e(
+              "div",
+              { className: "text-center" },
+              e("div", { className: "w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 text-2xl font-bold flex items-center justify-center mx-auto mb-2" }, "🎯"),
+              e("h3", { className: "text-lg font-black text-ink" }, "Session Complete!"),
+              e("p", { className: "text-xs text-slate mt-0.5" }, "You studied for " + Math.round(savedDuration / 60) + " minutes. Log your practice?")
+            ),
+
+            // Question counter inputs
+            e(
+              "div",
+              { className: "flex flex-col gap-3 bg-paper p-4 rounded-2xl border border-ink/5" },
+              e("label", { className: "text-xs font-bold text-ink" }, "How many questions did you solve?"),
+              e(
+                "div",
+                { className: "flex items-center gap-3" },
+                e("input", {
+                  type: "number",
+                  min: 0,
+                  value: qCount === 0 ? "" : qCount,
+                  placeholder: "0",
+                  onChange: (ev) => setQCount(parseInt(ev.target.value) || 0),
+                  className: "w-24 text-center text-xl font-bold p-3 rounded-xl border border-ink/15 bg-white focus:outline-none focus:border-teal",
+                }),
+                e(
+                  "div",
+                  { className: "flex items-center gap-1.5 flex-1" },
+                  [10, 25, 50].map((inc) =>
+                    e(
+                      "button",
+                      {
+                        key: inc,
+                        type: "button",
+                        onClick: () => setQCount((prev) => prev + inc),
+                        className: "flex-1 py-3 text-xs font-bold rounded-xl bg-white border border-ink/10 text-ink hover:bg-teal hover:text-white transition-all",
+                      },
+                      "+" + inc
+                    )
+                  )
+                )
+              )
+            ),
+
+            // Primary actions
+            e(
+              "div",
+              { className: "flex flex-col gap-2 pt-2" },
+              
+              // 1. Submit with questions
+              qCount > 0
+                ? e(
+                    "button",
+                    {
+                      type: "button",
+                      disabled: saving,
+                      onClick: () => handleFinishAndSave(false),
+                      className: "w-full py-4 rounded-xl bg-teal text-white font-bold text-sm shadow-lg shadow-teal/20 hover:bg-teal/90 transition-all",
+                    },
+                    saving ? "Saving..." : "✓ Save " + qCount + " Questions & Focus Time"
+                  )
+                : null,
+
+              // 2. Clear Option: No Questions Solved (Theory/Lecture only)
+              e(
+                "button",
+                {
+                  type: "button",
+                  disabled: saving,
+                  onClick: () => handleFinishAndSave(true),
+                  className: "w-full py-3.5 rounded-xl bg-ink/5 hover:bg-ink/10 text-ink font-bold text-xs transition-all text-center",
+                },
+                "📖 No questions solved in this session (Only Theory / Lecture)"
+              )
+            )
+          )
+        )
+      : null
   );
-            }
+           }
