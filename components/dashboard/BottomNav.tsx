@@ -1,4 +1,3 @@
-// components/dashboard/BottomNav.tsx
 "use client";
 
 import Link from "next/link";
@@ -8,12 +7,11 @@ export default function BottomNav() {
   const pathname = usePathname();
 
   const navItems = [
-    { label: "Home", href: "/dashboard", icon: "⚡" },
-    { label: "Syllabus", href: "/library", icon: "📚" },
+    { label: "Home", href: "/dashboard", icon: "🏠" },
+    { label: "Resources", href: "/resources", icon: "📖" },
     { label: "Study", href: "/focus", icon: "⏱️" },
-    { label: "Tasks", href: "/todo", icon: "✓" },
-    { label: "Tests", href: "/tests", icon: "📊" },
-    { label: "Notes", href: "/resources", icon: "📖" },
+    { label: "Test", href: "/tests", icon: "📊" },
+    { label: "Profile", href: "/profile", icon: "👤" },
   ];
 
   return (
@@ -25,14 +23,18 @@ export default function BottomNav() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex flex-col items-center justify-center min-w-[48px] py-1 px-1.5 rounded-xl transition-all ${
+              className={`flex flex-col items-center justify-center min-w-[56px] py-1 px-1 rounded-xl transition-all ${
                 isActive
                   ? "text-teal font-bold scale-105"
                   : "text-slate hover:text-ink font-medium"
               }`}
             >
-              <span className="text-lg leading-none mb-1">{item.icon}</span>
-              <span className={`text-[10px] leading-tight ${isActive ? "text-teal font-extrabold" : "text-slate"}`}>
+              <span className="text-xl leading-none mb-1">{item.icon}</span>
+              <span
+                className={`text-[10px] leading-tight ${
+                  isActive ? "text-teal font-black" : "text-slate font-semibold"
+                }`}
+              >
                 {item.label}
               </span>
             </Link>
