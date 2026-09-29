@@ -59,7 +59,12 @@ export default function DashboardPage() {
   const [todayQuestions, setTodayQuestions] = useState(0);
   const [totalQuestionsAllTime, setTotalQuestionsAllTime] = useState(0);
   const [streak, setStreak] = useState(0);
-  const [backlogCount, setBacklogCount] = useState(0);
+
+  // Backlogs
+  const [backlogsList, setBacklogsList] = useState<TaskItem[]>([]);
+  const [showAddBacklog, setShowAddBacklog] = useState(false);
+  const [newBacklogTitle, setNewBacklogTitle] = useState("");
+  const [addingBacklog, setAddingBacklog] = useState(false);
 
   // Study Distribution (Theory vs Practice vs Revision)
   const [splitRatio, setSplitRatio] = useState({
@@ -117,7 +122,6 @@ export default function DashboardPage() {
       if (schedules && schedules.length > 0) {
         setExamSchedules(schedules);
 
-        // Fetch shifts for these exams
         const scheduleIds = schedules.map((s) => s.id);
         const { data: shifts } = await supabase
           .from("exam_shifts")
@@ -134,7 +138,6 @@ export default function DashboardPage() {
           setShiftsMap(sMap);
         }
       } else {
-        // Fallback dynamic schedules if not present in DB
         const fallbackList: ExamScheduleItem[] = [];
         if (targetExam === "JEE") {
           fallbackList.push({
@@ -235,24 +238,19 @@ export default function DashboardPage() {
       setHeatGrid(grid);
 
       // 5. Backlogs & Action Tasks
-      const [{ data: chBacklogs }, { data: userTasks }] = await Promise.all([
-        supabase
-          .from("chapter_progress")
-          .select("id")
-          .eq("user_id", session.user.id)
-          .eq("is_backlog", true),
-        supabase
-          .from("tasks")
-          .select("id, title, priority, status, task_type")
-          .eq("user_id", session.user.id)
-          .neq("status", "completed")
-          .order("created_at", { ascending: false })
-          .limit(4),
-      ]);
+      const { data: userTasks } = await supabase
+        .from("tasks")
+        .select("id, title, priority, status, task_type")
+        .eq("user_id", session.user.id)
+        .neq("status", "completed")
+        .order("created_at", { ascending: false });
 
-      const pendingBacklogTasks = (userTasks || []).filter((t) => t.task_type === "backlog").length;
-      setBacklogCount((chBacklogs?.length || 0) + pendingBacklogTasks);
-      setTodayTasks(userTasks || []);
+      if (userTasks) {
+        const bl = userTasks.filter((t) => t.task_type === "backlog");
+        const regularTasks = userTasks.filter((t) => t.task_type !== "backlog");
+        setBacklogsList(bl);
+        setTodayTasks(regularTasks.slice(0, 4));
+      }
 
       // 6. Recent Mock Tests
       const { data: testData } = await supabase
@@ -301,6 +299,42 @@ export default function DashboardPage() {
     await supabase.from("tasks").update({ status: "completed" }).eq("id", taskId);
   };
 
+  // JEETrack-Style Add Backlog directly from dashboard
+  const handleAddBacklog = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBacklogTitle.trim() || !user || addingBacklog) return;
+
+    setAddingBacklog(true);
+    try {
+      const { data, error } = await supabase
+        .from("tasks")
+        .insert({
+          user_id: user.id,
+          title: newBacklogTitle.trim(),
+          task_type: "backlog",
+          priority: "high",
+          status: "pending",
+        })
+        .select()
+        .single();
+
+      if (!error && data) {
+        setBacklogsList((prev) => [data, ...prev]);
+        setNewBacklogTitle("");
+        setShowAddBacklog(false);
+      }
+    } catch (err) {
+      console.error("Failed to add backlog:", err);
+    } finally {
+      setAddingBacklog(false);
+    }
+  };
+
+  const handleCompleteBacklog = async (id: string) => {
+    setBacklogsList((prev) => prev.filter((b) => b.id !== id));
+    await supabase.from("tasks").update({ status: "completed" }).eq("id", id);
+  };
+
   const calculateDaysLeft = (targetDate: string) => {
     const diff = new Date(targetDate).getTime() - new Date().getTime();
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
@@ -314,7 +348,6 @@ export default function DashboardPage() {
     );
   }
 
-  const studentName = profile?.name || "Aspirant";
   const targetExam = profile?.target_exam || "JEE";
   const todayHours = (todayFocusMins / 60).toFixed(1);
 
@@ -326,12 +359,12 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] pb-28 text-slate-900 font-sans">
-      {/* 1. ORIGINAL GLOBAL APPHEADER (Logo + Drawer + Profile Pill) */}
-      <AppHeader user={user} profile={profile} streak={streak} />
+      {/* 1. ORIGINAL GLOBAL APPHEADER (Zero Props Required) */}
+      <AppHeader />
 
       {/* MAIN CONTAINER */}
       <main className="max-w-md mx-auto px-4 pt-3 space-y-3.5">
-        {/* 2. PERSONALIZED EXAM COUNTDOWN SUITE (JEE Mains, Advanced, NEET, Boards) */}
+        {/* 2. PERSONALIZED EXAM COUNTDOWN SUITE */}
         <div className="space-y-2">
           {examSchedules.map((exam) => {
             const days = calculateDaysLeft(exam.exam_date);
@@ -371,7 +404,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Shift Selector if shifts exist */}
+                {/* Shift Selector */}
                 {shifts.length > 0 && (
                   <div className="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-[10px]">
                     <span className="text-slate-400 font-semibold">Your Shift:</span>
@@ -429,25 +462,102 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          {/* Backlogs -> /library */}
-          <button
-            type="button"
-            onClick={() => router.push("/library")}
-            className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs text-left active:scale-[0.98] transition-all hover:border-rose-400"
-          >
+          {/* Backlogs Count */}
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
             <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Backlogs</span>
-            <div className="text-base font-black text-slate-900">{backlogCount}</div>
+            <div className="text-base font-black text-slate-900">{backlogsList.length}</div>
             <span
               className={`text-[9.5px] font-bold block mt-0.5 ${
-                backlogCount > 0 ? "text-rose-500" : "text-emerald-600"
+                backlogsList.length > 0 ? "text-rose-500" : "text-emerald-600"
               }`}
             >
-              {backlogCount > 0 ? "In Syllabus →" : "Clean ✓"}
+              {backlogsList.length > 0 ? "Pending" : "Clean ✓"}
             </span>
-          </button>
+          </div>
         </div>
 
-        {/* 5. STUDY DISTRIBUTION RATIO BAR */}
+        {/* 5. JEETRACK-GRADE BACKLOG RADAR & MINI ADDER WIDGET */}
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
+          <div className="flex items-center justify-between text-xs font-black mb-2">
+            <div className="flex items-center gap-1.5 text-slate-900">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+              <span>Backlog Radar</span>
+              <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-100">
+                {backlogsList.length} Pending
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowAddBacklog(!showAddBacklog)}
+              className="text-[10.5px] font-bold text-teal-600 hover:text-teal-700 bg-teal-50 hover:bg-teal-100/70 border border-teal-200 px-2 py-0.5 rounded-lg transition-all"
+            >
+              {showAddBacklog ? "✕ Close" : "+ Add Backlog"}
+            </button>
+          </div>
+
+          {/* Quick-Add Backlog Drawer */}
+          {showAddBacklog && (
+            <form onSubmit={handleAddBacklog} className="mb-3 p-2.5 bg-slate-50 rounded-xl border border-slate-200 animate-in fade-in">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newBacklogTitle}
+                  onChange={(e) => setNewBacklogTitle(e.target.value)}
+                  placeholder="e.g. Rotational Motion DPP #2 or Chemical Bonding PYQ"
+                  className="flex-1 text-xs p-2 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-teal-600"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={!newBacklogTitle.trim() || addingBacklog}
+                  className="px-3 py-2 bg-slate-900 text-white text-xs font-bold rounded-lg disabled:opacity-40 active:scale-95 transition-all shadow-xs"
+                >
+                  {addingBacklog ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Backlogs List */}
+          {backlogsList.length === 0 ? (
+            <div className="p-3 bg-emerald-50/60 border border-emerald-100 rounded-xl text-center text-xs text-emerald-800 font-semibold">
+              🎉 Zero backlogs! All homework, DPPs & syllabus chapters are on schedule.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {backlogsList.slice(0, 5).map((b) => (
+                <div
+                  key={b.id}
+                  className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 flex-shrink-0" />
+                    <span className="font-semibold text-slate-800 truncate">{b.title}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCompleteBacklog(b.id)}
+                    className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md hover:bg-emerald-100 active:scale-95 flex-shrink-0"
+                  >
+                    Done ✓
+                  </button>
+                </div>
+              ))}
+              {backlogsList.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => router.push("/library")}
+                  className="w-full text-center text-[10.5px] font-bold text-slate-500 hover:text-slate-800 pt-1 block"
+                >
+                  View all in Syllabus Tracker →
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 6. STUDY DISTRIBUTION RATIO BAR */}
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-xs font-black mb-2">
             <span className="text-slate-900 flex items-center gap-1.5">
@@ -486,7 +596,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 6. 12-WEEK CONSISTENCY MATRIX */}
+        {/* 7. 12-WEEK CONSISTENCY MATRIX */}
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 flex items-center gap-1.5">
@@ -524,7 +634,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 7. PRIORITY ACTION ITEMS */}
+        {/* 8. PRIORITY ACTION ITEMS */}
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-xs font-black mb-2">
             <span className="text-slate-900 flex items-center gap-1.5">
@@ -577,7 +687,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 8. QUICK ROUTE CARDS */}
+        {/* 9. QUICK ROUTE CARDS */}
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
@@ -600,7 +710,7 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {/* 9. RECENT MOCK TESTS */}
+        {/* 10. RECENT MOCK TESTS */}
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-xs font-black mb-2">
             <span className="text-slate-900 flex items-center gap-1.5">
