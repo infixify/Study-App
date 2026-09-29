@@ -1,6 +1,7 @@
 // app/api/ai-doubt/route.ts
 import { NextResponse } from "next/server";
 
+// Dedicated Key for Doubt Solver or fallback to general key
 const apiKey =
   process.env.GEMINI_API_KEY_DOUBT || process.env.GEMINI_API_KEY || "";
 
