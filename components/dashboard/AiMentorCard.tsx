@@ -8,7 +8,7 @@ interface AiMentorCardProps {
   report: any;
   loading: boolean;
   onRefresh: () => void;
-  onOpenDoubtSolver: () => void;
+  onOpenDoubtSolver?: () => void;
 }
 
 export default function AiMentorCard({
@@ -30,20 +30,20 @@ export default function AiMentorCard({
   return (
     <>
       {/* Sleek Compact AI Power Widget */}
-      <div className="rounded-2xl p-4 bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/50 border border-indigo-100/80 shadow-xs relative overflow-hidden">
+      <div className="rounded-2xl p-3.5 bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/50 border border-indigo-100/80 shadow-xs relative overflow-hidden">
         {/* Subtle decorative glow */}
-        <div className="absolute -top-10 -right-10 w-28 h-28 bg-indigo-200/30 rounded-full blur-xl pointer-events-none" />
+        <div className="absolute -top-10 -right-10 w-24 h-24 bg-indigo-200/30 rounded-full blur-xl pointer-events-none" />
 
         {/* Header Row */}
-        <div className="flex items-center justify-between gap-2 mb-2.5">
+        <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
-            <span className="w-7 h-7 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs shadow-xs">
+            <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs shadow-xs">
               🧠
             </span>
             <div>
               <h2 className="text-xs font-black tracking-tight text-ink flex items-center gap-1.5">
                 AI Academic Mentor
-                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100/70 px-1.5 py-0.5 rounded-md">
+                <span className="text-[9.5px] font-bold text-indigo-600 bg-indigo-100/70 px-1.5 py-0.5 rounded-md">
                   Kota Mode
                 </span>
               </h2>
@@ -52,7 +52,7 @@ export default function AiMentorCard({
 
           <div className="flex items-center gap-1.5">
             <span
-              className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+              className={`text-[9.5px] font-black px-2 py-0.5 rounded-full border ${
                 isWarning
                   ? "bg-rose-50 text-rose-600 border-rose-200"
                   : "bg-emerald-50 text-emerald-600 border-emerald-200"
@@ -64,30 +64,30 @@ export default function AiMentorCard({
               type="button"
               onClick={onRefresh}
               disabled={loading}
-              className="w-6 h-6 rounded-lg text-slate hover:text-ink hover:bg-black/5 flex items-center justify-center transition-all disabled:opacity-40"
+              className="w-5 h-5 rounded-md text-slate hover:text-ink hover:bg-black/5 flex items-center justify-center transition-all disabled:opacity-40"
               title="Recalculate Academic Report"
             >
-              <span className={`text-xs ${loading ? "animate-spin" : ""}`}>🔄</span>
+              <span className={`text-[11px] ${loading ? "animate-spin" : ""}`}>🔄</span>
             </button>
           </div>
         </div>
 
-        {/* Prediction Badge + 1-Line Insight */}
-        <div className="bg-white/80 backdrop-blur-xs rounded-xl p-2.5 border border-indigo-100/60 mb-3">
-          <div className="flex items-center justify-between text-[11px] font-black text-indigo-950 mb-1">
-            <span>{prediction}</span>
+        {/* Prediction & Insight (Compact 2-liner) */}
+        <div className="bg-white/90 backdrop-blur-xs rounded-xl p-2 border border-indigo-100/60 mb-2.5">
+          <div className="text-[10.5px] font-black text-indigo-950 mb-0.5">
+            {prediction}
           </div>
-          <p className="text-[11px] text-slate line-clamp-2 leading-relaxed">
+          <p className="text-[10.5px] text-slate line-clamp-2 leading-relaxed">
             {summary}
           </p>
         </div>
 
-        {/* Dual Compact Action Buttons */}
+        {/* Dual Action Buttons */}
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={() => setModalOpen(true)}
-            className="py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-xs active:scale-[0.98] transition-all"
+            className="py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-2xs active:scale-[0.98] transition-all"
           >
             <span>📋</span> View 7-Day Plan
           </button>
@@ -95,7 +95,7 @@ export default function AiMentorCard({
           <button
             type="button"
             onClick={onOpenDoubtSolver}
-            className="py-2 px-3 rounded-xl bg-white hover:bg-paper text-indigo-700 font-black text-[11px] border border-indigo-200/90 flex items-center justify-center gap-1.5 shadow-2xs active:scale-[0.98] transition-all"
+            className="py-1.5 px-3 rounded-xl bg-white hover:bg-paper text-indigo-700 font-black text-[11px] border border-indigo-200/90 flex items-center justify-center gap-1.5 shadow-2xs active:scale-[0.98] transition-all"
           >
             <span className="text-teal">✨</span> Ask Doubt Solver
           </button>
