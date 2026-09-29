@@ -160,8 +160,8 @@ export const OFFLINE_INSTITUTES: string[] = [
 
 export const BATCH_OTHER = "Other / not listed";
 
-// Class options shown at signup. "11_12" is the combined track — content
-// queries should treat it as the union of Class 11 + Class 12 content.
+// Helper used by content queries (library/dashboard/resources) so a user on the
+// combined track or dropper sees both classes' chapters instead of just one.
 export const CLASS_OPTIONS: { value: ClassLevel; label: string; sub: string; isNew?: boolean }[] = [
   { value: "10", label: "Class 10", sub: "Boards focus" },
   { value: "11", label: "Class 11", sub: "Foundation year" },
@@ -173,7 +173,10 @@ export const CLASS_OPTIONS: { value: ClassLevel; label: string; sub: string; isN
 // Helper used by content queries (library/dashboard) so a user on the
 // combined track sees both classes' chapters instead of just one.
 export function classLevelsForContent(classLevel: ClassLevel | null): string[] {
-  if (classLevel === "11_12") return ["11", "12"];
+  if (classLevel === "11_12" || classLevel === "Dropper") {
+  // Dropper students and 11+12 combined students get full Class 11 and 12 NCERT & content
+    return ["11", "12"];
+  }
   if (!classLevel) return [];
   return [classLevel];
 }
