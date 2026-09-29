@@ -1,47 +1,40 @@
-// app/profile/page.tsx
+// app/library/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  supabase,
-  ClassLevel,
-  TargetExam,
-  StudyMode,
-  CLASS_OPTIONS,
-  ONLINE_BATCHES,
-  OFFLINE_INSTITUTES,
-  BATCH_OTHER,
-  updateEditableProfile,
-} from "@/lib/supabase";
+import { supabase, classLevelsForContent } from "@/lib/supabase";
+import SubjectTabs from "@/components/library/SubjectTabs";
+import ChapterList from "@/components/library/ChapterList";
 import BottomNav from "@/components/dashboard/BottomNav";
-import AppHeader from "@/components/dashboard/AppHeader";
 
-interface UserProfile {
-  name: string;
-  email: string;
-  classLevel: ClassLevel;
-  targetExam: TargetExam;
-  wantsBoards: boolean;
-  studyMode: StudyMode;
-  batchName: string;
+type ProgressStatus = "not_started" | "in_progress" | "done";
+
+interface ChapterItem {
+  id: string;
+  title: string;
+  isToughTopic: boolean;
+  classTag: string;
+  inCompetitiveSyllabus: boolean;
+  jeeScope: "common" | "advanced_only";
+  neetScope: "common" | "neet_only";
+  progressStatus: ProgressStatus;
+  isBacklog: boolean;
 }
 
-export default function ProfilePage() {
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+interface SubjectItem {
+  id: string;
+  name: string;
+  chapters: ChapterItem[];
+}
+
+export default function LibraryPage() {
+  const [subjects, setSubjects] = useState<SubjectItem[]>([]);
+  const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
+  const [targetExam, setTargetExam] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Editable fields
-  const [studyMode, setStudyMode] = useState<StudyMode>("Online");
-  const [batch, setBatch] = useState<string>("");
-  const [editingBatch, setEditingBatch] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  // Name editing
-  const [editingName, setEditingName] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [savingName, setSavingName] = useState(false);
-
   useEffect(() => {
+    let cancelled = false;
     async function load() {
       const { data: authData } = await supabase.auth.getUser();
       const user = authData?.user;
@@ -49,362 +42,228 @@ export default function ProfilePage() {
         setLoading(false);
         return;
       }
-      const { data } = await supabase
+      const { data: profile } = await supabase
         .from("users")
-        .select("name, email, class_level, target_exam, wants_boards, study_mode, batch_name")
+        .select("class_level, target_exam")
         .eq("uid", user.id)
         .maybeSingle();
 
-      if (data) {
-        setProfile({
-          name: data.name ?? user.user_metadata?.full_name ?? "Student",
-          email: data.email ?? user.email ?? "",
-          classLevel: data.class_level,
-          targetExam: data.target_exam,
-          wantsBoards: data.wants_boards ?? false,
-          studyMode: data.study_mode ?? "Online",
-          batchName: data.batch_name ?? "",
-        });
-        setStudyMode(data.study_mode ?? "Online");
-        setBatch(data.batch_name ?? "");
-        setNewName(data.name ?? user.user_metadata?.full_name ?? "");
+      if (!profile?.class_level || !profile?.target_exam) {
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      const classLevels = classLevelsForContent(profile.class_level as any);
+
+      const { data: subjectRows } = await supabase
+        .from("subjects")
+        .select("id, name, class_level, display_order")
+        .eq("target_exam", profile.target_exam)
+        .in("class_level", classLevels)
+        .order("display_order", { ascending: true });
+
+      if (!subjectRows || subjectRows.length === 0) {
+        if (!cancelled) {
+          setSubjects([]);
+          setTargetExam(profile.target_exam);
+          setLoading(false);
+        }
+        return;
+      }
+
+      const subjectRowIds = subjectRows.map((s) => s.id);
+
+      const [{ data: chapterRows }, { data: progressRows }] = await Promise.all([
+        supabase
+          .from("chapters")
+          .select("id, subject_id, title, is_tough_topic, display_order, in_competitive_syllabus, jee_scope, neet_scope")
+          .in("subject_id", subjectRowIds)
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("chapter_progress")
+          .select("chapter_id, status, is_backlog")
+          .eq("user_id", user.id),
+      ]);
+
+      const progressMap = new Map<string, { status: ProgressStatus; isBacklog: boolean }>(
+        (progressRows ?? []).map((p) => [
+          p.chapter_id,
+          { status: p.status as ProgressStatus, isBacklog: p.is_backlog ?? false },
+        ])
+      );
+
+      const grouped = new Map<string, SubjectItem>();
+      const sortedSubjectRows = [...subjectRows].sort((a, b) =>
+        a.class_level < b.class_level ? -1 : a.class_level > b.class_level ? 1 : 0
+      );
+
+      for (const s of sortedSubjectRows) {
+        const key = s.name;
+        if (!grouped.has(key)) {
+          grouped.set(key, { id: key, name: s.name, chapters: [] });
+        }
+        const entry = grouped.get(key)!;
+        const chaptersForThisRow = (chapterRows ?? [])
+          .filter((c) => c.subject_id === s.id)
+          .filter((c) => {
+            if (s.class_level !== "Dropper") return true;
+            return c.in_competitive_syllabus !== false;
+          })
+          .map((c) => {
+            const prog = progressMap.get(c.id);
+            return {
+              id: c.id,
+              title: c.title,
+              isToughTopic: c.is_tough_topic,
+              classTag: s.class_level,
+              inCompetitiveSyllabus: c.in_competitive_syllabus,
+              jeeScope: (c.jee_scope ?? "common") as "common" | "advanced_only",
+              neetScope: (c.neet_scope ?? "common") as "common" | "neet_only",
+              progressStatus: prog?.status ?? "not_started",
+              isBacklog: prog?.isBacklog ?? false,
+            };
+          });
+        entry.chapters.push(...chaptersForThisRow);
+      }
+
+      const finalSubjects = Array.from(grouped.values());
+      if (!cancelled) {
+        setSubjects(finalSubjects);
+        setActiveSubjectId(finalSubjects[0]?.id ?? null);
+        setTargetExam(profile.target_exam);
+        setLoading(false);
+      }
     }
     load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  async function handleSaveName() {
-    if (!newName.trim()) return;
-    setSavingName(true);
-    const { data: authData } = await supabase.auth.getUser();
-    const user = authData?.user;
-    if (user) {
-      await supabase.from("users").update({ name: newName.trim() }).eq("uid", user.id);
-      await supabase.auth.updateUser({ data: { full_name: newName.trim() } });
-      setProfile((prev) => (prev ? { ...prev, name: newName.trim() } : null));
-      setEditingName(false);
-    }
-    setSavingName(false);
+  function handleProgressChange(chapterId: string, status: ProgressStatus) {
+    setSubjects((prev) =>
+      prev.map((subj) => ({
+        ...subj,
+        chapters: subj.chapters.map((ch) =>
+          ch.id === chapterId ? { ...ch, progressStatus: status } : ch
+        ),
+      }))
+    );
   }
 
-  async function saveEditable(nextMode: StudyMode, nextBatch: string) {
-    setSaving(true);
-    const res = await updateEditableProfile({ studyMode: nextMode, batchOrBranch: nextBatch });
-    if (res && res.success) {
-      setStudyMode(nextMode);
-      setBatch(nextBatch);
-      setProfile((prev) => (prev ? { ...prev, studyMode: nextMode, batchName: nextBatch } : null));
-      setEditingBatch(false);
-    } else {
-      alert("Failed to update profile settings.");
-    }
-    setSaving(false);
+  function handleBacklogToggle(chapterId: string, isBacklog: boolean) {
+    setSubjects((prev) =>
+      prev.map((subj) => ({
+        ...subj,
+        chapters: subj.chapters.map((ch) =>
+          ch.id === chapterId ? { ...ch, isBacklog } : ch
+        ),
+      }))
+    );
+  }
+
+  function getSubjectStats(subj: SubjectItem) {
+    const total = subj.chapters.length;
+    const done = subj.chapters.filter((c) => c.progressStatus === "done").length;
+    const backlogs = subj.chapters.filter((c) => c.isBacklog).length;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    return { total, done, backlogs, pct };
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] flex items-center justify-center text-xs font-bold text-slate-400">
-        Loading Profile…
+      <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] flex items-center justify-center">
+        <p className="text-slate-500 dark:text-slate-400 text-xs font-bold animate-pulse">
+          Loading syllabus tracker…
+        </p>
       </div>
     );
   }
 
-  if (!profile) {
+  if (subjects.length === 0) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] flex items-center justify-center p-6 text-xs text-slate-400">
-        Profile not found. Please log in again.
+      <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] pb-28">
+        <div className="max-w-md mx-auto px-5 pt-8">
+          <h1 className="font-display text-2xl font-black text-slate-900 dark:text-white mb-2">
+            Syllabus
+          </h1>
+          <p className="text-slate-500 dark:text-slate-400 text-xs">
+            No subjects found yet for your class/exam. Check back soon.
+          </p>
+        </div>
+        <BottomNav />
       </div>
     );
   }
 
-  const classLabel =
-    CLASS_OPTIONS.find((c) => c.value === profile.classLevel)?.label ?? profile.classLevel;
-
-  const schoolLabel =
-    profile.classLevel === "11"
-      ? "School exams prep"
-      : profile.classLevel === "Dropper"
-      ? "School / Board prep"
-      : "Boards prep";
-
-  const schoolValue =
-    profile.classLevel === "Dropper"
-      ? "Not applicable (Dropper)"
-      : profile.wantsBoards
-      ? "Yes"
-      : "No";
+  const activeSubject =
+    subjects.find((s) => s.id === activeSubjectId) ?? subjects[0];
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] text-slate-900 dark:text-slate-100 pb-28">
-      <AppHeader />
-      <div className="max-w-md mx-auto px-5 py-6">
-        <h1 className="font-display text-2xl font-black mb-0.5 tracking-tight text-slate-900 dark:text-white">
-          My Profile
-        </h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 font-medium">
-          Signed in as <span className="font-semibold text-slate-800 dark:text-slate-200">{profile.email}</span>
-        </p>
-
-        {/* Section 1: Editable Settings */}
-        <div className="flex items-center justify-between mb-2.5">
-          <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            Personal & Study Settings
-          </span>
-          <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-teal/10 dark:bg-teal/20 text-teal dark:text-[#2DD4BF]">
-            Editable
+      <div className="max-w-md mx-auto px-5 pt-8">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="font-display text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+            Syllabus
+          </h1>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">
+            Chapter tracker & backlogs
           </span>
         </div>
 
-        {/* Name Card */}
-        {editingName ? (
-          <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-3.5 mb-2.5 bg-white dark:bg-[#121A29] flex items-center gap-2 shadow-sm">
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="flex-1 text-sm font-bold bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white border border-slate-200 dark:border-white/10 rounded-xl p-2.5 focus:outline-none focus:border-teal"
-              placeholder="Enter your name"
-              autoFocus
-            />
-            <button
-              onClick={handleSaveName}
-              disabled={savingName}
-              className="bg-teal text-white text-xs font-bold px-3.5 py-2.5 rounded-xl shadow-xs"
-            >
-              {savingName ? "…" : "Save"}
-            </button>
-            <button
-              onClick={() => setEditingName(false)}
-              className="text-xs font-bold text-slate-400 px-2 py-2"
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <RowCard
-            label="Full Name"
-            value={profile.name}
-            isEditable
-            onClick={() => setEditingName(true)}
-          />
-        )}
-
-        <RowCard
-          label="Study Mode"
-          value={studyMode}
-          isEditable
-          onClick={() => setEditingBatch((v) => !v)}
+        {/* Subject Pills (Physics / Chemistry / Maths) */}
+        <SubjectTabs
+          subjects={subjects}
+          activeId={activeSubject.id}
+          onChange={setActiveSubjectId}
         />
 
-        <RowCard
-          label="Batch / Institute"
-          value={batch || "Self Study"}
-          isEditable
-          onClick={() => setEditingBatch((v) => !v)}
-        />
+        {/* Subject Progress Summary Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-4 mb-2">
+          {subjects.map((subj) => {
+            const { done, total, backlogs, pct } = getSubjectStats(subj);
+            return (
+              <div
+                key={subj.id}
+                className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#121A29] p-3 shadow-xs"
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                    {subj.name}
+                  </p>
+                  {backlogs > 0 && (
+                    <span className="text-[9.5px] font-bold text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400 px-1.5 py-0.5 rounded-full">
+                      {backlogs} bl
+                    </span>
+                  )}
+                </div>
 
-        {editingBatch && (
-          <BatchEditor
-            currentMode={studyMode}
-            currentBatch={batch}
-            saving={saving}
-            onSave={saveEditable}
-            onCancel={() => setEditingBatch(false)}
-          />
-        )}
+                <div className="w-full h-1.5 bg-slate-100 dark:bg-white/10 rounded-full mt-2.5 overflow-hidden">
+                  <div
+                    className="h-full bg-teal transition-all duration-300 rounded-full"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
 
-        {/* Section 2: Academic Track (Locked) */}
-        <div className="flex items-center justify-between mt-6 mb-2.5">
-          <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            Academic Track
-          </span>
-          <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-slate-300">
-            Locked 🔒
-          </span>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1.5 font-medium">
+                  {done}/{total} done ({pct}%)
+                </p>
+              </div>
+            );
+          })}
         </div>
 
-        <RowCard label="Class Level" value={classLabel} isLocked />
-        <RowCard label="Target Exam" value={profile.targetExam} isLocked />
-        <RowCard label={schoolLabel} value={schoolValue} isLocked />
-
-        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-4 leading-relaxed font-medium">
-          Class and Target Exam were locked during signup to keep your test streaks, syllabus progress, and countdown accurate.
-        </p>
+        {/* Chapters List with Status, Revision & Practice Tracking */}
+        <ChapterList
+          key={activeSubject.id}
+          subjectId={activeSubject.id}
+          chapters={activeSubject.chapters}
+          targetExam={targetExam || undefined}
+          onProgressChange={handleProgressChange}
+          onBacklogToggle={handleBacklogToggle}
+        />
       </div>
       <BottomNav />
-    </div>
-  );
-}
-
-function RowCard({
-  label,
-  value,
-  isEditable = false,
-  isLocked = false,
-  onClick,
-}: {
-  label: string;
-  value: string;
-  isEditable?: boolean;
-  isLocked?: boolean;
-  onClick?: () => void;
-}) {
-  const content = (
-    <div className="flex items-center justify-between w-full">
-      <div>
-        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-          {label}
-        </div>
-        <div className="text-sm font-bold mt-0.5 text-slate-900 dark:text-white">
-          {value}
-        </div>
-      </div>
-      {isEditable && (
-        <span className="text-xs font-bold text-teal dark:text-[#2DD4BF] flex items-center gap-1 hover:underline">
-          Edit ✎
-        </span>
-      )}
-      {isLocked && <span className="text-xs opacity-70">🔒</span>}
-    </div>
-  );
-
-  if (isEditable) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        className="w-full text-left rounded-2xl border border-slate-200 dark:border-white/10 p-3.5 mb-2.5 bg-white dark:bg-[#121A29] hover:border-teal dark:hover:border-teal/50 shadow-sm transition-all active:scale-[0.99]"
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return (
-    <div className="rounded-2xl border border-slate-200/80 dark:border-white/10 p-3.5 mb-2.5 bg-white/70 dark:bg-[#121A29]/70 backdrop-blur-xs shadow-xs">
-      {content}
-    </div>
-  );
-}
-
-function BatchEditor({
-  currentMode,
-  currentBatch,
-  saving,
-  onSave,
-  onCancel,
-}: {
-  currentMode: StudyMode;
-  currentBatch: string;
-  saving: boolean;
-  onSave: (mode: StudyMode, batch: string) => void;
-  onCancel: () => void;
-}) {
-  const [mode, setMode] = useState<StudyMode>(currentMode);
-  const [selectedBatch, setSelectedBatch] = useState<string>(currentBatch);
-  const [customBatch, setCustomBatch] = useState<string>("");
-
-  const rawOptions: any[] =
-    mode === "Online"
-      ? (ONLINE_BATCHES as any)
-      : mode === "Offline"
-      ? (OFFLINE_INSTITUTES as any)
-      : [];
-
-  const isCustom = !rawOptions.includes(selectedBatch) && selectedBatch !== "";
-
-  return (
-    <div className="rounded-2xl border border-teal/30 p-4 mb-4 bg-white dark:bg-[#151D2A] shadow-md space-y-3">
-      <h3 className="text-xs font-bold text-slate-900 dark:text-white">
-        Change Study Mode & Batch
-      </h3>
-
-      <div className="grid grid-cols-3 gap-1.5">
-        {(["Online", "Offline", "Self"] as StudyMode[]).map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => {
-              setMode(m);
-              setSelectedBatch(m === "Self" ? "Self Study" : "");
-            }}
-            className={`py-2 text-xs font-bold rounded-xl border transition-all ${
-              mode === m
-                ? "bg-teal text-white border-teal shadow-xs"
-                : "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300"
-            }`}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-
-      {mode !== "Self" && (
-        <div className="space-y-1.5 max-h-40 overflow-y-auto">
-          {rawOptions.map((opt: any) => (
-            <button
-              key={String(opt)}
-              type="button"
-              onClick={() => setSelectedBatch(String(opt))}
-              className={`w-full text-left p-2.5 rounded-xl text-xs font-semibold border transition-all ${
-                selectedBatch === String(opt)
-                  ? "bg-teal/15 dark:bg-teal/20 text-teal dark:text-[#2DD4BF] border-teal/40 font-bold"
-                  : "bg-slate-50 dark:bg-white/5 border-slate-200/60 dark:border-white/5 text-slate-700 dark:text-slate-300"
-              }`}
-            >
-              {String(opt)}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setSelectedBatch(BATCH_OTHER)}
-            className={`w-full text-left p-2.5 rounded-xl text-xs font-semibold border transition-all ${
-              selectedBatch === BATCH_OTHER || isCustom
-                ? "bg-teal/15 dark:bg-teal/20 text-teal dark:text-[#2DD4BF] border-teal/40 font-bold"
-                : "bg-slate-50 dark:bg-white/5 border-slate-200/60 dark:border-white/5 text-slate-700 dark:text-slate-300"
-            }`}
-          >
-            {BATCH_OTHER}
-          </button>
-        </div>
-      )}
-
-      {(selectedBatch === BATCH_OTHER || isCustom) && mode !== "Self" && (
-        <input
-          type="text"
-          placeholder="Enter coaching/batch name"
-          value={customBatch}
-          onChange={(e) => setCustomBatch(e.target.value)}
-          className="w-full text-xs font-semibold p-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white outline-none focus:border-teal"
-        />
-      )}
-
-      <div className="flex gap-2 pt-2">
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => {
-            const finalBatch =
-              mode === "Self"
-                ? "Self Study"
-                : isCustom || selectedBatch === BATCH_OTHER
-                ? customBatch || "Other"
-                : selectedBatch;
-            onSave(mode, finalBatch);
-          }}
-          className="flex-1 py-2.5 bg-teal text-white font-bold text-xs rounded-xl shadow-xs"
-        >
-          {saving ? "Saving…" : "Save Changes"}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-4 py-2.5 text-xs font-bold text-slate-400"
-        >
-          Cancel
-        </button>
-      </div>
     </div>
   );
 }
