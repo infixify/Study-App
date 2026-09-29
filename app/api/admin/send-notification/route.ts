@@ -2,7 +2,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// Helper: Generate Google OAuth2 Token from Service Account without heavy SDK
 async function getGoogleAccessToken(clientEmail: string, privateKey: string) {
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "RS256", typ: "JWT" };
@@ -14,7 +13,6 @@ async function getGoogleAccessToken(clientEmail: string, privateKey: string) {
     iat: now,
   };
 
-  // Web Crypto Sign JWT
   const b64Url = (obj: any) =>
     Buffer.from(JSON.stringify(obj))
       .toString("base64")
@@ -50,6 +48,29 @@ async function getGoogleAccessToken(clientEmail: string, privateKey: string) {
 
 export async function POST(req: Request) {
   try {
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+
+    if (!token) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const supabaseAsUser = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { global: { headers: { Authorization: `Bearer ${token}` } } }
+    );
+
+    const { data: userData, error: userErr } = await supabaseAsUser.auth.getUser();
+    if (userErr || !userData?.user) {
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+    }
+
+    const { data: isAdmin, error: adminErr } = await supabaseAsUser.rpc("is_admin");
+    if (adminErr || !isAdmin) {
+      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+    }
+
     const { title, body, action_url, target_audience } = await req.json();
 
     if (!title || !body) {
@@ -63,10 +84,8 @@ export async function POST(req: Request) {
     let fcmSuccessCount = 0;
 
     if (projectId && clientEmail && privateKey) {
-      // 1. Get Access Token
       const accessToken = await getGoogleAccessToken(clientEmail, privateKey);
 
-      // 2. Fetch target device tokens from Supabase
       const supabaseAdmin = createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -77,7 +96,6 @@ export async function POST(req: Request) {
         .select("token");
 
       if (tokens && tokens.length > 0) {
-        // Send to individual device tokens
         for (const t of tokens) {
           try {
             await fetch(
@@ -101,7 +119,6 @@ export async function POST(req: Request) {
           } catch (e) {}
         }
       } else {
-        // Broadcast to Firebase Topic
         const topic = target_audience === "all" ? "all_students" : `${target_audience}_students`;
         await fetch(
           `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
