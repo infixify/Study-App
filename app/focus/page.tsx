@@ -1,3 +1,4 @@
+// app/focus/page.tsx
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -14,11 +15,12 @@ const APP_LIST = [
   { id: "whatsapp", name: "WhatsApp", icon: "💬" },
   { id: "snapchat", name: "Snapchat", icon: "👻" },
   { id: "telegram", name: "Telegram", icon: "✈️" },
-  { id: "games", name: "Games & Others", icon: "🎮" },
+  { id: "games", name: "Games & Social Media", icon: "🎮" },
 ];
 
 export default function StudyPage() {
   const [userId, setUserId] = useState<string | null>(null);
+  const [targetExam, setTargetExam] = useState<string>("JEE");
 
   // Live Timer states
   const [seconds, setSeconds] = useState(0);
@@ -49,394 +51,281 @@ export default function StudyPage() {
   const [manualSub, setManualSub] = useState<SubjectType>("Physics");
   const [manualTask, setManualTask] = useState<StudyTaskType>("questions");
   const [manualMinutes, setManualMinutes] = useState<number>(60);
-  const [manualQs, setManualQs] = useState<number>(0);
-  const [manualDate, setManualDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [manualQs, setManualQs] = useState<number>(20);
+  const [manualDate, setManualDate] = useState<string>(
+    new Date().toISOString().split("T")[0]
+  );
   const [manualError, setManualError] = useState<string | null>(null);
 
+  // Active Available Subjects Filtered By Exam Target:
+  // JEE = Physics, Chemistry, Mathematics (NO BIOLOGY)
+  // NEET = Physics, Chemistry, Biology (NO MATHEMATICS)
+  const availableSubjects: SubjectType[] =
+    targetExam === "NEET"
+      ? ["Physics", "Chemistry", "Biology"]
+      : ["Physics", "Chemistry", "Mathematics"];
+
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data?.user) {
-        setUserId(data.user.id);
-        // Load user's saved app block preferences
-        supabase
-          .from("user_app_blocks")
-          .select("blocked_apps, strict_mode_enabled")
-          .eq("user_id", data.user.id)
-          .maybeSingle()
-          .then(({ data: pref }) => {
-            if (pref) {
-              setBlockedApps(pref.blocked_apps || []);
-              setStrictMode(pref.strict_mode_enabled ?? true);
-            }
-          });
+    async function loadUser() {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) return;
+      setUserId(user.id);
+
+      const { data: profile } = await supabase
+        .from("users")
+        .select("target_exam")
+        .eq("uid", user.id)
+        .maybeSingle();
+
+      if (profile?.target_exam) {
+        setTargetExam(profile.target_exam);
+        if (profile.target_exam === "NEET" && selectedSub === "Mathematics") {
+          setSelectedSub("Biology");
+        }
       }
-    });
+    }
+    loadUser();
+
+    // Load persistent blocked apps
+    const savedBlocks = localStorage.getItem("prepwise_blocked_apps");
+    if (savedBlocks) {
+      try {
+        setBlockedApps(JSON.parse(savedBlocks));
+      } catch (e) {}
+    }
   }, []);
 
+  const toggleAppBlock = (appId: string) => {
+    let updated: string[];
+    if (blockedApps.includes(appId)) {
+      updated = blockedApps.filter((id) => id !== appId);
+    } else {
+      updated = [...blockedApps, appId];
+    }
+    setBlockedApps(updated);
+    localStorage.setItem("prepwise_blocked_apps", JSON.stringify(updated));
+  };
+
+  // Timer Tick
   useEffect(() => {
     if (isActive) {
       timerRef.current = setInterval(() => {
-        setSeconds((prev) => prev + 1);
+        setSeconds((s) => s + 1);
       }, 1000);
-    } else {
+    } else if (!isActive && timerRef.current) {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
   }, [isActive]);
 
-  const formatTime = (sec: number) => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    const h = Math.floor(m / 60);
-    const remM = m % 60;
-    if (h > 0) {
-      return `${h < 10 ? "0" + h : h}:${remM < 10 ? "0" + remM : remM}:${s < 10 ? "0" + s : s}`;
-    }
-    return `${m < 10 ? "0" + m : m}:${s < 10 ? "0" + s : s}`;
-  };
-
-  function toggleBlockedApp(id: string) {
-    setBlockedApps((prev) =>
-      prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
-    );
-  }
-
-  // 🚀 Start live focus session after setup
-  function handleConfirmStart() {
+  const handleStartSession = () => {
     setShowPreModal(false);
+    setSeconds(0);
     setStartTime(new Date());
     setIsActive(true);
-
-    // Save app block preferences in background
-    if (userId) {
-      supabase.from("user_app_blocks").upsert({
-        user_id: userId,
-        blocked_apps: blockedApps,
-        strict_mode_enabled: strictMode,
-        updated_at: new Date().toISOString(),
-      });
-    }
-
-    // Call Native Android/Flutter Bridge if available
-    if (strictMode && typeof window !== "undefined" && (window as any).AppBridge) {
-      (window as any).AppBridge.startStrictTimer?.({
-        blockedApps,
-        subject: selectedSub,
-        task: selectedTask,
-      });
-    }
-  }
-
-  // ⏹ Stop session
-  const handleStopSession = () => {
-    setIsActive(false);
-    // Tell native bridge to release app block
-    if (typeof window !== "undefined" && (window as any).AppBridge) {
-      (window as any).AppBridge.stopStrictTimer?.();
-    }
-
-    if (seconds >= 30) {
-      setSavedDuration(seconds);
-      setShowPostModal(true);
-    } else {
-      setSeconds(0);
-      setStartTime(null);
-    }
   };
 
-  // 💾 Save live session to Supabase
-  const handleFinishAndSave = async (onlyTheory: boolean) => {
+  const handleStopSession = () => {
+    setIsActive(false);
+    setSavedDuration(seconds);
+    setShowPostModal(true);
+  };
+
+  const handleFinishAndSave = async (noQuestions: boolean) => {
     if (!userId) return;
     setSaving(true);
-    const durationMins = Math.round(savedDuration / 60);
-    const endedAt = new Date();
-    const startedAt = startTime || new Date(endedAt.getTime() - savedDuration * 1000);
-    const today = endedAt.toISOString().slice(0, 10);
+    const durationMinutes = Math.max(1, Math.round(savedDuration / 60));
+    const today = new Date().toISOString().split("T")[0];
 
     try {
-      // 1. Insert focus session
-      await supabase.from("focus_sessions").insert({
-        user_id: userId,
-        duration_seconds: savedDuration,
-        started_at: startedAt.toISOString(),
-        ended_at: endedAt.toISOString(),
-        start_time: startedAt.toISOString(),
-        end_time: endedAt.toISOString(),
-        subject: selectedSub,
-        study_type: selectedTask,
-        is_manual: false,
-        blocked_apps: strictMode ? blockedApps : [],
-        counts_for_streak: true,
-      });
-
-      // 2. Insert question logs if solved
-      const questionsSolved = onlyTheory ? 0 : qCount;
-      if (questionsSolved > 0) {
-        await supabase.from("question_logs").insert({
-          user_id: userId,
-          question_count: questionsSolved,
-          log_date: today,
-        });
-      }
-
-      // 3. Update daily logs aggregates
-      const { data: currentLog } = await supabase
+      // 1. Update daily_logs study_time_minutes
+      const { data: dailyRow } = await supabase
         .from("daily_logs")
-        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes")
+        .select("study_time_minutes")
         .eq("user_id", userId)
         .eq("log_date", today)
         .maybeSingle();
 
-      const prevTotal = currentLog?.study_time_minutes ?? 0;
-      const prevTheory = currentLog?.theory_minutes ?? 0;
-      const prevPractice = currentLog?.practice_minutes ?? 0;
-      const prevRevision = currentLog?.revision_minutes ?? 0;
-
+      const newMins = (dailyRow?.study_time_minutes || 0) + durationMinutes;
       await supabase.from("daily_logs").upsert(
         {
           user_id: userId,
           log_date: today,
-          study_time_minutes: prevTotal + durationMins,
-          theory_minutes: selectedTask === "theory" ? prevTheory + durationMins : prevTheory,
-          practice_minutes: selectedTask === "questions" ? prevPractice + durationMins : prevPractice,
-          revision_minutes: selectedTask === "revision" ? prevRevision + durationMins : prevRevision,
+          study_time_minutes: newMins,
         },
         { onConflict: "user_id,log_date" }
       );
-    } catch (err) {
-      console.error("Save session error:", err);
-    } finally {
+
       setSaving(false);
       setShowPostModal(false);
       setSeconds(0);
-      setQCount(0);
-      setStartTime(null);
+    } catch (err) {
+      console.error(err);
+      setSaving(false);
     }
   };
 
-  // 📝 Save manual offline study entry with OVERLAP CHECK
   const handleSaveManualEntry = async () => {
     if (!userId) return;
-    setManualError(null);
-    if (manualMinutes <= 0) {
-      setManualError("Study duration must be greater than 0 minutes.");
-      return;
-    }
-
     setSaving(true);
+    setManualError(null);
+
     try {
-      // 🛡️ ANTI-CHEAT OVERLAP CHECK:
-      // Verify user isn't logging manual study that overlaps with existing live sessions
-      const { data: existingSessions } = await supabase
-        .from("focus_sessions")
-        .select("duration_seconds, is_manual, started_at")
-        .eq("user_id", userId)
-        .gte("started_at", `${manualDate}T00:00:00`)
-        .lte("started_at", `${manualDate}T23:59:59`);
-
-      const liveMinsToday = (existingSessions ?? [])
-        .filter((s) => !s.is_manual)
-        .reduce((sum, s) => sum + Math.round((s.duration_seconds || 0) / 60), 0);
-
-      // Total daily study sanity check (cannot exceed 18 hours in 1 day)
-      if (liveMinsToday + manualMinutes > 1080) {
-        setManualError(
-          `Cannot exceed 18 study hours per day. You already have ${Math.round(liveMinsToday / 60)}h logged!`
-        );
-        setSaving(false);
-        return;
-      }
-
-      const manualStartTime = new Date(`${manualDate}T12:00:00Z`);
-      const manualEndTime = new Date(manualStartTime.getTime() + manualMinutes * 60000);
-
-      // 1. Insert manual focus session
-      await supabase.from("focus_sessions").insert({
-        user_id: userId,
-        duration_seconds: manualMinutes * 60,
-        started_at: manualStartTime.toISOString(),
-        ended_at: manualEndTime.toISOString(),
-        start_time: manualStartTime.toISOString(),
-        end_time: manualEndTime.toISOString(),
-        subject: manualSub,
-        study_type: manualTask,
-        is_manual: true,
-        counts_for_streak: true,
-      });
-
-      // 2. Insert questions if logged
-      if (manualQs > 0) {
-        await supabase.from("question_logs").insert({
-          user_id: userId,
-          question_count: manualQs,
-          log_date: manualDate,
-        });
-      }
-
-      // 3. Update daily logs aggregates
-      const { data: currentLog } = await supabase
+      const { data: dailyRow } = await supabase
         .from("daily_logs")
-        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes")
+        .select("study_time_minutes")
         .eq("user_id", userId)
         .eq("log_date", manualDate)
         .maybeSingle();
 
-      const prevTotal = currentLog?.study_time_minutes ?? 0;
-      const prevTheory = currentLog?.theory_minutes ?? 0;
-      const prevPractice = currentLog?.practice_minutes ?? 0;
-      const prevRevision = currentLog?.revision_minutes ?? 0;
-
+      const newMins = (dailyRow?.study_time_minutes || 0) + manualMinutes;
       await supabase.from("daily_logs").upsert(
         {
           user_id: userId,
           log_date: manualDate,
-          study_time_minutes: prevTotal + manualMinutes,
-          theory_minutes: manualTask === "theory" ? prevTheory + manualMinutes : prevTheory,
-          practice_minutes: manualTask === "questions" ? prevPractice + manualMinutes : prevPractice,
-          revision_minutes: manualTask === "revision" ? prevRevision + manualMinutes : prevRevision,
+          study_time_minutes: newMins,
         },
         { onConflict: "user_id,log_date" }
       );
 
-      setShowManualModal(false);
-      setManualMinutes(60);
-      setManualQs(0);
-      alert("✓ Manual study hours saved successfully!");
-    } catch (err: any) {
-      console.error("Manual log error:", err);
-      setManualError(err.message || "Failed to save entry.");
-    } finally {
       setSaving(false);
+      setShowManualModal(false);
+    } catch (err) {
+      setSaving(false);
+      setManualError("Failed to save entry");
     }
   };
 
+  const formatTimer = (totalSeconds: number) => {
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    return `${hrs > 0 ? hrs + ":" : ""}${mins
+      .toString()
+      .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
   return (
-    <div className="min-h-screen bg-paper flex flex-col justify-between pb-28 font-sans">
-      {/* Top Header */}
+    <div className="min-h-screen bg-paper pb-28">
       <AppHeader />
 
-      <main className="w-full max-w-md mx-auto px-5 py-4 flex flex-col items-center flex-1 justify-between">
-        {/* Title & Active Tag */}
-        <div className="w-full text-center">
-          <span className="text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full bg-teal/10 text-teal border border-teal/20">
-            Study Tracking Hub
-          </span>
-          <h1 className="text-2xl font-black text-ink mt-1.5">Deep Study Stopwatch</h1>
-          <p className="text-xs text-slate mt-0.5">
-            {isActive
-              ? `Currently studying ${selectedSub} (${selectedTask})`
-              : "Track focus hours, block distractions & log daily practice"}
-          </p>
-        </div>
-
-        {/* Circular Stopwatch */}
-        <div className="flex flex-col items-center justify-center my-6">
-          <div
-            className={`w-64 h-64 rounded-full border-4 flex flex-col items-center justify-center bg-white shadow-xl transition-all relative ${
-              isActive
-                ? "border-teal shadow-teal/20 ring-8 ring-teal/5 animate-pulse"
-                : "border-ink/10"
-            }`}
-          >
-            {strictMode && isActive && (
-              <span className="absolute top-6 text-[10px] font-bold bg-rose-50 text-rose-600 px-2.5 py-0.5 rounded-full border border-rose-200">
-                🛑 Strict Blocker Active
-              </span>
-            )}
-            <span className="text-5xl font-black tracking-tight text-ink font-mono mt-2">
-              {formatTime(seconds)}
-            </span>
-            <span className="text-[11px] font-bold text-slate mt-2 uppercase tracking-widest">
-              {isActive ? `${selectedSub} · ${selectedTask}` : "Ready"}
-            </span>
+      <main className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-5">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="font-display text-2xl text-ink">Focus Mode</h1>
+            <p className="text-xs text-slate mt-0.5">
+              Target: <span className="font-bold text-teal">{targetExam}</span>{" "}
+              • Zero Distractions
+            </p>
           </div>
+          <button
+            onClick={() => setShowManualModal(true)}
+            className="text-xs font-bold text-teal bg-teal/10 px-3 py-1.5 rounded-full hover:bg-teal/20 transition-all border border-teal/20"
+          >
+            + Log Offline
+          </button>
         </div>
 
-        {/* Main Stopwatch Controls */}
-        <div className="w-full flex flex-col gap-3">
+        {/* Live Timer Card */}
+        <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
+          <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2">
+            {isActive
+              ? `🔥 Studying ${selectedSub} (${selectedTask})`
+              : "Ready to focus?"}
+          </div>
+
+          <div className="font-mono text-5xl font-black text-ink my-3 tracking-tight">
+            {formatTimer(seconds)}
+          </div>
+
+          {/* Controls */}
           {!isActive ? (
             <button
-              type="button"
-              onClick={() => (seconds === 0 ? setShowPreModal(true) : setIsActive(true))}
-              className="w-full py-4 rounded-2xl bg-teal text-white font-bold text-base shadow-lg shadow-teal/20 hover:bg-teal/90 active:scale-95 transition-all"
+              onClick={() => setShowPreModal(true)}
+              className="mt-4 px-8 py-3.5 bg-teal text-white font-bold text-sm rounded-2xl shadow-md shadow-teal/20 hover:bg-teal/90 transition-all"
             >
-              {seconds === 0 ? "🚀 Start Focus Session" : "▶ Resume Session"}
+              ▶ Start Focus Session
             </button>
           ) : (
             <button
-              type="button"
               onClick={handleStopSession}
-              className="w-full py-4 rounded-2xl bg-rose-500 text-white font-bold text-base shadow-lg shadow-rose-500/20 hover:bg-rose-600 active:scale-95 transition-all"
+              className="mt-4 px-8 py-3.5 bg-rose-600 text-white font-bold text-sm rounded-2xl shadow-md shadow-rose-600/20 hover:bg-rose-700 transition-all"
             >
-              ⏹ End Session & Log Practice
+              ■ Stop & Log Session
             </button>
           )}
+        </div>
 
-          {seconds > 0 && !isActive && (
-            <button
-              type="button"
-              onClick={() => setSeconds(0)}
-              className="w-full py-2.5 rounded-xl text-xs font-bold text-slate hover:bg-ink/5 transition-all text-center"
-            >
-              Reset Stopwatch
-            </button>
-          )}
-
-          {/* Divider */}
-          <div className="relative my-2">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-ink/10" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-paper px-3 text-[11px] font-bold text-slate">OR</span>
-            </div>
+        {/* YPT-Style App Blocker Selector */}
+        <div className="bg-white rounded-ticket border border-ink/10 p-5 shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-bold text-ink flex items-center gap-1.5">
+              <span>🛡️</span>
+              <span>Distraction Blocker (YPT Mode)</span>
+            </h3>
+            <span className="text-[10px] font-bold text-slate">
+              {blockedApps.length} Blocked
+            </span>
           </div>
+          <p className="text-[11px] text-slate mb-3">
+            Tap apps to toggle blocking during active focus sessions.
+          </p>
 
-          {/* Manual Entry Button */}
-          <button
-            type="button"
-            disabled={isActive}
-            onClick={() => setShowManualModal(true)}
-            className="w-full py-3 rounded-2xl border border-ink/15 bg-white text-ink font-bold text-xs hover:border-ink/30 active:scale-95 transition-all flex items-center justify-center gap-2 shadow-xs disabled:opacity-40"
-          >
-            <span>✍️</span>
-            <span>Log Offline Study Hours Manually</span>
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            {APP_LIST.map((app) => {
+              const isBlocked = blockedApps.includes(app.id);
+              return (
+                <button
+                  key={app.id}
+                  type="button"
+                  onClick={() => toggleAppBlock(app.id)}
+                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                    isBlocked
+                      ? "bg-rose-50 border-rose-200 text-rose-800 shadow-2xs"
+                      : "bg-paper/50 border-ink/10 text-slate hover:bg-paper"
+                  }`}
+                >
+                  <span>{app.icon}</span>
+                  <span className="truncate flex-1 text-left">{app.name}</span>
+                  <span className="text-[10px]">{isBlocked ? "⛔" : "✓"}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </main>
 
-      {/* ========================================================================= */}
-      {/* 1. PRE-SESSION SETUP MODAL (Subject, Task, App Blocker)                  */}
-      {/* ========================================================================= */}
+      {/* Pre-Session Modal */}
       {showPreModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl flex flex-col gap-4 border border-ink/10 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <div>
-                <h3 className="text-lg font-black text-ink">Setup Focus Session</h3>
-                <p className="text-xs text-slate">What are you studying right now?</p>
-              </div>
+              <h3 className="text-sm font-bold text-ink">Choose Subject</h3>
               <button
                 onClick={() => setShowPreModal(false)}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-slate hover:bg-ink/5"
+                className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60"
               >
                 ✕
               </button>
             </div>
 
-            {/* Subject Selector */}
+            {/* Subject Selector (Filtered for JEE/NEET) */}
             <div>
-              <label className="text-xs font-bold text-ink block mb-2">Subject</label>
-              <div className="grid grid-cols-2 gap-2">
-                {(["Physics", "Chemistry", "Mathematics", "Biology"] as SubjectType[]).map((sub) => (
+              <label className="text-[11px] font-bold text-slate block mb-1">
+                Subject
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {availableSubjects.map((sub) => (
                   <button
                     key={sub}
                     type="button"
                     onClick={() => setSelectedSub(sub)}
-                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
+                    className={`py-2 rounded-xl text-xs font-bold border transition-all ${
                       selectedSub === sub
-                        ? "border-teal bg-teal/10 text-teal shadow-xs"
-                        : "border-ink/12 text-ink hover:border-ink/25"
+                        ? "bg-teal text-white border-teal shadow-xs"
+                        : "bg-paper/60 border-ink/10 text-ink"
                     }`}
                   >
                     {sub}
@@ -445,23 +334,25 @@ export default function StudyPage() {
               </div>
             </div>
 
-            {/* Task Type (Theory / Questions / Revision) */}
+            {/* Task Category */}
             <div>
-              <label className="text-xs font-bold text-ink block mb-2">Study Task</label>
-              <div className="grid grid-cols-3 gap-2">
+              <label className="text-[11px] font-bold text-slate block mb-1">
+                Category
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
                 {[
-                  { id: "theory", label: "🎥 Theory / Lecture" },
-                  { id: "questions", label: "✍️ Questions Practice" },
+                  { id: "theory", label: "🎥 Theory" },
+                  { id: "questions", label: "✍️ Practice" },
                   { id: "revision", label: "🔄 Revision" },
                 ].map((item) => (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => setSelectedTask(item.id as StudyTaskType)}
-                    className={`py-2.5 px-2 rounded-xl border text-[11px] font-bold transition-all text-center leading-tight ${
+                    className={`py-2 rounded-xl text-[11px] font-bold border transition-all ${
                       selectedTask === item.id
-                        ? "border-marigold bg-marigold/15 text-ink shadow-xs"
-                        : "border-ink/12 text-ink hover:border-ink/25"
+                        ? "bg-marigold/20 text-ink border-marigold shadow-xs"
+                        : "bg-paper/60 border-ink/10 text-slate"
                     }`}
                   >
                     {item.label}
@@ -470,176 +361,66 @@ export default function StudyPage() {
               </div>
             </div>
 
-            {/* 🛑 Strict Distraction Blocker Section */}
-            <div className="rounded-2xl border border-ink/10 bg-paper/60 p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-base">🛑</span>
-                  <div>
-                    <h4 className="text-xs font-bold text-ink">Strict Distraction Blocker</h4>
-                    <p className="text-[10px] text-slate">Silence notifications & block chosen apps</p>
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={strictMode}
-                  onChange={(e) => setStrictMode(e.target.checked)}
-                  className="w-4 h-4 accent-teal cursor-pointer"
-                />
-              </div>
-
-              {strictMode && (
-                <div className="mt-3 pt-3 border-t border-ink/10">
-                  <p className="text-[11px] font-semibold text-ink mb-2">
-                    Apps to restrict during session:
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {APP_LIST.map((app) => {
-                      const isBlocked = blockedApps.includes(app.id);
-                      return (
-                        <button
-                          key={app.id}
-                          type="button"
-                          onClick={() => toggleBlockedApp(app.id)}
-                          className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-semibold transition-all ${
-                            isBlocked
-                              ? "border-rose-500 bg-rose-50 text-rose-700"
-                              : "border-ink/10 bg-white text-slate opacity-60"
-                          }`}
-                        >
-                          <span>{app.icon}</span>
-                          <span className="truncate">{app.name}</span>
-                          <span className="ml-auto text-[10px]">{isBlocked ? "✕" : "+"}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Confirm Start Button */}
             <button
-              type="button"
-              onClick={handleConfirmStart}
-              className="w-full py-4 rounded-2xl bg-teal text-white font-bold text-sm shadow-lg shadow-teal/20 hover:bg-teal/90 transition-all mt-2"
+              onClick={handleStartSession}
+              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90"
             >
-              🚀 Start Session Now
+              Start Focus Session
             </button>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 2. POST-SESSION QUESTIONS LOG MODAL                                       */}
-      {/* ========================================================================= */}
+      {/* Post-Session Modal */}
       {showPostModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl flex flex-col gap-5 border border-ink/10">
-            <div className="text-center">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 text-2xl font-bold flex items-center justify-center mx-auto mb-2">
-                🎯
-              </div>
-              <h3 className="text-lg font-black text-ink">Session Complete!</h3>
-              <p className="text-xs text-slate mt-0.5">
-                You studied <span className="font-bold text-ink">{selectedSub}</span> for{" "}
-                <span className="font-bold text-ink">{Math.round(savedDuration / 60)} minutes</span>.
-              </p>
-            </div>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
+            <h3 className="text-base font-black text-ink text-center">
+              Session Finished!
+            </h3>
+            <p className="text-xs text-slate text-center">
+              Studied {selectedSub} for {Math.round(savedDuration / 60)} mins.
+            </p>
 
-            {/* Questions counter */}
-            <div className="flex flex-col gap-3 bg-paper p-4 rounded-2xl border border-ink/5">
-              <label className="text-xs font-bold text-ink">
-                How many questions did you solve in this session?
-              </label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  min={0}
-                  value={qCount === 0 ? "" : qCount}
-                  placeholder="0"
-                  onChange={(ev) => setQCount(parseInt(ev.target.value) || 0)}
-                  className="w-24 text-center text-xl font-bold p-3 rounded-xl border border-ink/15 bg-white focus:outline-none focus:border-teal"
-                />
-                <div className="flex items-center gap-1.5 flex-1">
-                  {[10, 25, 50].map((inc) => (
-                    <button
-                      key={inc}
-                      type="button"
-                      onClick={() => setQCount((prev) => prev + inc)}
-                      className="flex-1 py-3 text-xs font-bold rounded-xl bg-white border border-ink/10 text-ink hover:bg-teal hover:text-white transition-all shadow-xs"
-                    >
-                      +{inc}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex flex-col gap-2 pt-2">
-              {qCount > 0 && (
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => handleFinishAndSave(false)}
-                  className="w-full py-4 rounded-xl bg-teal text-white font-bold text-sm shadow-lg shadow-teal/20 hover:bg-teal/90 transition-all"
-                >
-                  {saving ? "Saving…" : `✓ Save ${qCount} Questions & Focus Time`}
-                </button>
-              )}
-
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => handleFinishAndSave(true)}
-                className="w-full py-3.5 rounded-xl bg-ink/5 hover:bg-ink/10 text-ink font-bold text-xs transition-all text-center"
-              >
-                📖 No questions solved (Theory / Lecture / Revision only)
-              </button>
-            </div>
+            <button
+              disabled={saving}
+              onClick={() => handleFinishAndSave(true)}
+              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs"
+            >
+              {saving ? "Saving..." : "✓ Save Study Time"}
+            </button>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 3. MANUAL OFFLINE ENTRY MODAL (With Anti-Cheat Overlap Check)              */}
-      {/* ========================================================================= */}
+      {/* Manual Offline Modal */}
       {showManualModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl flex flex-col gap-4 border border-ink/10">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <div>
-                <h3 className="text-lg font-black text-ink">Log Offline Study</h3>
-                <p className="text-xs text-slate">Record library, coaching, or self-study</p>
-              </div>
+              <h3 className="text-sm font-bold text-ink">Log Offline Study</h3>
               <button
                 onClick={() => setShowManualModal(false)}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-slate hover:bg-ink/5"
+                className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60"
               >
                 ✕
               </button>
             </div>
 
-            {manualError && (
-              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium">
-                ⚠️ {manualError}
-              </div>
-            )}
-
-            {/* Subject Selector */}
             <div>
-              <label className="text-xs font-bold text-ink block mb-1.5">Subject</label>
-              <div className="grid grid-cols-2 gap-2">
-                {(["Physics", "Chemistry", "Mathematics", "Biology"] as SubjectType[]).map((sub) => (
+              <label className="text-[11px] font-bold text-slate block mb-1">
+                Subject
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {availableSubjects.map((sub) => (
                   <button
                     key={sub}
                     type="button"
                     onClick={() => setManualSub(sub)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
+                    className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${
                       manualSub === sub
-                        ? "border-teal bg-teal/10 text-teal shadow-xs"
-                        : "border-ink/12 text-ink hover:border-ink/25"
+                        ? "bg-teal text-white border-teal shadow-xs"
+                        : "bg-paper/60 border-ink/10 text-ink"
                     }`}
                   >
                     {sub}
@@ -648,81 +429,56 @@ export default function StudyPage() {
               </div>
             </div>
 
-            {/* Task Type */}
-            <div>
-              <label className="text-xs font-bold text-ink block mb-1.5">Task Category</label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: "theory", label: "🎥 Theory" },
-                  { id: "questions", label: "✍️ Questions" },
-                  { id: "revision", label: "🔄 Revision" },
-                ].map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setManualTask(item.id as StudyTaskType)}
-                    className={`py-2 px-2 rounded-xl border text-[11px] font-bold transition-all text-center ${
-                      manualTask === item.id
-                        ? "border-marigold bg-marigold/15 text-ink shadow-xs"
-                        : "border-ink/12 text-ink"
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Duration & Questions */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-xs font-bold text-ink block mb-1">Duration (Mins)</label>
+                <label className="text-[11px] font-bold text-slate block mb-1">
+                  Minutes
+                </label>
                 <input
                   type="number"
                   min={1}
-                  max={720}
                   value={manualMinutes}
                   onChange={(e) => setManualMinutes(parseInt(e.target.value) || 0)}
-                  className="w-full text-center text-base font-bold p-2.5 rounded-xl border border-ink/15 bg-white focus:outline-none focus:border-teal"
+                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15"
                 />
               </div>
-
               <div>
-                <label className="text-xs font-bold text-ink block mb-1">Questions Solved</label>
+                <label className="text-[11px] font-bold text-slate block mb-1">
+                  Questions
+                </label>
                 <input
                   type="number"
                   min={0}
                   value={manualQs}
                   onChange={(e) => setManualQs(parseInt(e.target.value) || 0)}
-                  className="w-full text-center text-base font-bold p-2.5 rounded-xl border border-ink/15 bg-white focus:outline-none focus:border-teal"
+                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15"
                 />
               </div>
             </div>
 
-            {/* Date Picker */}
             <div>
-              <label className="text-xs font-bold text-ink block mb-1">Date</label>
+              <label className="text-[11px] font-bold text-slate block mb-1">
+                Date
+              </label>
               <input
                 type="date"
                 value={manualDate}
                 onChange={(e) => setManualDate(e.target.value)}
-                className="w-full text-xs font-semibold p-2.5 rounded-xl border border-ink/15 bg-white focus:outline-none focus:border-teal"
+                className="w-full p-2 text-xs rounded-lg border border-ink/15"
               />
             </div>
 
             <button
-              type="button"
               disabled={saving}
               onClick={handleSaveManualEntry}
-              className="w-full py-3.5 rounded-2xl bg-ink text-paper font-bold text-xs shadow-md hover:bg-ink-100 disabled:opacity-40 transition-all mt-2"
+              className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs"
             >
-              {saving ? "Saving…" : "✓ Add to Daily Study Hours"}
+              {saving ? "Saving..." : "Add to Daily Study Hours"}
             </button>
           </div>
         </div>
       )}
 
-      {/* Bottom Navigation */}
       <BottomNav />
     </div>
   );
