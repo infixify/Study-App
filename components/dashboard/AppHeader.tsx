@@ -1,3 +1,4 @@
+// components/dashboard/AppHeader.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -38,7 +39,8 @@ export default function AppHeader() {
         .eq("uid", authUser.id)
         .maybeSingle();
 
-      const resolvedName = profile?.name || authUser.user_metadata?.full_name || "Student";
+      const resolvedName =
+        profile?.name || authUser.user_metadata?.full_name || "Student";
       setUser({
         id: authUser.id,
         name: resolvedName,
@@ -56,7 +58,10 @@ export default function AppHeader() {
     setSavingName(true);
 
     try {
-      await supabase.from("users").update({ name: newName.trim() }).eq("uid", user.id);
+      await supabase
+        .from("users")
+        .update({ name: newName.trim() })
+        .eq("uid", user.id);
       await supabase.auth.updateUser({ data: { full_name: newName.trim() } });
       setUser((prev) => (prev ? { ...prev, name: newName.trim() } : null));
       setEditingName(false);
@@ -72,14 +77,16 @@ export default function AppHeader() {
     router.push("/onboarding");
   }
 
+  // 🎯 Updated Hamburger Navigation Items Exactly As Requested:
   const navLinks = [
     { name: "Dashboard", href: "/dashboard", icon: "⚡" },
-    { name: "Syllabus & Backlogs", href: "/library", icon: "📚" },
-    { name: "Daily Tasks", href: "/todo", icon: "✓" },
-    { name: "Focus Stopwatch", href: "/focus", icon: "⏱️" },
-    { name: "Tests & Accuracy", href: "/tests", icon: "📊" },
-    { name: "Notes & PYQs", href: "/resources", icon: "📖" },
-    { name: "My Profile", href: "/profile", icon: "👤" },
+    { name: "Syllabus", href: "/library", icon: "📚" },
+    { name: "Daily Tasks (To-Do List)", href: "/todo", icon: "✓" },
+    { name: "Study", href: "/focus", icon: "⏱️" },
+    { name: "Test and Test Schedule", href: "/tests", icon: "📊" },
+    { name: "Resources Library", href: "/resources", icon: "📖" },
+    { name: "Community", href: "/groups", icon: "👥" },
+    { name: "Profile", href: "/profile", icon: "👤" },
   ];
 
   return (
@@ -94,8 +101,18 @@ export default function AppHeader() {
             aria-label="Open Navigation Menu"
             className="w-9 h-9 rounded-xl flex items-center justify-center text-ink/75 hover:text-ink hover:bg-ink/5 active:scale-95 transition-all"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2.2}
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+              />
             </svg>
           </button>
 
@@ -109,7 +126,7 @@ export default function AppHeader() {
           </Link>
         </div>
 
-        {/* Right: Profile Avatar Pill */}
+        {/* Right: User Avatar + Profile Quick Menu */}
         <div className="relative">
           <button
             type="button"
@@ -160,7 +177,9 @@ export default function AppHeader() {
                       </div>
                     ) : (
                       <div className="flex items-center justify-between w-full">
-                        <h4 className="text-sm font-bold text-ink truncate">{user?.name}</h4>
+                        <h4 className="text-sm font-bold text-ink truncate">
+                          {user?.name}
+                        </h4>
                         <button
                           onClick={() => setEditingName(true)}
                           className="text-[11px] text-teal font-semibold hover:underline"
@@ -170,12 +189,15 @@ export default function AppHeader() {
                       </div>
                     )}
                   </div>
-                  <p className="text-[11px] text-slate truncate mt-0.5">{user?.email}</p>
-
+                  <p className="text-[11px] text-slate truncate mt-0.5">
+                    {user?.email}
+                  </p>
                   {user?.targetExam && (
                     <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-marigold/10 border border-marigold/20 text-[10px] font-bold text-ink">
                       <span>🎯</span>
-                      <span>Targeting {user.targetExam} {user.targetYear || ""}</span>
+                      <span>
+                        Targeting {user.targetExam} {user.targetYear || ""}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -194,7 +216,7 @@ export default function AppHeader() {
                     onClick={() => setProfilePopupOpen(false)}
                     className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-medium text-ink hover:bg-ink/5 transition-colors"
                   >
-                    <span>⏱️</span> Open Focus Timer
+                    <span>⏱️</span> Open Study Timer
                   </Link>
                 </div>
 
@@ -204,8 +226,18 @@ export default function AppHeader() {
                   onClick={handleSignOut}
                   className="w-full mt-2 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
                 >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+                  <svg
+                    className="w-3.5 h-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
+                    />
                   </svg>
                   Sign Out
                 </button>
@@ -234,8 +266,12 @@ export default function AppHeader() {
                     PW
                   </div>
                   <div>
-                    <h3 className="font-display font-bold text-base text-ink">PrepWise</h3>
-                    <p className="text-[10px] text-slate font-medium">All Pages Navigation</p>
+                    <h3 className="font-display font-bold text-base text-ink">
+                      PrepWise
+                    </h3>
+                    <p className="text-[10px] text-slate font-medium">
+                      All Pages Navigation
+                    </p>
                   </div>
                 </div>
                 <button
@@ -276,8 +312,12 @@ export default function AppHeader() {
                   {user?.name ? user.name[0].toUpperCase() : "U"}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-ink truncate max-w-[120px]">{user?.name}</p>
-                  <p className="text-[10px] text-slate truncate max-w-[120px]">{user?.email}</p>
+                  <p className="text-xs font-bold text-ink truncate max-w-[120px]">
+                    {user?.name}
+                  </p>
+                  <p className="text-[10px] text-slate truncate max-w-[120px]">
+                    {user?.email}
+                  </p>
                 </div>
               </div>
               <button
@@ -292,4 +332,4 @@ export default function AppHeader() {
       )}
     </>
   );
-          }
+}
