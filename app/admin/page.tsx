@@ -283,9 +283,15 @@ export default function AdminPage() {
       }
 
       if (deliveryChannel === "both" || deliveryChannel === "push_only") {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+
         await fetch("/api/admin/send-notification", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken || ""}`,
+          },
           body: JSON.stringify({
             title: notifTitle.trim(),
             body: notifBody.trim(),
