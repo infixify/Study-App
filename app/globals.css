@@ -1,14 +1,67 @@
+/* app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
+  /* LIGHT THEME (Crisp Editorial - High Contrast) */
   --bg-paper: #F8F9FA;
   --color-surface: #FFFFFF;
+  --color-surface-elevated: #F1F5F9;
   --color-ink: #0F172A;
+  --color-ink-subtle: #1E293B;
   --color-slate: #64748B;
-  --border-subtle: rgba(15, 23, 42, 0.08);
+  --border-color: rgba(15, 23, 42, 0.08);
 }
+
 html.dark {
+  /* DARK THEME (Midnight OLED Studio) */
   --bg-paper: #0B0F17;
-  --color-surface: #151D2A;
+  --color-surface: #141C2B;
+  --color-surface-elevated: #1E293B;
   --color-ink: #F8FAFC;
+  --color-ink-subtle: #E2E8F0;
   --color-slate: #94A3B8;
-  --border-subtle: rgba(255, 255, 255, 0.1);
+  --border-color: rgba(255, 255, 255, 0.1);
+}
+
+body {
+  background-color: var(--bg-paper);
+  color: var(--color-ink);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Ensure background cards switch cleanly in dark mode */
+html.dark .bg-white {
+  background-color: var(--color-surface) !important;
+}
+
+html.dark .bg-paper {
+  background-color: var(--bg-paper) !important;
+}
+
+html.dark .border-ink\/10,
+html.dark .border-ink\/8,
+html.dark .border-ink\/15,
+html.dark .border-ink\/12 {
+  border-color: var(--border-color) !important;
+}
+
+@layer base {
+  :focus-visible {
+    outline: 2px solid #F59E0B;
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+.perf-rail {
+  background-image: radial-gradient(circle, var(--color-slate) 1px, transparent 1px);
+  background-size: 8px 8px;
 }
