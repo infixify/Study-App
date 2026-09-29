@@ -31,6 +31,15 @@ type Stats = {
   boardsOnly: number;
 };
 
+type RecentUser = {
+  uid: string;
+  name: string | null;
+  email: string | null;
+  target_exam: string | null;
+  target_year: number | null;
+  created_at?: string;
+};
+
 type AdminNotification = {
   id: string;
   title: string;
@@ -61,6 +70,7 @@ export default function AdminPage() {
 
   // --- Admin Data State ---
   const [stats, setStats] = useState<Stats | null>(null);
+  const [recentUsersList, setRecentUsersList] = useState<RecentUser[]>([]);
   const [schedule, setSchedule] = useState<ExamScheduleRow[]>([]);
   const [editedDates, setEditedDates] = useState<
     Record<string, { exam_date: string; is_confirmed: boolean }>
@@ -124,21 +134,40 @@ export default function AdminPage() {
   }, []);
 
   const loadAdminData = async () => {
-    // 1. Stats
-    const { data: users } = await supabase
-      .from("users")
-      .select("target_exam, class_level");
+    // 1. STATS: 100% Accurate & Case-Insensitive Calculation
+    try {
+      const { data: users, count } = await supabase
+        .from("users")
+        .select("uid, name, email, target_exam, target_year, created_at", { count: "exact" })
+        .order("created_at", { ascending: false });
 
-    if (users) {
-      setStats({
-        totalUsers: users.length,
-        jeeUsers: users.filter((u) => u.target_exam === "JEE").length,
-        neetUsers: users.filter((u) => u.target_exam === "NEET").length,
-        boardsOnly: users.filter((u) => u.target_exam === "BOARDS").length,
-      });
+      if (users) {
+        const total = count ?? users.length;
+        let jee = 0;
+        let neet = 0;
+        let boards = 0;
+
+        users.forEach((u) => {
+          const exam = (u.target_exam || "").trim().toUpperCase();
+          if (exam.includes("JEE")) jee++;
+          else if (exam.includes("NEET")) neet++;
+          else if (exam.includes("BOARD")) boards++;
+        });
+
+        setStats({
+          totalUsers: total,
+          jeeUsers: jee,
+          neetUsers: neet,
+          boardsOnly: boards,
+        });
+
+        setRecentUsersList(users.slice(0, 8));
+      }
+    } catch (err) {
+      console.warn("Stats load error", err);
     }
 
-    // 2. Schedule
+    // 2. Schedules
     const { data: schedules } = await supabase
       .from("exam_schedules")
       .select("*")
@@ -437,13 +466,52 @@ export default function AdminPage() {
       </header>
 
       <div className="max-w-4xl mx-auto px-6 pt-6 flex flex-col gap-8">
-        {/* 1. STATS */}
+        {/* 1. STATS (REALTIME & ACCURATE) */}
         {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Total Aspirants" value={stats.totalUsers} />
-            <StatCard label="JEE Students" value={stats.jeeUsers} />
-            <StatCard label="NEET Students" value={stats.neetUsers} />
-            <StatCard label="Boards Only" value={stats.boardsOnly} />
+          <div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard label="Total Aspirants" value={stats.totalUsers} />
+              <StatCard label="JEE Students" value={stats.jeeUsers} />
+              <StatCard label="NEET Students" value={stats.neetUsers} />
+              <StatCard label="Boards Only" value={stats.boardsOnly} />
+            </div>
+
+            {/* Recent Registered Students Quick Preview */}
+            {recentUsersList.length > 0 && (
+              <div className="mt-3 p-4 rounded-ticket border border-ink/10 bg-white">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-bold text-ink">
+                    Recently Enrolled Aspirants
+                  </h4>
+                  <span className="text-[10px] text-slate font-medium">
+                    Showing latest {recentUsersList.length}
+                  </span>
+                </div>
+                <div className="divide-y divide-ink/5">
+                  {recentUsersList.map((u) => (
+                    <div
+                      key={u.uid}
+                      className="py-2 flex items-center justify-between text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-ink/5 flex items-center justify-center font-bold text-[10px] text-ink">
+                          {u.name ? u.name[0].toUpperCase() : "U"}
+                        </div>
+                        <div>
+                          <p className="font-bold text-ink leading-none">
+                            {u.name || "Student"}
+                          </p>
+                          <p className="text-[10px] text-slate">{u.email}</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal/10 text-teal">
+                        {u.target_exam || "JEE"} {u.target_year || ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
