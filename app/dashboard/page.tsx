@@ -131,7 +131,18 @@ export default function DashboardPage() {
       if (uProf) {
         setProfile(uProf);
         setSelectedShiftId(uProf.selected_shift_id || null);
-        fetchMentorReport(session.user.id);
+
+        // CACHE-FIRST MENTOR REPORT: Zero API calls on restart!
+        const cached = localStorage.getItem(`mentor_report_${session.user.id}`);
+        if (cached) {
+          try {
+            setMentorReport(JSON.parse(cached));
+          } catch {
+            fetchMentorReport(session.user.id, false);
+          }
+        } else {
+          fetchMentorReport(session.user.id, false);
+        }
 
         const allowedClasses = classLevelsForContent(uProf.class_level);
         setSelectedClass(allowedClasses[0] || "11");
@@ -169,7 +180,6 @@ export default function DashboardPage() {
       if (schedules && schedules.length > 0) {
         studentSchedules = schedules.filter((s) => {
           if (s.target_exam === "Boards") {
-            // Strictly exclude boards if user is Dropper
             return wantsBoards;
           }
           return s.target_exam === targetExam || s.target_exam === "ALL";
@@ -224,7 +234,6 @@ export default function DashboardPage() {
             is_confirmed: false,
           });
         }
-        // ONLY non-dropper with wants_boards gets boards fallback!
         if (wantsBoards) {
           studentSchedules.push({
             id: "boards-fallback",
@@ -361,6 +370,7 @@ export default function DashboardPage() {
     fetchChaptersForSubject(subjId);
   };
 
+  // Dedicated Fetch that writes to Cache
   const fetchMentorReport = async (uid: string, force = false) => {
     setMentorLoading(true);
     try {
@@ -372,6 +382,9 @@ export default function DashboardPage() {
       if (res.ok) {
         const json = await res.json();
         setMentorReport(json.report);
+        if (json.report) {
+          localStorage.setItem(`mentor_report_${uid}`, JSON.stringify(json.report));
+        }
       }
     } catch (e) {
       console.error("Mentor fetch error:", e);
@@ -492,7 +505,6 @@ export default function DashboardPage() {
                 key={exam.id}
                 className="rounded-2xl p-3 bg-[#0B132B] text-white shadow-md border border-slate-800 flex flex-col justify-between"
               >
-                {/* Header Badge */}
                 <div className="flex items-center justify-between gap-1 mb-1.5">
                   <span className="text-[9.5px] font-black uppercase tracking-wider text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-md border border-amber-400/30 truncate">
                     {exam.label}
@@ -502,7 +514,6 @@ export default function DashboardPage() {
                   </span>
                 </div>
 
-                {/* Days Left Hero & Date */}
                 <div className="flex items-baseline justify-between mt-1 mb-1">
                   <div className="text-2xl font-black tracking-tight text-amber-400 leading-none">
                     {days}
@@ -518,7 +529,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Shift Dropdown */}
                 {shifts.length > 0 && (
                   <div className="mt-1.5 pt-1.5 border-t border-white/10">
                     <select
@@ -552,7 +562,6 @@ export default function DashboardPage() {
 
         {/* 3. THREE COCKPIT METRICS */}
         <div className="grid grid-cols-3 gap-2">
-          {/* Today Focus -> /focus */}
           <button
             type="button"
             onClick={() => router.push("/focus")}
@@ -566,7 +575,6 @@ export default function DashboardPage() {
             <span className="text-[10px] font-bold text-teal-700 block mt-0.5">Timer →</span>
           </button>
 
-          {/* Today Questions */}
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
             <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Questions</span>
             <div className="text-lg font-black text-slate-900 tracking-tight">{todayQuestions}</div>
@@ -575,7 +583,6 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          {/* Backlogs Count */}
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
             <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Backlogs</span>
             <div className="text-lg font-black text-slate-900 tracking-tight">{backlogsList.length}</div>
