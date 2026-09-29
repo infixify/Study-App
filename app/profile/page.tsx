@@ -90,8 +90,8 @@ export default function ProfilePage() {
 
   async function saveEditable(nextMode: StudyMode, nextBatch: string) {
     setSaving(true);
-    const ok = await updateEditableProfile({ studyMode: nextMode, batchName: nextBatch });
-    if (ok) {
+    const res = await updateEditableProfile({ studyMode: nextMode, batchOrBranch: nextBatch });
+    if (res && res.success) {
       setStudyMode(nextMode);
       setBatch(nextBatch);
       setProfile((prev) => (prev ? { ...prev, studyMode: nextMode, batchName: nextBatch } : null));
