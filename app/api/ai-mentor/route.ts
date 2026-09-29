@@ -7,8 +7,8 @@ const apiKey =
 
 const MODELS_CASCADE = [
   "gemini-2.5-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-8b",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-pro",
 ];
 
 async function callGeminiApi(model: string, prompt: string, key: string) {
@@ -61,7 +61,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
     }
 
-    // Check cache first if not forced
     if (!forceRefresh) {
       const { data: existingUser } = await supabase
         .from("users")
@@ -74,7 +73,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // Fetch student telemetry
     const [
       { data: profile },
       { data: pastLogs },
@@ -97,16 +95,15 @@ export async function POST(req: Request) {
         .limit(14),
       supabase
         .from("test_logs")
-        .select("test_name, total_marks, max_marks, accuracy, test_date")
+        .select("test_name, marks_scored, max_marks, accuracy, test_date")
         .eq("user_id", userId)
         .order("test_date", { ascending: false })
         .limit(5),
       supabase
-        .from("tasks")
-        .select("title, priority, due_date")
+        .from("chapter_progress")
+        .select("chapter_id, status")
         .eq("user_id", userId)
-        .eq("task_type", "backlog")
-        .neq("status", "completed"),
+        .eq("is_backlog", true),
     ]);
 
     const targetExam = profile?.target_exam || "JEE";
