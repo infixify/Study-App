@@ -1,235 +1,205 @@
+// components/dashboard/AiMentorCard.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useState } from "react";
 
-interface MentorReport {
-  id?: string;
-  overall_status: "On Track" | "Needs Attention" | "Critical Backlog" | string;
-  score_prediction?: string;
-  strengths: string[];
-  weaknesses: string[];
-  diagnostic_summary: string;
-  seven_day_plan: { day: string; focus: string; target: string }[];
-  action_tips: string[];
-  created_at?: string;
+interface AiMentorCardProps {
+  userId: string;
+  report: any;
+  loading: boolean;
+  onRefresh: () => void;
+  onOpenDoubtSolver: () => void;
 }
 
-export default function AiMentorCard({ userId }: { userId: string }) {
-  const [report, setReport] = useState<MentorReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
-  const [showModal, setShowModal] = useState(false);
+export default function AiMentorCard({
+  report,
+  loading,
+  onRefresh,
+  onOpenDoubtSolver,
+}: AiMentorCardProps) {
+  const [modalOpen, setModalOpen] = useState(false);
 
-  const fetchMentorReport = async (force = false) => {
-    if (force) setGenerating(true);
-    else setLoading(true);
+  const status = report?.overall_status || "On Track";
+  const prediction = report?.score_prediction || "Projected Target: 99+ %ile";
+  const summary =
+    report?.diagnostic_summary ||
+    "Maintain a rigid 1:1.5 Theory-to-Practice ratio to guarantee high mock retention.";
 
-    try {
-      const res = await fetch("/api/ai-mentor", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, forceRefresh: force }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.report) setReport(data.report);
-      }
-    } catch (e) {
-      console.error("Mentor card load error:", e);
-    } finally {
-      setLoading(false);
-      setGenerating(false);
-    }
-  };
-
-  useEffect(() => {
-    if (userId) fetchMentorReport(false);
-  }, [userId]);
-
-  if (loading) {
-    return (
-      <div className="w-full p-5 rounded-ticket border border-ink/10 bg-white animate-pulse">
-        <div className="h-4 bg-ink/10 rounded w-1/3 mb-2" />
-        <div className="h-3 bg-ink/5 rounded w-2/3" />
-      </div>
-    );
-  }
-
-  const statusColor =
-    report?.overall_status === "On Track"
-      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-      : report?.overall_status === "Critical Backlog"
-      ? "bg-rose-50 text-rose-700 border-rose-200"
-      : "bg-amber-50 text-amber-700 border-amber-200";
+  const isWarning = status.toLowerCase().includes("attention") || status.toLowerCase().includes("lag");
 
   return (
     <>
-      <div className="rounded-ticket border border-indigo-100 bg-gradient-to-br from-white via-indigo-50/20 to-white p-5 shadow-xs relative overflow-hidden">
-        {/* Glow Accent */}
-        <div className="absolute -top-12 -right-12 w-28 h-28 bg-indigo-200/30 rounded-full blur-2xl pointer-events-none" />
+      {/* Sleek Compact AI Power Widget */}
+      <div className="rounded-2xl p-4 bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/50 border border-indigo-100/80 shadow-xs relative overflow-hidden">
+        {/* Subtle decorative glow */}
+        <div className="absolute -top-10 -right-10 w-28 h-28 bg-indigo-200/30 rounded-full blur-xl pointer-events-none" />
 
-        {/* Header */}
-        <div className="flex items-center justify-between mb-3 relative z-10">
+        {/* Header Row */}
+        <div className="flex items-center justify-between gap-2 mb-2.5">
           <div className="flex items-center gap-2">
-            <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-sm font-bold shadow-xs">
+            <span className="w-7 h-7 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs shadow-xs">
               🧠
             </span>
             <div>
-              <h3 className="text-sm font-black text-ink">AI Personal Mentor</h3>
-              <p className="text-[10px] text-slate">Kota-standard Diagnostic & Action Plan</p>
+              <h2 className="text-xs font-black tracking-tight text-ink flex items-center gap-1.5">
+                AI Academic Mentor
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100/70 px-1.5 py-0.5 rounded-md">
+                  Kota Mode
+                </span>
+              </h2>
             </div>
           </div>
 
-          {report?.overall_status && (
-            <span className={`text-[10.5px] font-black px-2.5 py-1 rounded-full border ${statusColor}`}>
-              ● {report.overall_status}
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                isWarning
+                  ? "bg-rose-50 text-rose-600 border-rose-200"
+                  : "bg-emerald-50 text-emerald-600 border-emerald-200"
+              }`}
+            >
+              • {status}
             </span>
-          )}
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={loading}
+              className="w-6 h-6 rounded-lg text-slate hover:text-ink hover:bg-black/5 flex items-center justify-center transition-all disabled:opacity-40"
+              title="Recalculate Academic Report"
+            >
+              <span className={`text-xs ${loading ? "animate-spin" : ""}`}>🔄</span>
+            </button>
+          </div>
         </div>
 
-        {/* Score Prediction & Highlight */}
-        {report?.score_prediction && (
-          <div className="p-3 rounded-xl bg-white border border-indigo-100 shadow-2xs mb-3">
-            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">Target Trajectory</p>
-            <p className="text-xs font-bold text-ink mt-0.5">{report.score_prediction}</p>
+        {/* Prediction Badge + 1-Line Insight */}
+        <div className="bg-white/80 backdrop-blur-xs rounded-xl p-2.5 border border-indigo-100/60 mb-3">
+          <div className="flex items-center justify-between text-[11px] font-black text-indigo-950 mb-1">
+            <span>{prediction}</span>
           </div>
-        )}
+          <p className="text-[11px] text-slate line-clamp-2 leading-relaxed">
+            {summary}
+          </p>
+        </div>
 
-        {/* Short Summary Snippet */}
-        <p className="text-xs text-slate line-clamp-2 leading-relaxed mb-4">
-          {report?.diagnostic_summary || "Analyzing your study habits, test scores and backlog load…"}
-        </p>
-
-        {/* Actions */}
-        <div className="flex items-center gap-2">
+        {/* Dual Compact Action Buttons */}
+        <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => setShowModal(true)}
-            className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-sm shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95 transition-all text-center"
+            onClick={() => setModalOpen(true)}
+            className="py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-xs active:scale-[0.98] transition-all"
           >
-            🔍 View Full Diagnostic & 7-Day Plan
+            <span>📋</span> View 7-Day Plan
           </button>
 
           <button
             type="button"
-            disabled={generating}
-            onClick={() => fetchMentorReport(true)}
-            title="Refresh AI Analysis"
-            className="p-2.5 rounded-xl border border-ink/12 bg-white text-slate hover:text-ink active:scale-95 transition-all text-xs"
+            onClick={onOpenDoubtSolver}
+            className="py-2 px-3 rounded-xl bg-white hover:bg-paper text-indigo-700 font-black text-[11px] border border-indigo-200/90 flex items-center justify-center gap-1.5 shadow-2xs active:scale-[0.98] transition-all"
           >
-            {generating ? "⏳" : "🔄"}
+            <span className="text-teal">✨</span> Ask Doubt Solver
           </button>
         </div>
       </div>
 
-      {/* 🚀 FULL MENTOR REPORT MODAL */}
-      {showModal && report && (
+      {/* Full 7-Day Diagnostic Modal */}
+      {modalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-          <div className="w-full max-w-lg bg-white rounded-3xl p-6 shadow-2xl flex flex-col gap-4 border border-ink/10 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full max-h-[88vh] flex flex-col shadow-2xl border border-ink/10 overflow-hidden">
             {/* Modal Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-ink/8">
-              <div className="flex items-center gap-2.5">
-                <span className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-base">
+            <div className="p-4 border-b border-ink/8 flex items-center justify-between bg-paper/60">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-sm shadow-xs">
                   🧠
                 </span>
                 <div>
-                  <h3 className="text-base font-black text-ink">Mentor Diagnostic Report</h3>
-                  <p className="text-[11px] text-slate">Personalized Kota Academic Roadmap</p>
+                  <h3 className="text-sm font-black text-ink">Academic Diagnostic Report</h3>
+                  <p className="text-[10px] text-slate">Personalized Kota Blueprint</p>
                 </div>
               </div>
               <button
-                onClick={() => setShowModal(false)}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-slate hover:bg-ink/5"
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-slate hover:bg-ink/10 text-sm"
               >
                 ✕
               </button>
             </div>
 
-            {/* Overall Status Badge */}
-            <div className="flex items-center justify-between p-3.5 rounded-2xl bg-indigo-50/60 border border-indigo-100">
-              <div>
-                <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">Readiness Status</p>
-                <p className="text-sm font-black text-indigo-950 mt-0.5">{report.overall_status}</p>
-              </div>
-              <span className="text-xs font-bold text-indigo-700 bg-white px-3 py-1 rounded-full border border-indigo-200">
-                {report.score_prediction?.split(":")[1]?.trim() || "Active Tracking"}
-              </span>
-            </div>
-
-            {/* Strengths & Weaknesses */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-200/70">
-                <p className="text-[11px] font-bold text-emerald-900 mb-1.5 flex items-center gap-1">
-                  <span>✓</span> Strengths
-                </p>
-                <ul className="text-[11px] text-emerald-800 space-y-1">
-                  {report.strengths?.map((s, i) => (
-                    <li key={i}>• {s}</li>
-                  ))}
-                </ul>
+            {/* Modal Body */}
+            <div className="p-4 overflow-y-auto space-y-3.5 text-xs">
+              {/* Status Box */}
+              <div className="p-3 bg-indigo-50/60 border border-indigo-100 rounded-2xl flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-slate uppercase tracking-wider">Status</span>
+                  <div className="font-black text-indigo-950 text-sm">{status}</div>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] font-bold text-slate uppercase tracking-wider">Benchmark</span>
+                  <div className="font-bold text-indigo-700 text-xs">{prediction}</div>
+                </div>
               </div>
 
-              <div className="p-3 rounded-2xl bg-rose-50/60 border border-rose-200/70">
-                <p className="text-[11px] font-bold text-rose-900 mb-1.5 flex items-center gap-1">
-                  <span>⚠</span> Focus Areas
-                </p>
-                <ul className="text-[11px] text-rose-800 space-y-1">
-                  {report.weaknesses?.map((w, i) => (
-                    <li key={i}>• {w}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-
-            {/* Diagnostic Narrative */}
-            <div className="p-4 rounded-2xl bg-paper/60 border border-ink/8">
-              <h4 className="text-xs font-bold text-ink mb-1.5">Detailed Performance Analysis</h4>
-              <p className="text-xs text-slate leading-relaxed whitespace-pre-line">
-                {report.diagnostic_summary}
-              </p>
-            </div>
-
-            {/* 7-Day Action Plan */}
-            <div>
-              <h4 className="text-xs font-bold text-ink mb-2">Personalized 7-Day Action Plan</h4>
-              <div className="flex flex-col gap-2">
-                {report.seven_day_plan?.map((plan, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-xl border border-ink/10 bg-white flex items-center justify-between text-xs"
-                  >
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 mr-2">
-                        {plan.day}
-                      </span>
-                      <strong className="text-ink">{plan.focus}</strong>
-                      <p className="text-[11px] text-slate mt-0.5">{plan.target}</p>
-                    </div>
+              {/* Strengths & Weaknesses */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-2xl">
+                  <div className="font-black text-emerald-800 text-[11px] mb-1.5 flex items-center gap-1">
+                    <span>✓</span> Strengths
                   </div>
-                ))}
+                  <ul className="space-y-1 text-[10.5px] text-emerald-950">
+                    {(report?.strengths || ["Consistent daily tracking"]).map((s: string, i: number) => (
+                      <li key={i}>• {s}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="p-3 bg-rose-50/50 border border-rose-100 rounded-2xl">
+                  <div className="font-black text-rose-800 text-[11px] mb-1.5 flex items-center gap-1">
+                    <span>⚠️</span> Red Flags
+                  </div>
+                  <ul className="space-y-1 text-[10.5px] text-rose-950">
+                    {(report?.weaknesses || ["Increase numerical practice"]).map((w: string, i: number) => (
+                      <li key={i}>• {w}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Comprehensive Summary */}
+              <div className="p-3.5 bg-paper/60 border border-ink/8 rounded-2xl">
+                <h4 className="text-[11px] font-black text-ink mb-1">Director's Performance Review</h4>
+                <p className="text-[11px] text-slate leading-relaxed whitespace-pre-wrap">{summary}</p>
+              </div>
+
+              {/* 7-Day Plan */}
+              <div>
+                <h4 className="text-[11px] font-black text-ink mb-2">7-Day Remedial Action Blueprint</h4>
+                <div className="space-y-1.5">
+                  {(report?.seven_day_plan || []).map((step: any, i: number) => (
+                    <div key={i} className="p-2.5 bg-white border border-ink/8 rounded-xl flex items-start gap-2 shadow-2xs">
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-black text-[9.5px] flex-shrink-0">
+                        {step.day}
+                      </span>
+                      <div className="flex-1">
+                        <div className="font-bold text-ink text-[11px]">{step.focus}</div>
+                        <div className="text-slate text-[10px]">{step.target}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
-            {/* Coaching Action Tips */}
-            <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200/70">
-              <p className="text-xs font-bold text-amber-900 mb-1 flex items-center gap-1">
-                <span>💡</span> Mentor's Golden Advice
-              </p>
-              <ul className="text-xs text-amber-800 space-y-1">
-                {report.action_tips?.map((tip, i) => (
-                  <li key={i}>• {tip}</li>
-                ))}
-              </ul>
+            {/* Modal Footer */}
+            <div className="p-3 border-t border-ink/8 bg-paper/40 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="px-4 py-2 bg-ink text-paper rounded-xl font-bold text-xs"
+              >
+                Got It, Back to Study
+              </button>
             </div>
-
-            {/* Close Button */}
-            <button
-              onClick={() => setShowModal(false)}
-              className="w-full py-3 rounded-xl bg-ink text-paper text-xs font-bold hover:bg-ink-100 transition-all mt-1"
-            >
-              Got it, I'll execute this!
-            </button>
           </div>
         </div>
       )}
