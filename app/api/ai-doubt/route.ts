@@ -1,7 +1,6 @@
 // app/api/ai-doubt/route.ts
 import { NextResponse } from "next/server";
 
-// Dedicated Key for Doubt Solver or fallback to general key
 const apiKey =
   process.env.GEMINI_API_KEY_DOUBT || process.env.GEMINI_API_KEY || "";
 
@@ -11,14 +10,34 @@ const MODELS_CASCADE = [
   "gemini-1.5-flash-8b",
 ];
 
-async function callGeminiDoubt(model: string, systemText: string, userText: string, key: string) {
+async function callGeminiDoubt(
+  model: string,
+  systemText: string,
+  userText: string,
+  key: string,
+  imageBase64?: string
+) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+
+  const parts: any[] = [{ text: userText }];
+
+  // If user uploaded a photo/image of a question
+  if (imageBase64) {
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    parts.unshift({
+      inlineData: {
+        mimeType: "image/jpeg",
+        data: cleanBase64,
+      },
+    });
+  }
+
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemText }] },
-      contents: [{ parts: [{ text: userText }] }],
+      contents: [{ parts: parts }],
       generationConfig: {
         temperature: 0.3,
       },
@@ -36,14 +55,25 @@ async function callGeminiDoubt(model: string, systemText: string, userText: stri
   return text;
 }
 
-async function generateDoubtResponse(systemText: string, userText: string, key: string) {
+async function generateDoubtResponse(
+  systemText: string,
+  userText: string,
+  key: string,
+  imageBase64?: string
+) {
   let lastError: any = null;
   for (const model of MODELS_CASCADE) {
     try {
-      const result = await callGeminiDoubt(model, systemText, userText, key);
+      const result = await callGeminiDoubt(
+        model,
+        systemText,
+        userText,
+        key,
+        imageBase64
+      );
       return result;
     } catch (err: any) {
-      console.warn(`Doubt Solver: Model ${model} failed, switching to next...`, err?.message);
+      console.warn(`Doubt Solver: Model ${model} failed, trying next...`, err?.message);
       lastError = err;
     }
   }
@@ -52,20 +82,32 @@ async function generateDoubtResponse(systemText: string, userText: string, key: 
 
 export async function POST(req: Request) {
   try {
-    const { query, subject, targetExam, conversationHistory } = await req.json();
+    const body = await req.json();
 
-    if (!query) {
-      return NextResponse.json({ error: "Missing query" }, { status: 400 });
+    // Support query, message, prompt, or messages array sent from frontend!
+    let studentQuestion =
+      body.query ||
+      body.message ||
+      body.prompt ||
+      (Array.isArray(body.messages)
+        ? body.messages[body.messages.length - 1]?.content
+        : "");
+
+    if (!studentQuestion && !body.image) {
+      return NextResponse.json({ error: "Missing question query" }, { status: 400 });
     }
 
     if (!apiKey) {
-      return NextResponse.json({ error: "API key not configured" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Gemini API key not configured on server" },
+        { status: 500 }
+      );
     }
 
     const systemInstruction = `
 You are an elite Doubt Solver Faculty for JEE & NEET.
-Target Subject: ${subject || "General Science"}
-Target Exam: ${targetExam || "JEE / NEET"}
+Target Subject: ${body.subject || "General Science"}
+Target Exam: ${body.targetExam || "JEE / NEET"}
 
 Guidelines:
 1. Provide mathematically rigorous, step-by-step solutions.
@@ -76,14 +118,21 @@ Guidelines:
 
     const fullPrompt = `
 Past Conversation:
-${JSON.stringify(conversationHistory || [])}
+${JSON.stringify(body.conversationHistory || body.messages || [])}
 
-Student Doubt:
-${query}
+Student Question:
+${studentQuestion || "Solve the attached image question step-by-step."}
 `;
 
-    const reply = await generateDoubtResponse(systemInstruction, fullPrompt, apiKey);
-    return NextResponse.json({ reply });
+    const reply = await generateDoubtResponse(
+      systemInstruction,
+      fullPrompt,
+      apiKey,
+      body.image || body.imageBase64
+    );
+
+    // Support both "reply" and "text" in response so frontend always gets it
+    return NextResponse.json({ reply, text: reply, content: reply });
   } catch (error: any) {
     console.error("AI Doubt Endpoint Error:", error);
     return NextResponse.json(
