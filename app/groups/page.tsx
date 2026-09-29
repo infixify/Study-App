@@ -18,7 +18,6 @@ interface PrivateGroup {
   id: string;
   name: string;
   target_exam: string;
-  passcode: string;
   member_count: number;
 }
 
@@ -45,6 +44,7 @@ export default function CommunityPage() {
   const [selectedGroupToJoin, setSelectedGroupToJoin] = useState<PrivateGroup | null>(null);
   const [enteredPasscode, setEnteredPasscode] = useState("");
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [joining, setJoining] = useState(false);
 
   // Load User & Groups
   useEffect(() => {
@@ -54,13 +54,12 @@ export default function CommunityPage() {
       if (!user) return;
       setCurrentUser(user);
 
-      const { data: profile } = await supabase
-        .from("users")
-        .select("role")
-        .eq("uid", user.id)
-        .maybeSingle();
-
-      if (profile?.role === "admin") {
+      // Real admin check — same mechanism as the rest of the app (Admin
+      // Panel etc). users.role is NOT used for this anymore: it was a
+      // self-updatable column with no lock of its own, so any signed-in
+      // user could have set role='admin' on their own row.
+      const { data: adminCheck } = await supabase.rpc("is_admin");
+      if (adminCheck) {
         setIsAdmin(true);
       }
 
@@ -72,10 +71,12 @@ export default function CommunityPage() {
         } catch (e) {}
       }
 
-      // Fetch groups from Supabase
+      // Fetch groups — passcode is never selected here anymore. It can't
+      // be: SELECT on study_groups.passcode is revoked at the DB level,
+      // so a request for it would just error. Joining verifies server-side.
       const { data: dbGroups } = await supabase
         .from("study_groups")
-        .select("id, name, target_exam, passcode")
+        .select("id, name, target_exam")
         .order("created_at", { ascending: false });
 
       if (dbGroups && dbGroups.length > 0) {
@@ -86,13 +87,12 @@ export default function CommunityPage() {
           }))
         );
       } else {
-        // Fallback default community room
+        // Fallback default community room (local-only, not in the DB)
         setGroups([
           {
             id: "room-kota-challengers",
             name: "Kota 10-Hour Challenge",
             target_exam: "JEE",
-            passcode: "1234",
             member_count: 18,
           },
         ]);
@@ -173,6 +173,8 @@ export default function CommunityPage() {
     localStorage.setItem(`msgs_${currentFeedId}`, JSON.stringify(nextMsgs));
 
     try {
+      // sender_uid must be the real signed-in uid — the insert RLS policy
+      // now requires sender_uid = auth.uid(), so this can't be spoofed.
       await supabase.from("group_messages").insert({
         group_id: currentFeedId,
         sender_uid: currentUser?.id ?? null,
@@ -184,7 +186,8 @@ export default function CommunityPage() {
     }
   };
 
-  // Delete message
+  // Delete message — RLS now enforces sender_uid = auth.uid() OR is_admin(),
+  // so this can't be bypassed by calling the table directly either.
   const handleDeleteMessage = async (id: string) => {
     const updated = messages.filter((m) => m.id !== id);
     setMessages(updated);
@@ -200,43 +203,60 @@ export default function CommunityPage() {
     e.preventDefault();
     if (!newGroupName.trim() || !newGroupPasscode.trim()) return;
 
-    const newGroup: PrivateGroup = {
-      id: "group-" + Date.now(),
-      name: newGroupName.trim(),
-      target_exam: newGroupExam,
-      passcode: newGroupPasscode.trim(),
-      member_count: 1,
-    };
-
-    const nextGroups = [newGroup, ...groups];
-    setGroups(nextGroups);
-
-    const nextJoined = [...myJoinedGroupIds, newGroup.id];
-    setMyJoinedGroupIds(nextJoined);
-    localStorage.setItem("prepwise_joined_groups", JSON.stringify(nextJoined));
-
     try {
-      await supabase.from("study_groups").insert({
-        id: newGroup.id,
-        name: newGroup.name,
-        target_exam: newGroup.target_exam,
-        passcode: newGroup.passcode,
-        created_by: currentUser?.id ?? null,
-      });
-    } catch (e) {}
+      // Let the DB generate the real uuid (study_groups.id is uuid — a
+      // client-made "group-<timestamp>" string was never valid here) and
+      // use the row it returns, rather than a locally invented id.
+      const { data: inserted, error } = await supabase
+        .from("study_groups")
+        .insert({
+          name: newGroupName.trim(),
+          target_exam: newGroupExam,
+          passcode: newGroupPasscode.trim(),
+          created_by: currentUser?.id ?? null,
+        })
+        .select("id, name, target_exam")
+        .single();
 
-    setShowCreateModal(false);
-    setNewGroupName("");
-    setNewGroupPasscode("");
-    setActiveGroupId(newGroup.id);
+      if (error || !inserted) {
+        console.warn("Could not create group", error);
+        return;
+      }
+
+      const newGroup: PrivateGroup = { ...inserted, member_count: 1 };
+      setGroups((prev) => [newGroup, ...prev]);
+
+      const nextJoined = [...myJoinedGroupIds, newGroup.id];
+      setMyJoinedGroupIds(nextJoined);
+      localStorage.setItem("prepwise_joined_groups", JSON.stringify(nextJoined));
+
+      setShowCreateModal(false);
+      setNewGroupName("");
+      setNewGroupPasscode("");
+      setActiveGroupId(newGroup.id);
+    } catch (e) {
+      console.warn("Could not create group", e);
+    }
   };
 
-  // Join Private Group with Passcode
-  const handleVerifyAndJoin = (e: React.FormEvent) => {
+  // Join Private Group with Passcode — verified server-side via a
+  // security-definer function. The passcode itself never reaches the
+  // browser; only a true/false answer does.
+  const handleVerifyAndJoin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedGroupToJoin) return;
 
-    if (enteredPasscode.trim() !== selectedGroupToJoin.passcode.trim()) {
+    setJoining(true);
+    setJoinError(null);
+
+    const { data: isCorrect, error } = await supabase.rpc("verify_group_passcode", {
+      p_group_id: selectedGroupToJoin.id,
+      p_passcode: enteredPasscode.trim(),
+    });
+
+    setJoining(false);
+
+    if (error || !isCorrect) {
       setJoinError("Incorrect passcode! Ask group admin.");
       return;
     }
@@ -630,9 +650,10 @@ export default function CommunityPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-teal text-white text-xs font-bold shadow-xs hover:bg-teal/90"
+                  disabled={joining}
+                  className="flex-1 py-2.5 rounded-xl bg-teal text-white text-xs font-bold shadow-xs hover:bg-teal/90 disabled:opacity-50"
                 >
-                  Verify & Join
+                  {joining ? "Checking…" : "Verify & Join"}
                 </button>
               </div>
             </form>
