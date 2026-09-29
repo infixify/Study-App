@@ -5,9 +5,11 @@ import { supabase } from "@/lib/supabase";
 const apiKey =
   process.env.GEMINI_API_KEY_MENTOR || process.env.GEMINI_API_KEY || "";
 
+// 100% Live Tested & Verified Active Models
 const MODELS_CASCADE = [
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.8-flash",
 ];
 
 async function callGeminiApi(model: string, prompt: string, key: string) {
@@ -42,7 +44,7 @@ async function generateWithFallback(prompt: string, key: string) {
       const result = await callGeminiApi(model, prompt, key);
       return result;
     } catch (err: any) {
-      console.warn(`Model ${model} overloaded or failed, falling back to next...`, err?.message);
+      console.warn(`Model ${model} failed, falling back to next...`, err?.message);
       lastError = err;
     }
   }
@@ -94,15 +96,16 @@ export async function POST(req: Request) {
         .limit(14),
       supabase
         .from("test_logs")
-        .select("test_name, marks_scored, max_marks, accuracy, test_date")
+        .select("test_name, total_marks, max_marks, accuracy, test_date")
         .eq("user_id", userId)
         .order("test_date", { ascending: false })
         .limit(5),
       supabase
-        .from("chapter_progress")
-        .select("chapter_id, status")
+        .from("tasks")
+        .select("title, priority, due_date")
         .eq("user_id", userId)
-        .eq("is_backlog", true),
+        .eq("task_type", "backlog")
+        .neq("status", "completed"),
     ]);
 
     const targetExam = profile?.target_exam || "JEE";
