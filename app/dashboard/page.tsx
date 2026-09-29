@@ -1,4 +1,3 @@
-// app/dashboard/page.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -54,10 +53,10 @@ export default function DashboardPage() {
   const [daysLeft, setDaysLeft] = useState(0);
 
   useEffect(() => {
-    // Exam date calculator (JEE 2027)
     const examDate = new Date("2027-01-22T09:00:00");
     const diffTime = examDate.getTime() - new Date().getTime();
-    setDaysLeft(Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24))));
+    const remainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    setDaysLeft(remainingDays > 0 ? remainingDays : 0);
 
     async function loadData() {
       const {
@@ -70,7 +69,6 @@ export default function DashboardPage() {
       }
       setUser(session.user);
 
-      // Fetch user profile
       const { data: uProf } = await supabase
         .from("users")
         .select("*")
@@ -82,7 +80,6 @@ export default function DashboardPage() {
         fetchMentorReport(session.user.id);
       }
 
-      // Fetch Recent 7 Days Logs
       const { data: pastLogs } = await supabase
         .from("daily_logs")
         .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, streak_count, log_date")
@@ -112,7 +109,6 @@ export default function DashboardPage() {
         revisionMins: todayLog?.revision_minutes || 0,
       });
 
-      // Fetch Backlogs
       const { data: backlogData } = await supabase
         .from("tasks")
         .select("id, title, priority, subject, status")
@@ -127,7 +123,6 @@ export default function DashboardPage() {
         setStats((prev) => ({ ...prev, backlogCount: backlogData.length }));
       }
 
-      // Fetch Tests
       const { data: testData } = await supabase
         .from("test_logs")
         .select("id, test_name, total_marks, max_marks, accuracy, test_date")
@@ -199,19 +194,19 @@ export default function DashboardPage() {
     );
   }
 
-  const studentName = profile?.name || user?.user_metadata?.full_name?.split(" ")[0] || "Aspirant";
+  const studentName = profile?.name || "Aspirant";
   const targetExam = profile?.target_exam || "JEE";
   const targetYear = profile?.target_year || "2027";
   const todayHours = (stats.todayMinutes / 60).toFixed(1);
 
-  const totalLoggedMins = stats.theoryMins + stats.practiceMins + stats.revisionMins || 1;
-  const theoryPercent = Math.round((stats.theoryMins / totalLoggedMins) * 100);
-  const practicePercent = Math.round((stats.practiceMins / totalLoggedMins) * 100);
-  const revisionPercent = Math.round((stats.revisionMins / totalLoggedMins) * 100);
+  const sumMins = stats.theoryMins + stats.practiceMins + stats.revisionMins;
+  const totalMins = sumMins > 0 ? sumMins : 1;
+  const theoryPercent = Math.round((stats.theoryMins / totalMins) * 100);
+  const practicePercent = Math.round((stats.practiceMins / totalMins) * 100);
+  const revisionPercent = Math.round((stats.revisionMins / totalMins) * 100);
 
   return (
     <div className="min-h-screen bg-slate-50/50 pb-28 text-slate-900">
-      {/* 1. TOP NAVBAR */}
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 px-4 py-2.5">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -239,9 +234,7 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* MAIN CONTAINER */}
       <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3.5">
-        {/* 2. EXAM COUNTDOWN HERO */}
         <div className="rounded-2xl p-3.5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-md relative overflow-hidden flex items-center justify-between">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">
@@ -261,7 +254,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 3. COMPACT AI MENTOR WIDGET */}
         <AiMentorCard
           userId={user?.id}
           report={mentorReport}
@@ -270,9 +262,7 @@ export default function DashboardPage() {
           onOpenDoubtSolver={() => setDoubtOpen(true)}
         />
 
-        {/* 4. THREE CRITICAL COCKPIT METRICS */}
         <div className="grid grid-cols-3 gap-2">
-          {/* Today Study */}
           <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Today Study</span>
             <div className="text-base font-black text-slate-900">
@@ -282,7 +272,6 @@ export default function DashboardPage() {
             <span className="text-[9.5px] font-bold text-teal-600 block mt-0.5">Target: 6.0h</span>
           </div>
 
-          {/* Unresolved Backlogs */}
           <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Backlogs</span>
             <div className="text-base font-black text-slate-900">{stats.backlogCount}</div>
@@ -295,7 +284,6 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          {/* Quick Study Launcher */}
           <button
             type="button"
             onClick={() => router.push("/study")}
@@ -307,7 +295,6 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {/* 5. EFFICIENCY RATIO INDEX */}
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2">
             <span className="text-slate-900 flex items-center gap-1.5">
@@ -322,17 +309,14 @@ export default function DashboardPage() {
             <div
               style={{ width: `${stats.todayMinutes > 0 ? theoryPercent : 33}%` }}
               className="bg-amber-400 transition-all"
-              title="Theory"
             />
             <div
               style={{ width: `${stats.todayMinutes > 0 ? practicePercent : 50}%` }}
               className="bg-teal-600 transition-all"
-              title="Practice"
             />
             <div
               style={{ width: `${stats.todayMinutes > 0 ? revisionPercent : 17}%` }}
               className="bg-indigo-500 transition-all"
-              title="Revision"
             />
           </div>
 
@@ -352,7 +336,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 6. WEEKLY STUDY CONSISTENCY MATRIX */}
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 flex items-center gap-1.5">
@@ -390,7 +373,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 7. BACKLOG RADAR */}
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2">
             <span className="text-slate-900 flex items-center gap-1.5">
@@ -452,7 +434,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 8. LATEST TEST BENCHMARK STRIP */}
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2">
             <span className="text-slate-900 flex items-center gap-1.5">
@@ -497,4 +478,18 @@ export default function DashboardPage() {
                       {t.total_marks} / {t.max_marks}
                     </div>
                     <div className="text-[10px] font-bold text-teal-600">
-                      Acc: {t.accuracy || M
+                      Acc: {t.accuracy || Math.round((t.total_marks / t.max_marks) * 100)}%
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+
+      <AiChatSheet open={doubtOpen} onClose={() => setDoubtOpen(false)} />
+      <BottomNav />
+    </div>
+  );
+                                 }
