@@ -86,13 +86,13 @@ export default function DashboardPage() {
   const [backlogPriority, setBacklogPriority] = useState<"high" | "medium" | "low">("high");
   const [backlogDueDate, setBacklogDueDate] = useState<string>("");
 
-  // Dynamic Subjects & Chapters from DB
+  // Dynamic Subjects & Chapters
   const [allSubjects, setAllSubjects] = useState<SubjectItem[]>([]);
   const [filteredSubjects, setFilteredSubjects] = useState<SubjectItem[]>([]);
   const [chaptersList, setChaptersList] = useState<ChapterItem[]>([]);
   const [submittingBacklog, setSubmittingBacklog] = useState(false);
 
-  // Study Distribution (Theory vs Practice vs Revision)
+  // Study Distribution
   const [splitRatio, setSplitRatio] = useState({
     theory: 0,
     practice: 0,
@@ -104,7 +104,7 @@ export default function DashboardPage() {
   const [recentTests, setRecentTests] = useState<TestLog[]>([]);
   const [heatGrid, setHeatGrid] = useState<number[]>([]);
 
-  // Personalized Exam Schedules & Shifts from DB
+  // Exam Schedules
   const [examSchedules, setExamSchedules] = useState<ExamScheduleItem[]>([]);
   const [shiftsMap, setShiftsMap] = useState<Record<string, ExamShift[]>>({});
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
@@ -136,7 +136,6 @@ export default function DashboardPage() {
         const allowedClasses = classLevelsForContent(uProf.class_level);
         setSelectedClass(allowedClasses[0] || "11");
 
-        // Fetch Subjects according to allowed classes
         const { data: subs } = await supabase
           .from("subjects")
           .select("id, name, class_level")
@@ -312,7 +311,6 @@ export default function DashboardPage() {
     loadData();
   }, [router]);
 
-  // Fetch Chapters when subject changes
   const fetchChaptersForSubject = async (subjId: string) => {
     if (!subjId) return;
     const { data } = await supabase
@@ -385,7 +383,6 @@ export default function DashboardPage() {
     await supabase.from("tasks").update({ status: "completed" }).eq("id", id);
   };
 
-  // Submit Dual Mode Backlog
   const handleSaveBacklog = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || submittingBacklog) return;
@@ -397,7 +394,6 @@ export default function DashboardPage() {
       const prefix = foundChap ? foundChap.name : foundSub ? foundSub.name : "Syllabus Topic";
       finalTitle = backlogTitle.trim() ? `${prefix}: ${backlogTitle.trim()}` : prefix;
 
-      // Also flag chapter in chapter_progress if selected
       if (selectedChapterId) {
         await supabase.from("chapter_progress").upsert({
           user_id: user.id,
@@ -446,7 +442,7 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center text-xs font-bold text-slate-600">
+      <div className="min-h-screen bg-[#F1F5F9] flex items-center justify-center text-xs font-bold text-slate-700">
         <span className="animate-spin mr-2">⏳</span> Loading PrepWise Dashboard…
       </div>
     );
@@ -463,11 +459,11 @@ export default function DashboardPage() {
   const revisionPct = Math.round((splitRatio.revision / totalSplitMins) * 100);
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] pb-28 text-slate-900 font-sans">
+    <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased">
       <AppHeader />
 
-      <main className="max-w-md mx-auto px-4 pt-3 space-y-3.5">
-        {/* EXAM COUNTDOWNS */}
+      <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3.5">
+        {/* 1. HIGH-CONTRAST COUNTDOWN BANNER (JEETrack Style) */}
         <div className="space-y-2">
           {examSchedules.map((exam) => {
             const days = calculateDaysLeft(exam.exam_date);
@@ -476,20 +472,24 @@ export default function DashboardPage() {
             return (
               <div
                 key={exam.id}
-                className="rounded-2xl p-3.5 bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white shadow-md border border-slate-800"
+                className="rounded-2xl p-4 bg-[#0B132B] text-white shadow-lg border border-slate-800 relative overflow-hidden"
               >
-                <div className="flex items-center justify-between">
+                {/* Subtle Amber Glow Accent */}
+                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+
+                <div className="flex items-center justify-between relative z-10">
                   <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-300 bg-amber-400/20 px-2.5 py-0.5 rounded-md border border-amber-400/30">
                         {exam.label}
                       </span>
-                      <span className="text-[9.5px] text-slate-400">
-                        {exam.is_confirmed ? "Official" : "Estimated"}
+                      <span className="text-[10px] font-semibold text-slate-300">
+                        {exam.is_confirmed ? "• Confirmed" : "• Projected"}
                       </span>
                     </div>
-                    <div className="text-xs font-semibold text-slate-200 mt-1">
+                    <div className="text-sm font-bold text-white mt-1.5 tracking-tight">
                       {new Date(exam.exam_date).toLocaleDateString("en-IN", {
+                        weekday: "short",
                         month: "short",
                         day: "numeric",
                         year: "numeric",
@@ -497,23 +497,25 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  <div className="text-right bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 backdrop-blur-xs">
-                    <div className="text-xl font-black tracking-tight text-white leading-none">
+                  {/* Golden-Yellow Days Left Counter */}
+                  <div className="text-right bg-white/10 px-3.5 py-2 rounded-xl border border-white/20 backdrop-blur-md shadow-xs">
+                    <div className="text-2xl font-black tracking-tight text-amber-400 leading-none">
                       {days}
                     </div>
-                    <div className="text-[8.5px] font-bold uppercase tracking-wider text-slate-300">
+                    <div className="text-[8.5px] font-extrabold uppercase tracking-wider text-slate-200 mt-0.5">
                       Days Left
                     </div>
                   </div>
                 </div>
 
+                {/* Shift Selector */}
                 {shifts.length > 0 && (
-                  <div className="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-[10px]">
-                    <span className="text-slate-400 font-semibold">Your Shift:</span>
+                  <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between text-[11px] relative z-10">
+                    <span className="text-slate-300 font-bold">Your Shift Slot:</span>
                     <select
                       value={selectedShiftId || ""}
                       onChange={(e) => handleShiftSelect(e.target.value)}
-                      className="bg-slate-800 text-white rounded-lg px-2 py-1 border border-slate-700 text-[10px] focus:outline-none"
+                      className="bg-slate-800 text-white rounded-lg px-2.5 py-1 border border-slate-700 text-xs font-semibold focus:outline-none focus:border-amber-400"
                     >
                       <option value="">Select Exam Shift</option>
                       {shifts.map((sh) => (
@@ -529,7 +531,7 @@ export default function DashboardPage() {
           })}
         </div>
 
-        {/* AI MENTOR WIDGET */}
+        {/* 2. AI MENTOR WIDGET */}
         <AiMentorCard
           userId={user?.id}
           targetExam={targetExam}
@@ -539,35 +541,38 @@ export default function DashboardPage() {
           onOpenDoubtSolver={() => setDoubtOpen(true)}
         />
 
-        {/* THREE COCKPIT METRICS */}
+        {/* 3. THREE COCKPIT METRICS (Solid White Cards with Crisp Borders) */}
         <div className="grid grid-cols-3 gap-2">
+          {/* Today Focus -> /focus */}
           <button
             type="button"
             onClick={() => router.push("/focus")}
-            className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs text-left active:scale-[0.98] transition-all hover:border-teal-500"
+            className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] text-left active:scale-[0.98] transition-all hover:border-teal-500"
           >
-            <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Today Focus</span>
-            <div className="text-base font-black text-slate-900">
+            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Today Focus</span>
+            <div className="text-lg font-black text-slate-900 tracking-tight">
               {todayHours}
-              <span className="text-[10px] font-semibold text-slate-500">h</span>
+              <span className="text-xs font-semibold text-slate-500 ml-0.5">h</span>
             </div>
-            <span className="text-[9.5px] font-bold text-teal-600 block mt-0.5">Timer →</span>
+            <span className="text-[10px] font-bold text-teal-700 block mt-0.5">Timer →</span>
           </button>
 
-          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
-            <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Questions</span>
-            <div className="text-base font-black text-slate-900">{todayQuestions}</div>
-            <span className="text-[9.5px] font-bold text-indigo-600 block mt-0.5">
+          {/* Today Questions */}
+          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Questions</span>
+            <div className="text-lg font-black text-slate-900 tracking-tight">{todayQuestions}</div>
+            <span className="text-[10px] font-bold text-indigo-700 block mt-0.5">
               All: {totalQuestionsAllTime}
             </span>
           </div>
 
-          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
-            <span className="text-[10px] font-bold text-slate-500 block mb-0.5">Backlogs</span>
-            <div className="text-base font-black text-slate-900">{backlogsList.length}</div>
+          {/* Backlogs Count */}
+          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Backlogs</span>
+            <div className="text-lg font-black text-slate-900 tracking-tight">{backlogsList.length}</div>
             <span
-              className={`text-[9.5px] font-bold block mt-0.5 ${
-                backlogsList.length > 0 ? "text-rose-500" : "text-emerald-600"
+              className={`text-[10px] font-bold block mt-0.5 ${
+                backlogsList.length > 0 ? "text-rose-600" : "text-emerald-700"
               }`}
             >
               {backlogsList.length > 0 ? "Pending" : "Clean ✓"}
@@ -575,13 +580,13 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* JEETRACK-GRADE BACKLOG RADAR WITH POPUP TRIGGER */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between text-xs font-black mb-2">
-            <div className="flex items-center gap-1.5 text-slate-900">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-              <span>Backlog Radar</span>
-              <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-100">
+        {/* 4. BACKLOG RADAR WIDGET (Contrast List & 1-Tap Trigger) */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+          <div className="flex items-center justify-between text-xs font-black mb-2.5">
+            <div className="flex items-center gap-2 text-slate-900">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-pulse" />
+              <span className="text-sm font-black">Backlog Radar</span>
+              <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md border border-rose-200">
                 {backlogsList.length} Pending
               </span>
             </div>
@@ -589,38 +594,38 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => setShowAddBacklogModal(true)}
-              className="text-[10.5px] font-bold text-teal-600 hover:text-teal-700 bg-teal-50 hover:bg-teal-100/70 border border-teal-200 px-2 py-0.5 rounded-lg transition-all active:scale-95"
+              className="text-[11px] font-black text-teal-800 bg-teal-100/80 hover:bg-teal-200 border border-teal-300 px-2.5 py-1 rounded-xl transition-all active:scale-95 shadow-2xs"
             >
               + Add Backlog
             </button>
           </div>
 
           {backlogsList.length === 0 ? (
-            <div className="p-3 bg-emerald-50/60 border border-emerald-100 rounded-xl text-center text-xs text-emerald-800 font-semibold">
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-xs text-emerald-900 font-bold">
               🎉 Zero backlogs! All homework, DPPs & syllabus chapters are on schedule.
             </div>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {backlogsList.slice(0, 5).map((b) => (
                 <div
                   key={b.id}
-                  className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2 text-xs"
+                  className="p-3 bg-slate-50/80 border border-slate-200 rounded-xl flex items-center justify-between gap-2 text-xs"
                 >
-                  <div className="flex items-center gap-2 overflow-hidden">
+                  <div className="flex items-center gap-2.5 overflow-hidden">
                     <span
-                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                        b.priority === "high" ? "bg-rose-500" : b.priority === "medium" ? "bg-amber-400" : "bg-emerald-500"
+                      className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        b.priority === "high" ? "bg-rose-600" : b.priority === "medium" ? "bg-amber-500" : "bg-emerald-600"
                       }`}
                     />
                     <div className="truncate">
-                      <span className="font-semibold text-slate-800 block truncate">{b.title}</span>
-                      {b.due_date && <span className="text-[9.5px] text-slate-400 block">Due: {b.due_date}</span>}
+                      <span className="font-bold text-slate-900 block truncate">{b.title}</span>
+                      {b.due_date && <span className="text-[10px] font-semibold text-slate-500 block">Target: {b.due_date}</span>}
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleCompleteBacklog(b.id)}
-                    className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md hover:bg-emerald-100 active:scale-95 flex-shrink-0"
+                    className="text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg hover:bg-emerald-200 active:scale-95 flex-shrink-0"
                   >
                     Done ✓
                   </button>
@@ -630,30 +635,30 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => router.push("/library")}
-                  className="w-full text-center text-[10.5px] font-bold text-slate-500 hover:text-slate-800 pt-1 block"
+                  className="w-full text-center text-[11px] font-bold text-slate-600 hover:text-slate-900 pt-1.5 block"
                 >
-                  View all in Syllabus Tracker →
+                  View all {backlogsList.length} backlogs in Syllabus Tracker →
                 </button>
               )}
             </div>
           )}
         </div>
 
-        {/* STUDY RATIO SPLIT */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between text-xs font-black mb-2">
-            <span className="text-slate-900 flex items-center gap-1.5">
+        {/* 5. STUDY DISTRIBUTION RATIO (High Contrast Bar) */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+          <div className="flex items-center justify-between text-xs font-black mb-2.5">
+            <span className="text-slate-900 font-bold flex items-center gap-1.5">
               <span>⚖️</span> Today's Study Split
             </span>
-            <span className="text-[10px] font-bold text-slate-500">
-              Target: 60% Numerical Practice
+            <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+              Target: 60% Practice
             </span>
           </div>
 
-          <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden flex mb-2">
+          <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex mb-2.5 shadow-inner">
             <div
               style={{ width: `${sumSplit > 0 ? theoryPct : 33}%` }}
-              className="bg-amber-400 transition-all"
+              className="bg-amber-500 transition-all"
             />
             <div
               style={{ width: `${sumSplit > 0 ? practicePct : 50}%` }}
@@ -661,100 +666,103 @@ export default function DashboardPage() {
             />
             <div
               style={{ width: `${sumSplit > 0 ? revisionPct : 17}%` }}
-              className="bg-indigo-500 transition-all"
+              className="bg-indigo-600 transition-all"
             />
           </div>
 
-          <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 px-0.5">
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-amber-400" /> Theory ({splitRatio.theory}m)
+          <div className="flex items-center justify-between text-[11px] font-bold px-0.5">
+            <span className="flex items-center gap-1.5 text-amber-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Theory ({splitRatio.theory}m)
             </span>
-            <span className="flex items-center gap-1 text-teal-700">
-              <span className="w-2 h-2 rounded-full bg-teal-600" /> Practice ({splitRatio.practice}m)
+            <span className="flex items-center gap-1.5 text-teal-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-teal-600" /> Practice ({splitRatio.practice}m)
             </span>
-            <span className="flex items-center gap-1 text-indigo-700">
-              <span className="w-2 h-2 rounded-full bg-indigo-500" /> Revision ({splitRatio.revision}m)
+            <span className="flex items-center gap-1.5 text-indigo-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" /> Revision ({splitRatio.revision}m)
             </span>
           </div>
         </div>
 
-        {/* 12-WEEK HEATMAP */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between text-xs font-black mb-2.5">
-            <span className="text-slate-900 flex items-center gap-1.5">
+        {/* 6. GITHUB-STYLE 12-WEEK CONSISTENCY HEATMAP */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+          <div className="flex items-center justify-between text-xs font-black mb-3">
+            <span className="text-slate-900 font-bold flex items-center gap-1.5">
               <span>🟩</span> 12-Week Consistency Matrix
             </span>
-            <span className="text-[10px] font-bold text-slate-500">{streak} Day Streak</span>
+            <span className="text-[10px] font-black text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300">
+              🔥 {streak} Day Streak
+            </span>
           </div>
 
-          <div className="grid grid-flow-col grid-rows-7 gap-1 overflow-x-auto py-1">
+          {/* 84-Tile High-Contrast Matrix */}
+          <div className="grid grid-flow-col grid-rows-7 gap-1.5 overflow-x-auto py-1">
             {heatGrid.map((level, idx) => {
               const bg =
                 level === 4
-                  ? "bg-teal-700"
+                  ? "bg-[#065F46] border border-[#047857]" // 6h+ Dark emerald
                   : level === 3
-                  ? "bg-teal-500"
+                  ? "bg-[#059669] border border-[#10B981]" // 4h+ Vibrant emerald
                   : level === 2
-                  ? "bg-teal-300"
+                  ? "bg-[#34D399] border border-[#6EE7B7]" // 2h+
                   : level === 1
-                  ? "bg-teal-100"
-                  : "bg-slate-100";
-              return <div key={idx} className={`w-3.5 h-3.5 rounded-xs ${bg}`} />;
+                  ? "bg-[#A7F3D0] border border-[#D1FAE5]" // 1h+
+                  : "bg-slate-200/80 border border-slate-300/60"; // Zero day
+              return <div key={idx} className={`w-3.5 h-3.5 rounded-sm ${bg}`} />;
             })}
           </div>
 
-          <div className="flex items-center justify-between text-[9.5px] font-bold text-slate-400 mt-2 px-0.5">
+          <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 mt-2.5 px-0.5">
             <span>Less Focus</span>
-            <div className="flex items-center gap-1">
-              <span className="w-2.5 h-2.5 rounded-xs bg-slate-100" />
-              <span className="w-2.5 h-2.5 rounded-xs bg-teal-100" />
-              <span className="w-2.5 h-2.5 rounded-xs bg-teal-300" />
-              <span className="w-2.5 h-2.5 rounded-xs bg-teal-500" />
-              <span className="w-2.5 h-2.5 rounded-xs bg-teal-700" />
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-xs bg-slate-200 border border-slate-300" />
+              <span className="w-3 h-3 rounded-xs bg-[#A7F3D0]" />
+              <span className="w-3 h-3 rounded-xs bg-[#34D399]" />
+              <span className="w-3 h-3 rounded-xs bg-[#059669]" />
+              <span className="w-3 h-3 rounded-xs bg-[#065F46]" />
             </div>
-            <span>More Focus (6h+)</span>
+            <span className="font-bold text-slate-800">More Focus (6h+)</span>
           </div>
         </div>
 
-        {/* ACTION ITEMS */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between text-xs font-black mb-2">
-            <span className="text-slate-900 flex items-center gap-1.5">
-              <span>🎯</span> Today's Action Items
+        {/* 7. PRIORITY ACTION ITEMS */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+          <div className="flex items-center justify-between text-xs font-black mb-2.5">
+            <span className="text-slate-900 font-bold flex items-center gap-1.5">
+              <span>🎯</span> Today's Priority Goals
             </span>
             <button
               type="button"
               onClick={() => router.push("/todo")}
-              className="text-[10.5px] font-bold text-teal-600 hover:underline"
+              className="text-[11px] font-bold text-teal-800 hover:underline"
             >
-              Manage All →
+              Open To-Do List →
             </button>
           </div>
 
           {todayTasks.length === 0 ? (
-            <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-center text-xs text-emerald-800 font-bold">
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-xs text-emerald-900 font-bold">
               🎉 No pending tasks! Plan goals in your To-Do tab.
             </div>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {todayTasks.map((task) => (
                 <div
                   key={task.id}
-                  className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2 text-xs"
+                  className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2 text-xs"
                 >
-                  <div className="flex items-center gap-2 overflow-hidden">
+                  <div className="flex items-center gap-2.5 overflow-hidden">
                     <span
                       className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                        task.priority === "high" ? "bg-rose-500" : task.priority === "medium" ? "bg-amber-400" : "bg-emerald-500"
+                        task.priority === "high" ? "bg-rose-600" : task.priority === "medium" ? "bg-amber-500" : "bg-emerald-600"
                       }`}
                     />
-                    <span className="font-semibold text-slate-800 truncate">{task.title}</span>
+                    <span className="font-bold text-slate-900 truncate">{task.title}</span>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => handleToggleTask(task.id)}
-                    className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md hover:bg-emerald-100 active:scale-95 flex-shrink-0"
+                    className="text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg hover:bg-emerald-200 active:scale-95 flex-shrink-0"
                   >
                     Done ✓
                   </button>
@@ -764,74 +772,74 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* QUICK ROUTE CARDS */}
-        <div className="grid grid-cols-2 gap-2">
+        {/* 8. QUICK ROUTE CARDS */}
+        <div className="grid grid-cols-2 gap-2.5">
           <button
             type="button"
             onClick={() => router.push("/library")}
-            className="p-3 bg-white hover:bg-slate-50 border border-slate-200 rounded-2xl text-left shadow-xs active:scale-[0.98] transition-all"
+            className="p-3.5 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-[0_2px_8px_rgba(0,0,0,0.04)] active:scale-[0.98] transition-all"
           >
-            <div className="text-base mb-1">📚</div>
+            <div className="text-xl mb-1">📚</div>
             <div className="text-xs font-black text-slate-900">Syllabus Tracker</div>
-            <div className="text-[10px] text-slate-500">Chapters & Backlogs</div>
+            <div className="text-[10px] font-semibold text-slate-500">Chapters & Backlogs</div>
           </button>
 
           <button
             type="button"
             onClick={() => router.push("/tests")}
-            className="p-3 bg-white hover:bg-slate-50 border border-slate-200 rounded-2xl text-left shadow-xs active:scale-[0.98] transition-all"
+            className="p-3.5 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-[0_2px_8px_rgba(0,0,0,0.04)] active:scale-[0.98] transition-all"
           >
-            <div className="text-base mb-1">📊</div>
+            <div className="text-xl mb-1">📊</div>
             <div className="text-xs font-black text-slate-900">Test Hub</div>
-            <div className="text-[10px] text-slate-500">Log & analyze marks</div>
+            <div className="text-[10px] font-semibold text-slate-500">Log & analyze marks</div>
           </button>
         </div>
 
-        {/* RECENT MOCK TESTS */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between text-xs font-black mb-2">
-            <span className="text-slate-900 flex items-center gap-1.5">
+        {/* 9. RECENT MOCK TESTS */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+          <div className="flex items-center justify-between text-xs font-black mb-2.5">
+            <span className="text-slate-900 font-bold flex items-center gap-1.5">
               <span>📈</span> Recent Mock Performance
             </span>
             <button
               type="button"
               onClick={() => router.push("/tests")}
-              className="text-[10.5px] font-bold text-indigo-600 hover:underline"
+              className="text-[11px] font-bold text-indigo-700 hover:underline"
             >
               View Hub →
             </button>
           </div>
 
           {recentTests.length === 0 ? (
-            <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl flex items-center justify-between">
+            <div className="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl flex items-center justify-between">
               <div>
-                <div className="text-[11px] font-black text-indigo-950">No Tests Logged</div>
-                <div className="text-[10px] text-slate-500">Log mock test marks to track accuracy</div>
+                <div className="text-xs font-black text-indigo-950">No Tests Logged</div>
+                <div className="text-[10px] font-semibold text-slate-600">Log mock test marks to track accuracy</div>
               </div>
               <button
                 type="button"
                 onClick={() => router.push("/tests")}
-                className="px-2.5 py-1 bg-indigo-600 text-white font-bold text-[10.5px] rounded-lg shadow-2xs"
+                className="px-3 py-1.5 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-xs"
               >
                 + Log Score
               </button>
             </div>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {recentTests.map((t) => (
                 <div
                   key={t.id}
-                  className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs"
+                  className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs"
                 >
                   <div>
-                    <div className="font-bold text-slate-900 text-[11px]">{t.test_name}</div>
-                    <div className="text-[10px] text-slate-500">{t.test_date}</div>
+                    <div className="font-black text-slate-900 text-xs">{t.test_name}</div>
+                    <div className="text-[10px] font-semibold text-slate-500">{t.test_date}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-black text-slate-900 text-xs">
+                    <div className="font-black text-slate-900 text-sm">
                       {t.total_marks} / {t.max_marks}
                     </div>
-                    <div className="text-[10px] font-bold text-teal-600">
+                    <div className="text-[10px] font-bold text-teal-700">
                       Acc: {t.accuracy || Math.round((t.total_marks / t.max_marks) * 100)}%
                     </div>
                   </div>
@@ -842,37 +850,37 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* DUAL MODE BACKLOG MODAL (CHAPTER BACKLOG / OTHER BACKLOG) */}
+      {/* 10. HIGH-VISIBILITY BACKLOG MODAL */}
       {showAddBacklogModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-300 overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2">
-                <span className="w-8 h-8 rounded-xl bg-rose-500 text-white flex items-center justify-center text-sm shadow-xs">
+                <span className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center text-sm shadow-xs font-bold">
                   🎯
                 </span>
                 <div>
                   <h3 className="text-sm font-black text-slate-900">Add Academic Backlog</h3>
-                  <p className="text-[10px] text-slate-500">Track and eliminate pending syllabus</p>
+                  <p className="text-[10px] font-semibold text-slate-500">Track and eliminate pending syllabus</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowAddBacklogModal(false)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-200 text-xs"
+                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-200 text-sm font-bold"
               >
                 ✕
               </button>
             </div>
 
             {/* Segmented Slider Tab */}
-            <div className="p-3 border-b border-slate-100 bg-slate-50/30">
-              <div className="grid grid-cols-2 p-1 bg-slate-200/70 rounded-xl text-xs font-bold">
+            <div className="p-3 border-b border-slate-200 bg-slate-100">
+              <div className="grid grid-cols-2 p-1 bg-slate-200 rounded-xl text-xs font-black">
                 <button
                   type="button"
                   onClick={() => setBacklogMode("chapter")}
-                  className={`py-1.5 rounded-lg transition-all ${
+                  className={`py-2 rounded-lg transition-all ${
                     backlogMode === "chapter"
                       ? "bg-white text-slate-900 shadow-xs"
                       : "text-slate-600 hover:text-slate-900"
@@ -883,7 +891,7 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => setBacklogMode("other")}
-                  className={`py-1.5 rounded-lg transition-all ${
+                  className={`py-2 rounded-lg transition-all ${
                     backlogMode === "other"
                       ? "bg-white text-slate-900 shadow-xs"
                       : "text-slate-600 hover:text-slate-900"
@@ -895,13 +903,12 @@ export default function DashboardPage() {
             </div>
 
             {/* Modal Form */}
-            <form onSubmit={handleSaveBacklog} className="p-4 space-y-3 overflow-y-auto text-xs">
+            <form onSubmit={handleSaveBacklog} className="p-4 space-y-3.5 overflow-y-auto text-xs">
               {backlogMode === "chapter" ? (
                 <>
-                  {/* Class Selection (If student has multiple allowed classes, e.g. Dropper or 11+12) */}
                   {allowedClasses.length > 1 && (
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      <label className="block text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                         Select Class
                       </label>
                       <div className="flex gap-2">
@@ -910,10 +917,10 @@ export default function DashboardPage() {
                             key={cl}
                             type="button"
                             onClick={() => handleClassChange(cl)}
-                            className={`flex-1 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                            className={`flex-1 py-2 rounded-xl border text-xs font-black transition-all ${
                               selectedClass === cl
-                                ? "bg-slate-900 text-white border-slate-900 shadow-2xs"
-                                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                                ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+                                : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
                             }`}
                           >
                             Class {cl}
@@ -923,15 +930,14 @@ export default function DashboardPage() {
                     </div>
                   )}
 
-                  {/* Subject Selection */}
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    <label className="block text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                       Subject
                     </label>
                     <select
                       value={selectedSubjectId}
                       onChange={(e) => handleSubjectChange(e.target.value)}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-teal-600"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-teal-600"
                     >
                       {filteredSubjects.map((sub) => (
                         <option key={sub.id} value={sub.id}>
@@ -941,15 +947,14 @@ export default function DashboardPage() {
                     </select>
                   </div>
 
-                  {/* Chapter Selection */}
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    <label className="block text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                       Syllabus Chapter
                     </label>
                     <select
                       value={selectedChapterId}
                       onChange={(e) => setSelectedChapterId(e.target.value)}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-teal-600"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-teal-600"
                     >
                       {chaptersList.map((chap) => (
                         <option key={chap.id} value={chap.id}>
@@ -959,9 +964,8 @@ export default function DashboardPage() {
                     </select>
                   </div>
 
-                  {/* Optional Custom Note / Topic */}
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    <label className="block text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                       Specific Sub-topic / Note (Optional)
                     </label>
                     <input
@@ -969,14 +973,13 @@ export default function DashboardPage() {
                       value={backlogTitle}
                       onChange={(e) => setBacklogTitle(e.target.value)}
                       placeholder="e.g. Only Moment of Inertia & Rolling Motion pending"
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-teal-600"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 font-semibold focus:outline-none focus:border-teal-600"
                     />
                   </div>
                 </>
               ) : (
-                /* Other Backlog Mode */
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  <label className="block text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                     Backlog Description / Task Name
                   </label>
                   <input
@@ -985,24 +988,24 @@ export default function DashboardPage() {
                     onChange={(e) => setBacklogTitle(e.target.value)}
                     placeholder="e.g. Allen Mock Test #3 Negative Marking Analysis"
                     required
-                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-teal-600"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 font-semibold focus:outline-none focus:border-teal-600"
                   />
                 </div>
               )}
 
-              {/* Priority Selection */}
+              {/* Priority */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                   Priority Urgency
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setBacklogPriority("high")}
-                    className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
+                    className={`py-2 px-2 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-1 ${
                       backlogPriority === "high"
-                        ? "bg-rose-50 border-rose-300 text-rose-700 shadow-2xs"
-                        : "bg-white border-slate-200 text-slate-600"
+                        ? "bg-rose-100 border-rose-400 text-rose-800 shadow-xs"
+                        : "bg-white border-slate-300 text-slate-700"
                     }`}
                   >
                     <span>🔴</span> High
@@ -1010,10 +1013,10 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setBacklogPriority("medium")}
-                    className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
+                    className={`py-2 px-2 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-1 ${
                       backlogPriority === "medium"
-                        ? "bg-amber-50 border-amber-300 text-amber-700 shadow-2xs"
-                        : "bg-white border-slate-200 text-slate-600"
+                        ? "bg-amber-100 border-amber-400 text-amber-800 shadow-xs"
+                        : "bg-white border-slate-300 text-slate-700"
                     }`}
                   >
                     <span>🟡</span> Medium
@@ -1021,10 +1024,10 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setBacklogPriority("low")}
-                    className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
+                    className={`py-2 px-2 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-1 ${
                       backlogPriority === "low"
-                        ? "bg-emerald-50 border-emerald-300 text-emerald-700 shadow-2xs"
-                        : "bg-white border-slate-200 text-slate-600"
+                        ? "bg-emerald-100 border-emerald-400 text-emerald-800 shadow-xs"
+                        : "bg-white border-slate-300 text-slate-700"
                     }`}
                   >
                     <span>🟢</span> Low
@@ -1032,32 +1035,32 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Due Date Picker */}
+              {/* Due Date */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                   Target Elimination Date
                 </label>
                 <input
                   type="date"
                   value={backlogDueDate}
                   onChange={(e) => setBacklogDueDate(e.target.value)}
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-teal-600"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-teal-600"
                 />
               </div>
 
-              {/* Modal Submit Actions */}
+              {/* Actions */}
               <div className="pt-2 flex gap-2">
                 <button
                   type="button"
                   onClick={() => setShowAddBacklogModal(false)}
-                  className="flex-1 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-all"
+                  className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-black text-xs hover:bg-slate-100 transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submittingBacklog || (backlogMode === "other" && !backlogTitle.trim())}
-                  className="flex-1 py-2 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 disabled:opacity-40 transition-all shadow-xs"
+                  className="flex-1 py-2.5 rounded-xl bg-slate-900 text-white font-black text-xs hover:bg-slate-800 disabled:opacity-40 transition-all shadow-md"
                 >
                   {submittingBacklog ? "Saving…" : "Save Backlog"}
                 </button>
