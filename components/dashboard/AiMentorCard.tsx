@@ -5,6 +5,7 @@ import React, { useState } from "react";
 
 interface AiMentorCardProps {
   userId: string;
+  targetExam?: string;
   report: any;
   loading: boolean;
   onRefresh: () => void;
@@ -12,6 +13,7 @@ interface AiMentorCardProps {
 }
 
 export default function AiMentorCard({
+  targetExam = "Competitive Exam",
   report,
   loading,
   onRefresh,
@@ -20,18 +22,20 @@ export default function AiMentorCard({
   const [modalOpen, setModalOpen] = useState(false);
 
   const status = report?.overall_status || "On Track";
-  const prediction = report?.score_prediction || "Projected Target: 99+ %ile";
+  const prediction = report?.score_prediction || `Targeting ${targetExam}: Aim for Top Percentile`;
   const summary =
     report?.diagnostic_summary ||
-    "Maintain a rigid 1:1.5 Theory-to-Practice ratio to guarantee high mock retention.";
+    "Maintain a rigid 1:1.5 Theory-to-Practice ratio to guarantee high retention on exam day.";
 
-  const isWarning = status.toLowerCase().includes("attention") || status.toLowerCase().includes("lag");
+  const isWarning =
+    status.toLowerCase().includes("attention") ||
+    status.toLowerCase().includes("lag") ||
+    status.toLowerCase().includes("backlog");
 
   return (
     <>
-      {/* Sleek Compact AI Power Widget */}
+      {/* Sleek Compact Card */}
       <div className="rounded-2xl p-3.5 bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/50 border border-indigo-100/80 shadow-xs relative overflow-hidden">
-        {/* Subtle decorative glow */}
         <div className="absolute -top-10 -right-10 w-24 h-24 bg-indigo-200/30 rounded-full blur-xl pointer-events-none" />
 
         {/* Header Row */}
@@ -44,7 +48,7 @@ export default function AiMentorCard({
               <h2 className="text-xs font-black tracking-tight text-ink flex items-center gap-1.5">
                 AI Academic Mentor
                 <span className="text-[9.5px] font-bold text-indigo-600 bg-indigo-100/70 px-1.5 py-0.5 rounded-md">
-                  Kota Mode
+                  {targetExam} Diagnostic
                 </span>
               </h2>
             </div>
@@ -72,7 +76,7 @@ export default function AiMentorCard({
           </div>
         </div>
 
-        {/* Prediction & Insight (Compact 2-liner) */}
+        {/* Compact Prediction & Insight */}
         <div className="bg-white/90 backdrop-blur-xs rounded-xl p-2 border border-indigo-100/60 mb-2.5">
           <div className="text-[10.5px] font-black text-indigo-950 mb-0.5">
             {prediction}
@@ -106,15 +110,14 @@ export default function AiMentorCard({
       {modalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white rounded-3xl max-w-lg w-full max-h-[88vh] flex flex-col shadow-2xl border border-ink/10 overflow-hidden">
-            {/* Modal Header */}
             <div className="p-4 border-b border-ink/8 flex items-center justify-between bg-paper/60">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-sm shadow-xs">
                   🧠
                 </span>
                 <div>
-                  <h3 className="text-sm font-black text-ink">Academic Diagnostic Report</h3>
-                  <p className="text-[10px] text-slate">Personalized Kota Blueprint</p>
+                  <h3 className="text-sm font-black text-ink">Personalized Academic Diagnostic</h3>
+                  <p className="text-[10px] text-slate">Tailored for {targetExam}</p>
                 </div>
               </div>
               <button
@@ -126,9 +129,7 @@ export default function AiMentorCard({
               </button>
             </div>
 
-            {/* Modal Body */}
             <div className="p-4 overflow-y-auto space-y-3.5 text-xs">
-              {/* Status Box */}
               <div className="p-3 bg-indigo-50/60 border border-indigo-100 rounded-2xl flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-bold text-slate uppercase tracking-wider">Status</span>
@@ -140,14 +141,13 @@ export default function AiMentorCard({
                 </div>
               </div>
 
-              {/* Strengths & Weaknesses */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-2xl">
                   <div className="font-black text-emerald-800 text-[11px] mb-1.5 flex items-center gap-1">
                     <span>✓</span> Strengths
                   </div>
                   <ul className="space-y-1 text-[10.5px] text-emerald-950">
-                    {(report?.strengths || ["Consistent daily tracking"]).map((s: string, i: number) => (
+                    {(report?.strengths || ["Consistent daily check-ins"]).map((s: string, i: number) => (
                       <li key={i}>• {s}</li>
                     ))}
                   </ul>
@@ -155,25 +155,23 @@ export default function AiMentorCard({
 
                 <div className="p-3 bg-rose-50/50 border border-rose-100 rounded-2xl">
                   <div className="font-black text-rose-800 text-[11px] mb-1.5 flex items-center gap-1">
-                    <span>⚠️</span> Red Flags
+                    <span>⚠️</span> Focus Areas
                   </div>
                   <ul className="space-y-1 text-[10.5px] text-rose-950">
-                    {(report?.weaknesses || ["Increase numerical practice"]).map((w: string, i: number) => (
+                    {(report?.weaknesses || ["Increase question solving pace"]).map((w: string, i: number) => (
                       <li key={i}>• {w}</li>
                     ))}
                   </ul>
                 </div>
               </div>
 
-              {/* Comprehensive Summary */}
               <div className="p-3.5 bg-paper/60 border border-ink/8 rounded-2xl">
-                <h4 className="text-[11px] font-black text-ink mb-1">Director's Performance Review</h4>
+                <h4 className="text-[11px] font-black text-ink mb-1">Academic Analysis</h4>
                 <p className="text-[11px] text-slate leading-relaxed whitespace-pre-wrap">{summary}</p>
               </div>
 
-              {/* 7-Day Plan */}
               <div>
-                <h4 className="text-[11px] font-black text-ink mb-2">7-Day Remedial Action Blueprint</h4>
+                <h4 className="text-[11px] font-black text-ink mb-2">7-Day Action Blueprint</h4>
                 <div className="space-y-1.5">
                   {(report?.seven_day_plan || []).map((step: any, i: number) => (
                     <div key={i} className="p-2.5 bg-white border border-ink/8 rounded-xl flex items-start gap-2 shadow-2xs">
@@ -190,14 +188,13 @@ export default function AiMentorCard({
               </div>
             </div>
 
-            {/* Modal Footer */}
             <div className="p-3 border-t border-ink/8 bg-paper/40 flex justify-end">
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
                 className="px-4 py-2 bg-ink text-paper rounded-xl font-bold text-xs"
               >
-                Got It, Back to Study
+                Back to Dashboard
               </button>
             </div>
           </div>
