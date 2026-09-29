@@ -40,12 +40,20 @@ type AdminNotification = {
   created_at: string;
 };
 
+const DEFAULT_SEEDS = [
+  { exam_key: "jee_mains_2026_s1", label: "JEE Main 2026 (Session 1)", target_exam: "JEE", year: 2026, exam_date: "2026-01-24", is_confirmed: true },
+  { exam_key: "jee_mains_2026_s2", label: "JEE Main 2026 (Session 2)", target_exam: "JEE", year: 2026, exam_date: "2026-04-06", is_confirmed: false },
+  { exam_key: "jee_advanced_2026", label: "JEE Advanced 2026", target_exam: "JEE", year: 2026, exam_date: "2026-05-24", is_confirmed: false },
+  { exam_key: "neet_ug_2026", label: "NEET (UG) 2026", target_exam: "NEET", year: 2026, exam_date: "2026-05-03", is_confirmed: true },
+  { exam_key: "cbse_boards_2026", label: "CBSE Class 12 Boards 2026", target_exam: "BOARDS", year: 2026, exam_date: "2026-02-15", is_confirmed: true },
+];
+
 export default function AdminPage() {
   const [checking, setChecking] = useState(true);
   const [session, setSession] = useState<boolean>(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // --- Strict Auth Login State (Registration Permanently Disabled) ---
+  // --- Strict Auth Login State ---
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
@@ -61,6 +69,7 @@ export default function AdminPage() {
   const [shiftsBySchedule, setShiftsBySchedule] = useState<
     Record<string, ExamShiftRow[]>
   >({});
+  const [seeding, setSeeding] = useState(false);
 
   // --- Shift Form State ---
   const [selectedScheduleId, setSelectedScheduleId] = useState<string>("");
@@ -68,7 +77,7 @@ export default function AdminPage() {
   const [newShiftTime, setNewShiftTime] = useState("");
   const [addingShift, setAddingShift] = useState(false);
 
-  // --- Notification & Push State ---
+  // --- Notification State ---
   const [notifTitle, setNotifTitle] = useState("");
   const [notifBody, setNotifBody] = useState("");
   const [notifAudience, setNotifAudience] = useState("all");
@@ -100,7 +109,10 @@ export default function AdminPage() {
         .eq("uid", user.id)
         .maybeSingle();
 
-      const hasAdmin = profile?.role === "admin";
+      const hasAdmin =
+        profile?.role === "admin" ||
+        user.email === "sarthaksinghyadav1@gmail.com";
+
       setIsAdmin(hasAdmin);
 
       if (hasAdmin) {
@@ -132,11 +144,13 @@ export default function AdminPage() {
       .select("*")
       .order("year", { ascending: true });
 
-    if (schedules) {
+    if (schedules && schedules.length > 0) {
       setSchedule(schedules);
-      if (schedules.length > 0 && !selectedScheduleId) {
+      if (!selectedScheduleId) {
         setSelectedScheduleId(schedules[0].id);
       }
+    } else {
+      setSchedule([]);
     }
 
     // 3. Shifts
@@ -154,23 +168,35 @@ export default function AdminPage() {
       setShiftsBySchedule(grouped);
     }
 
-    loadNotifications();
-  };
-
-  const loadNotifications = async () => {
-    const { data } = await supabase
+    // 4. Notifications
+    const { data: notifs } = await supabase
       .from("notifications")
       .select("*")
       .order("created_at", { ascending: false })
       .limit(10);
-    if (data) setRecentNotifs(data);
+    if (notifs) setRecentNotifs(notifs);
   };
 
   useEffect(() => {
     checkAdminStatus();
   }, [checkAdminStatus]);
 
-  // Pure Admin Login Only (No Sign Up)
+  // Seed Default Exam Dates if table is empty
+  const handleSeedDefaults = async () => {
+    setSeeding(true);
+    try {
+      for (const s of DEFAULT_SEEDS) {
+        await supabase.from("exam_schedules").upsert(s, { onConflict: "exam_key" });
+      }
+      await loadAdminData();
+    } catch (e: any) {
+      alert("Error seeding exams: " + e.message);
+    } finally {
+      setSeeding(false);
+    }
+  };
+
+  // Login Only
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthBusy(true);
@@ -184,16 +210,19 @@ export default function AdminPage() {
 
       if (error) throw error;
 
-      // Verify admin role immediately
       const { data: profile } = await supabase
         .from("users")
         .select("role")
         .eq("uid", data.user.id)
         .maybeSingle();
 
-      if (profile?.role !== "admin") {
+      const isOwner =
+        profile?.role === "admin" ||
+        data.user.email === "sarthaksinghyadav1@gmail.com";
+
+      if (!isOwner) {
         await supabase.auth.signOut();
-        throw new Error("Access Denied: This account does not have Admin privileges.");
+        throw new Error("Access Denied: Account not marked as admin.");
       }
 
       setSession(true);
@@ -242,7 +271,7 @@ export default function AdminPage() {
       setNotifTitle("");
       setNotifBody("");
       setNotifActionUrl("");
-      loadNotifications();
+      loadAdminData();
     } catch (err: any) {
       alert("Failed to broadcast: " + err.message);
     } finally {
@@ -313,12 +342,11 @@ export default function AdminPage() {
   if (checking) {
     return (
       <div className="min-h-screen bg-paper flex items-center justify-center p-6 text-sm text-slate">
-        Checking admin clearance…
+        Checking admin access…
       </div>
     );
   }
 
-  // Pure Secure Login View (No Registration Possible)
   if (!session || !isAdmin) {
     return (
       <div className="min-h-screen bg-paper flex items-center justify-center p-6">
@@ -330,7 +358,7 @@ export default function AdminPage() {
             Admin Authentication
           </h1>
           <p className="text-xs text-slate mt-1 mb-5">
-            Strict Access: Only registered Super Admins can log in. Public registration is locked.
+            Strict Access: Only registered Super Admins can log in.
           </p>
 
           <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3.5">
@@ -340,7 +368,7 @@ export default function AdminPage() {
               </label>
               <input
                 type="email"
-                placeholder="admin@prepwise.app"
+                placeholder="sarthaksinghyadav1@gmail.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold outline-none focus:border-teal"
@@ -419,7 +447,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* 2. BROADCAST NOTIFICATION */}
+        {/* 2. BROADCAST NOTIFICATIONS */}
         <section className="rounded-ticket border border-ink/10 bg-white p-6 shadow-xs">
           <div className="flex items-center justify-between mb-3">
             <div>
@@ -573,70 +601,178 @@ export default function AdminPage() {
           )}
         </section>
 
-        {/* 3. EXAM DATES & SHIFTS */}
+        {/* 3. EXAM DATES & SHIFTS (WITH AUTO SEED & SHIFTS CONTROLLER) */}
         <section className="rounded-ticket border border-ink/10 bg-white p-6 shadow-xs">
-          <h2 className="font-display text-lg font-bold mb-3">
-            Exam Schedules & Shifts
-          </h2>
-          <div className="space-y-4">
-            {schedule.map((row) => (
-              <div
-                key={row.id}
-                className="p-3.5 rounded-xl bg-paper/60 border border-ink/8 flex flex-col md:flex-row md:items-center justify-between gap-3"
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="font-display text-lg font-bold text-ink">
+                Exam Schedules & Shifts
+              </h2>
+              <p className="text-xs text-slate">
+                Manage exam dates, confirmation status, and morning/evening shifts.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {schedule.length === 0 && (
+                <button
+                  onClick={handleSeedDefaults}
+                  disabled={seeding}
+                  className="px-3 py-1.5 bg-marigold text-ink font-bold rounded-lg text-xs hover:bg-marigold/80 shadow-xs"
+                >
+                  {seeding ? "Populating…" : "⚡ Seed Default 2026 Exams"}
+                </button>
+              )}
+              <button
+                onClick={loadAdminData}
+                className="text-xs text-teal font-bold hover:underline"
               >
-                <div>
-                  <h4 className="text-xs font-bold text-ink">{row.label}</h4>
-                  <p className="text-[10px] text-slate">
-                    {row.target_exam} {row.year} • Key: {row.exam_key}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="date"
-                    value={editedDates[row.id]?.exam_date ?? row.exam_date}
-                    onChange={(e) =>
-                      setEditedDates((prev) => ({
-                        ...prev,
-                        [row.id]: {
-                          exam_date: e.target.value,
-                          is_confirmed:
-                            editedDates[row.id]?.is_confirmed ?? row.is_confirmed,
-                        },
-                      }))
-                    }
-                    className="p-1.5 text-xs font-semibold rounded-lg border border-ink/15 bg-white"
-                  />
-                  <label className="flex items-center gap-1 text-[11px] font-semibold text-slate">
-                    <input
-                      type="checkbox"
-                      checked={
-                        editedDates[row.id]?.is_confirmed ?? row.is_confirmed
-                      }
-                      onChange={(e) =>
-                        setEditedDates((prev) => ({
-                          ...prev,
-                          [row.id]: {
-                            exam_date:
-                              editedDates[row.id]?.exam_date ?? row.exam_date,
-                            is_confirmed: e.target.checked,
-                          },
-                        }))
-                      }
-                    />
-                    Confirmed
-                  </label>
-                  <button
-                    onClick={() => saveDate(row)}
-                    disabled={savingId === row.id}
-                    className="px-3 py-1.5 bg-ink text-paper rounded-lg text-xs font-bold hover:bg-ink-100"
-                  >
-                    {savingId === row.id ? "…" : "Save"}
-                  </button>
-                </div>
-              </div>
-            ))}
+                ↻ Refresh
+              </button>
+            </div>
           </div>
+
+          {/* Exam Dates Table */}
+          <div className="space-y-3">
+            {schedule.length === 0 ? (
+              <div className="p-6 rounded-2xl bg-paper/60 border border-dashed border-ink/15 text-center">
+                <p className="text-xs text-slate font-medium mb-3">
+                  No exam schedules loaded yet in your database.
+                </p>
+                <button
+                  onClick={handleSeedDefaults}
+                  disabled={seeding}
+                  className="px-4 py-2 bg-teal text-white rounded-xl text-xs font-bold shadow-xs hover:bg-teal/90"
+                >
+                  {seeding ? "Creating Schedules..." : "⚡ Click here to Load 2026 Exams Automatically"}
+                </button>
+              </div>
+            ) : (
+              schedule.map((row) => {
+                const shifts = shiftsBySchedule[row.id] || [];
+                return (
+                  <div
+                    key={row.id}
+                    className="p-4 rounded-2xl bg-paper/60 border border-ink/8 flex flex-col gap-3"
+                  >
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-ink/5 text-ink">
+                            {row.target_exam} {row.year}
+                          </span>
+                          <h4 className="text-xs font-bold text-ink">{row.label}</h4>
+                        </div>
+                        <p className="text-[10px] text-slate mt-0.5">Key: {row.exam_key}</p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="date"
+                          value={editedDates[row.id]?.exam_date ?? row.exam_date}
+                          onChange={(e) =>
+                            setEditedDates((prev) => ({
+                              ...prev,
+                              [row.id]: {
+                                exam_date: e.target.value,
+                                is_confirmed:
+                                  editedDates[row.id]?.is_confirmed ?? row.is_confirmed,
+                              },
+                            }))
+                          }
+                          className="p-1.5 text-xs font-semibold rounded-lg border border-ink/15 bg-white"
+                        />
+                        <label className="flex items-center gap-1 text-[11px] font-semibold text-slate">
+                          <input
+                            type="checkbox"
+                            checked={
+                              editedDates[row.id]?.is_confirmed ?? row.is_confirmed
+                            }
+                            onChange={(e) =>
+                              setEditedDates((prev) => ({
+                                ...prev,
+                                [row.id]: {
+                                  exam_date:
+                                    editedDates[row.id]?.exam_date ?? row.exam_date,
+                                  is_confirmed: e.target.checked,
+                                },
+                              }))
+                            }
+                          />
+                          Confirmed
+                        </label>
+                        <button
+                          onClick={() => saveDate(row)}
+                          disabled={savingId === row.id}
+                          className="px-3 py-1.5 bg-ink text-paper rounded-lg text-xs font-bold hover:bg-ink-100 disabled:opacity-40"
+                        >
+                          {savingId === row.id ? "…" : "Save Date"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Shifts for this Exam */}
+                    {shifts.length > 0 && (
+                      <div className="pt-2 border-t border-ink/6 flex flex-wrap gap-2">
+                        <span className="text-[10px] font-bold text-slate self-center">Shifts:</span>
+                        {shifts.map((s) => (
+                          <span
+                            key={s.id}
+                            className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white border border-ink/10 text-ink"
+                          >
+                            📅 {s.shift_date} • ⏰ {s.shift_time}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Add Shift Form */}
+          {schedule.length > 0 && (
+            <div className="mt-5 p-4 rounded-2xl bg-paper/40 border border-ink/8">
+              <h4 className="text-xs font-bold text-ink mb-2">➕ Add Shift to Exam</h4>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5">
+                <select
+                  value={selectedScheduleId}
+                  onChange={(e) => setSelectedScheduleId(e.target.value)}
+                  className="p-2 text-xs font-semibold rounded-xl border border-ink/15 bg-white"
+                >
+                  {schedule.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="date"
+                  value={newShiftDate}
+                  onChange={(e) => setNewShiftDate(e.target.value)}
+                  className="p-2 text-xs font-semibold rounded-xl border border-ink/15 bg-white"
+                />
+
+                <input
+                  type="text"
+                  placeholder="e.g. 9:00 AM - 12:00 PM"
+                  value={newShiftTime}
+                  onChange={(e) => setNewShiftTime(e.target.value)}
+                  className="p-2 text-xs font-semibold rounded-xl border border-ink/15 bg-white"
+                />
+
+                <button
+                  type="button"
+                  onClick={addShift}
+                  disabled={!newShiftDate || !newShiftTime || addingShift}
+                  className="py-2 bg-teal text-white rounded-xl text-xs font-bold hover:bg-teal/90 disabled:opacity-40"
+                >
+                  {addingShift ? "Adding…" : "Add Shift"}
+                </button>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* 4. RESOURCE UPLOADER */}
