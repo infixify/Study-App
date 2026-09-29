@@ -1,3 +1,4 @@
+// app/profile/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -41,45 +42,40 @@ export default function ProfilePage() {
   const [savingName, setSavingName] = useState(false);
 
   useEffect(() => {
-    async function loadProfile() {
+    async function load() {
       const { data: authData } = await supabase.auth.getUser();
       const user = authData?.user;
       if (!user) {
         setLoading(false);
         return;
       }
-
-      const { data: userRow } = await supabase
+      const { data } = await supabase
         .from("users")
-        .select("name, email, class_level, target_exam, wants_boards, study_mode, batch_or_branch_id, batches(name)")
+        .select("name, email, class_level, target_exam, wants_boards, study_mode, batch_name")
         .eq("uid", user.id)
         .maybeSingle();
 
-      if (userRow) {
-        const batchName = (userRow.batches as any)?.name || "Not set";
-        const userProf: UserProfile = {
-          name: userRow.name || user.email || "Student",
-          email: userRow.email || user.email || "",
-          classLevel: userRow.class_level as ClassLevel,
-          targetExam: userRow.target_exam as TargetExam,
-          wantsBoards: userRow.wants_boards ?? false,
-          studyMode: (userRow.study_mode as StudyMode) || "Self",
-          batchName: batchName,
-        };
-
-        setProfile(userProf);
-        setNewName(userProf.name);
-        setStudyMode(userProf.studyMode);
-        setBatch(userProf.batchName === "Not set" ? "" : userProf.batchName);
+      if (data) {
+        setProfile({
+          name: data.name ?? user.user_metadata?.full_name ?? "Student",
+          email: data.email ?? user.email ?? "",
+          classLevel: data.class_level,
+          targetExam: data.target_exam,
+          wantsBoards: data.wants_boards ?? false,
+          studyMode: data.study_mode ?? "Online",
+          batchName: data.batch_name ?? "",
+        });
+        setStudyMode(data.study_mode ?? "Online");
+        setBatch(data.batch_name ?? "");
+        setNewName(data.name ?? user.user_metadata?.full_name ?? "");
       }
       setLoading(false);
     }
-
-    loadProfile();
+    load();
   }, []);
 
   async function handleSaveName() {
-    if (!newName.trim() || !profile) return;
+    if (!newName.trim()) return;
     setSavingName(true);
     const { data: authData } = await supabase.auth.getUser();
     const user = authData?.user;
@@ -94,28 +90,30 @@ export default function ProfilePage() {
 
   async function saveEditable(nextMode: StudyMode, nextBatch: string) {
     setSaving(true);
-    const res = await updateEditableProfile({ studyMode: nextMode, batchOrBranch: nextBatch });
-    if (res.success) {
+    const ok = await updateEditableProfile({ studyMode: nextMode, batchName: nextBatch });
+    if (ok) {
       setStudyMode(nextMode);
       setBatch(nextBatch);
-      setProfile((prev) => (prev ? { ...prev, studyMode: nextMode, batchName: nextBatch || "Self" } : null));
+      setProfile((prev) => (prev ? { ...prev, studyMode: nextMode, batchName: nextBatch } : null));
+      setEditingBatch(false);
+    } else {
+      alert("Failed to update profile settings.");
     }
     setSaving(false);
-    setEditingBatch(false);
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-paper flex items-center justify-center">
-        <p className="text-ink/60 text-sm">Loading your profile…</p>
+      <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] flex items-center justify-center text-xs font-bold text-slate-400">
+        Loading Profile…
       </div>
     );
   }
 
   if (!profile) {
     return (
-      <div className="min-h-screen bg-paper flex items-center justify-center">
-        <p className="text-ink/60 text-sm">No profile found. Please sign in.</p>
+      <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] flex items-center justify-center p-6 text-xs text-slate-400">
+        Profile not found. Please log in again.
       </div>
     );
   }
@@ -138,60 +136,71 @@ export default function ProfilePage() {
       : "No";
 
   return (
-    <div className="min-h-screen bg-paper pb-28">
-      {/* Universal App Header */}
+    <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] text-slate-900 dark:text-slate-100 pb-28">
       <AppHeader />
-
       <div className="max-w-md mx-auto px-5 py-6">
-        <h1 className="font-display text-2xl font-bold mb-1 text-ink">My Profile</h1>
-        <p className="text-slate text-xs mb-6">
-          Signed in as <span className="font-medium text-ink">{profile.email}</span>
+        <h1 className="font-display text-2xl font-black mb-0.5 tracking-tight text-slate-900 dark:text-white">
+          My Profile
+        </h1>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 font-medium">
+          Signed in as <span className="font-semibold text-slate-800 dark:text-slate-200">{profile.email}</span>
         </p>
 
-        {/* Editable Information Section */}
-        <SectionLabel text="Personal & Study Settings" pillText="Editable" pillTone="edit" />
-        
-        {/* Name (Now Editable!) */}
+        {/* Section 1: Editable Settings */}
+        <div className="flex items-center justify-between mb-2.5">
+          <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Personal & Study Settings
+          </span>
+          <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-teal/10 dark:bg-teal/20 text-teal dark:text-[#2DD4BF]">
+            Editable
+          </span>
+        </div>
+
+        {/* Name Card */}
         {editingName ? (
-          <div className="rounded-ticket border border-ink/15 p-3.5 mb-2 bg-white flex items-center gap-2">
+          <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-3.5 mb-2.5 bg-white dark:bg-[#121A29] flex items-center gap-2 shadow-sm">
             <input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              className="flex-1 text-sm font-semibold border border-ink/20 rounded-lg p-2 focus:outline-none focus:border-teal"
+              className="flex-1 text-sm font-bold bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white border border-slate-200 dark:border-white/10 rounded-xl p-2.5 focus:outline-none focus:border-teal"
               placeholder="Enter your name"
               autoFocus
             />
             <button
               onClick={handleSaveName}
               disabled={savingName}
-              className="bg-teal text-white text-xs font-bold px-3 py-2 rounded-lg"
+              className="bg-teal text-white text-xs font-bold px-3.5 py-2.5 rounded-xl shadow-xs"
             >
               {savingName ? "…" : "Save"}
             </button>
             <button
               onClick={() => setEditingName(false)}
-              className="text-xs text-slate px-2 py-2"
+              className="text-xs font-bold text-slate-400 px-2 py-2"
             >
               Cancel
             </button>
           </div>
         ) : (
-          <EditableRow
+          <RowCard
             label="Full Name"
             value={profile.name}
+            isEditable
             onClick={() => setEditingName(true)}
           />
         )}
 
-        <EditableRow
-          label="Study mode"
+        <RowCard
+          label="Study Mode"
           value={studyMode}
+          isEditable
           onClick={() => setEditingBatch((v) => !v)}
         />
-        <EditableRow
-          label="Batch / institute"
+
+        <RowCard
+          label="Batch / Institute"
           value={batch || "Self Study"}
+          isEditable
           onClick={() => setEditingBatch((v) => !v)}
         />
 
@@ -205,81 +214,77 @@ export default function ProfilePage() {
           />
         )}
 
-        {/* Locked Information Section */}
-        <SectionLabel text="Academic Track" pillText="Locked" pillTone="locked" className="mt-7" />
-        <LockedRow label="Class" value={classLabel} />
-        <LockedRow label="Target exam" value={profile.targetExam} />
-        <LockedRow label={schoolLabel} value={schoolValue} />
+        {/* Section 2: Academic Track (Locked) */}
+        <div className="flex items-center justify-between mt-6 mb-2.5">
+          <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Academic Track
+          </span>
+          <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-slate-300">
+            Locked 🔒
+          </span>
+        </div>
 
-        <p className="text-[11px] text-slate mt-3 leading-relaxed">
+        <RowCard label="Class Level" value={classLabel} isLocked />
+        <RowCard label="Target Exam" value={profile.targetExam} isLocked />
+        <RowCard label={schoolLabel} value={schoolValue} isLocked />
+
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-4 leading-relaxed font-medium">
           Class and Target Exam were locked during signup to keep your test streaks, syllabus progress, and countdown accurate.
         </p>
       </div>
-
       <BottomNav />
     </div>
   );
 }
 
-function SectionLabel({
-  text,
-  pillText,
-  pillTone,
-  className = "",
-}: {
-  text: string;
-  pillText: string;
-  pillTone: "locked" | "edit";
-  className?: string;
-}) {
-  return (
-    <div className={`flex items-center gap-2 mb-2.5 ${className}`}>
-      <span className="text-[11px] font-bold uppercase tracking-wide text-slate">
-        {text}
-      </span>
-      <span
-        className={`text-[9.5px] font-bold px-2 py-0.5 rounded-full ${
-          pillTone === "locked" ? "bg-ink/10 text-slate" : "bg-teal/15 text-teal"
-        }`}
-      >
-        {pillText}
-      </span>
-    </div>
-  );
-}
-
-function LockedRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between rounded-ticket border border-ink/12 p-3.5 mb-2 bg-white/70">
-      <div>
-        <div className="text-[10.5px] uppercase tracking-wide text-slate">{label}</div>
-        <div className="text-sm font-semibold mt-0.5 text-ink">{value}</div>
-      </div>
-      <span className="text-xs">🔒</span>
-    </div>
-  );
-}
-
-function EditableRow({
+function RowCard({
   label,
   value,
+  isEditable = false,
+  isLocked = false,
   onClick,
 }: {
   label: string;
   value: string;
-  onClick: () => void;
+  isEditable?: boolean;
+  isLocked?: boolean;
+  onClick?: () => void;
 }) {
-  return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-center justify-between rounded-ticket border border-ink/12 p-3.5 mb-2 text-left bg-white hover:border-ink/25 transition-colors shadow-xs"
-    >
+  const content = (
+    <div className="flex items-center justify-between w-full">
       <div>
-        <div className="text-[10.5px] uppercase tracking-wide text-slate">{label}</div>
-        <div className="text-sm font-semibold mt-0.5 text-ink">{value}</div>
+        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          {label}
+        </div>
+        <div className="text-sm font-bold mt-0.5 text-slate-900 dark:text-white">
+          {value}
+        </div>
       </div>
-      <span className="text-xs text-teal font-semibold">Edit ✎</span>
-    </button>
+      {isEditable && (
+        <span className="text-xs font-bold text-teal dark:text-[#2DD4BF] flex items-center gap-1 hover:underline">
+          Edit ✎
+        </span>
+      )}
+      {isLocked && <span className="text-xs opacity-70">🔒</span>}
+    </div>
+  );
+
+  if (isEditable) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-full text-left rounded-2xl border border-slate-200 dark:border-white/10 p-3.5 mb-2.5 bg-white dark:bg-[#121A29] hover:border-teal dark:hover:border-teal/50 shadow-sm transition-all active:scale-[0.99]"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-200/80 dark:border-white/10 p-3.5 mb-2.5 bg-white/70 dark:bg-[#121A29]/70 backdrop-blur-xs shadow-xs">
+      {content}
+    </div>
   );
 }
 
@@ -297,20 +302,37 @@ function BatchEditor({
   onCancel: () => void;
 }) {
   const [mode, setMode] = useState<StudyMode>(currentMode);
-  const [batch, setBatch] = useState<string>(currentBatch);
+  const [selectedBatch, setSelectedBatch] = useState<string>(currentBatch);
+  const [customBatch, setCustomBatch] = useState<string>("");
+
+  const options =
+    mode === "Online"
+      ? ONLINE_BATCHES
+      : mode === "Offline"
+      ? OFFLINE_INSTITUTES
+      : [];
+
+  const isCustom = !options.includes(selectedBatch) && selectedBatch !== "";
 
   return (
-    <div className="rounded-ticket border border-ink/12 p-4 mt-2 bg-white shadow-xs">
-      <div className="flex gap-2 mb-3">
+    <div className="rounded-2xl border border-teal/30 p-4 mb-4 bg-white dark:bg-[#151D2A] shadow-md space-y-3">
+      <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+        Change Study Mode & Batch
+      </h3>
+
+      <div className="grid grid-cols-3 gap-1.5">
         {(["Online", "Offline", "Self"] as StudyMode[]).map((m) => (
           <button
             key={m}
+            type="button"
             onClick={() => {
               setMode(m);
-              setBatch("");
+              setSelectedBatch(m === "Self" ? "Self Study" : "");
             }}
-            className={`flex-1 text-xs font-semibold rounded-full py-2 border transition-all ${
-              mode === m ? "bg-ink text-paper border-ink" : "border-ink/15 text-slate bg-paper/50"
+            className={`py-2 text-xs font-bold rounded-xl border transition-all ${
+              mode === m
+                ? "bg-teal text-white border-teal shadow-xs"
+                : "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300"
             }`}
           >
             {m}
@@ -318,42 +340,29 @@ function BatchEditor({
         ))}
       </div>
 
-      {mode === "Offline" && (
-        <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
-          {OFFLINE_INSTITUTES.map((inst) => (
+      {mode !== "Self" && (
+        <div className="space-y-1.5 max-h-40 overflow-y-auto">
+          {options.map((opt) => (
             <button
-              key={inst}
-              onClick={() => setBatch(inst)}
-              className={`text-left text-sm rounded-lg border p-2.5 transition-all ${
-                batch === inst ? "border-marigold bg-marigold/10 font-medium" : "border-ink/12 hover:border-ink/25"
+              key={opt}
+              type="button"
+              onClick={() => setSelectedBatch(opt)}
+              className={`w-full text-left p-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                selectedBatch === opt
+                  ? "bg-teal/15 dark:bg-teal/20 text-teal dark:text-[#2DD4BF] border-teal/40 font-bold"
+                  : "bg-slate-50 dark:bg-white/5 border-slate-200/60 dark:border-white/5 text-slate-700 dark:text-slate-300"
               }`}
             >
-              {inst}
+              {opt}
             </button>
           ))}
-        </div>
-      )}
-
-      {mode === "Online" && (
-        <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
-          {ONLINE_BATCHES.map((b) => {
-            const key = `${b.institute} — ${b.name}`;
-            return (
-              <button
-                key={key}
-                onClick={() => setBatch(key)}
-                className={`text-left text-sm rounded-lg border p-2.5 transition-all ${
-                  batch === key ? "border-marigold bg-marigold/10 font-medium" : "border-ink/12 hover:border-ink/25"
-                }`}
-              >
-                {key}
-              </button>
-            );
-          })}
           <button
-            onClick={() => setBatch(BATCH_OTHER)}
-            className={`text-left text-sm rounded-lg border p-2.5 transition-all ${
-              batch === BATCH_OTHER ? "border-marigold bg-marigold/10 font-medium" : "border-ink/12 hover:border-ink/25"
+            type="button"
+            onClick={() => setSelectedBatch(BATCH_OTHER)}
+            className={`w-full text-left p-2.5 rounded-xl text-xs font-semibold border transition-all ${
+              selectedBatch === BATCH_OTHER || isCustom
+                ? "bg-teal/15 dark:bg-teal/20 text-teal dark:text-[#2DD4BF] border-teal/40 font-bold"
+                : "bg-slate-50 dark:bg-white/5 border-slate-200/60 dark:border-white/5 text-slate-700 dark:text-slate-300"
             }`}
           >
             {BATCH_OTHER}
@@ -361,25 +370,41 @@ function BatchEditor({
         </div>
       )}
 
-      {mode === "Self" && (
-        <p className="text-xs text-slate py-2">No batch needed for self-study.</p>
+      {(selectedBatch === BATCH_OTHER || isCustom) && mode !== "Self" && (
+        <input
+          type="text"
+          placeholder="Enter coaching/batch name"
+          value={customBatch}
+          onChange={(e) => setCustomBatch(e.target.value)}
+          className="w-full text-xs font-semibold p-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white outline-none focus:border-teal"
+        />
       )}
 
-      <div className="flex gap-2 mt-4">
+      <div className="flex gap-2 pt-2">
         <button
-          onClick={onCancel}
-          className="flex-1 text-xs font-medium rounded-full py-2.5 border border-ink/15 hover:bg-ink/5"
+          type="button"
+          disabled={saving}
+          onClick={() => {
+            const finalBatch =
+              mode === "Self"
+                ? "Self Study"
+                : isCustom || selectedBatch === BATCH_OTHER
+                ? customBatch || "Other"
+                : selectedBatch;
+            onSave(mode, finalBatch);
+          }}
+          className="flex-1 py-2.5 bg-teal text-white font-bold text-xs rounded-xl shadow-xs"
         >
-          Cancel
+          {saving ? "Saving…" : "Save Changes"}
         </button>
         <button
-          disabled={saving || (mode !== "Self" && !batch)}
-          onClick={() => onSave(mode, mode === "Self" ? "" : batch)}
-          className="flex-1 text-xs font-bold rounded-full py-2.5 bg-ink text-paper disabled:opacity-30 shadow-xs"
+          type="button"
+          onClick={onCancel}
+          className="px-4 py-2.5 text-xs font-bold text-slate-400"
         >
-          {saving ? "Saving…" : "Save"}
+          Cancel
         </button>
       </div>
     </div>
   );
-                                            }
+}
