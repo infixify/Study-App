@@ -104,7 +104,7 @@ export default function DashboardPage() {
   const [recentTests, setRecentTests] = useState<TestLog[]>([]);
   const [heatGrid, setHeatGrid] = useState<number[]>([]);
 
-  // Exam Schedules
+  // Admin Connected Exam Schedules & Shifts
   const [examSchedules, setExamSchedules] = useState<ExamScheduleItem[]>([]);
   const [shiftsMap, setShiftsMap] = useState<Record<string, ExamShift[]>>({});
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
@@ -154,18 +154,28 @@ export default function DashboardPage() {
 
       const targetExam = uProf?.target_exam || "JEE";
       const targetYear = Number(uProf?.target_year) || 2027;
+      const isDropper = uProf?.class_level === "Dropper";
+      const wantsBoards = !isDropper && Boolean(uProf?.wants_boards);
 
-      // 2. Fetch Personalized Exam Schedules
+      // 2. FETCH REAL ADMIN EXAM SCHEDULES (Strict Filter: No boards for Dropper!)
       const { data: schedules } = await supabase
         .from("exam_schedule")
         .select("*")
-        .or(`target_exam.eq.${targetExam},target_exam.eq.ALL`)
         .eq("year", targetYear)
         .order("display_order", { ascending: true });
 
+      let studentSchedules: ExamScheduleItem[] = [];
+
       if (schedules && schedules.length > 0) {
-        setExamSchedules(schedules);
-        const scheduleIds = schedules.map((s) => s.id);
+        studentSchedules = schedules.filter((s) => {
+          if (s.target_exam === "Boards") {
+            // Strictly exclude boards if user is Dropper
+            return wantsBoards;
+          }
+          return s.target_exam === targetExam || s.target_exam === "ALL";
+        });
+
+        const scheduleIds = studentSchedules.map((s) => s.id);
         const { data: shifts } = await supabase
           .from("exam_shifts")
           .select("*")
@@ -180,19 +190,21 @@ export default function DashboardPage() {
           });
           setShiftsMap(sMap);
         }
-      } else {
-        const fallbackList: ExamScheduleItem[] = [];
+      }
+
+      // Fallback if Admin hasn't seeded rows yet
+      if (studentSchedules.length === 0) {
         if (targetExam === "JEE") {
-          fallbackList.push({
+          studentSchedules.push({
             id: "mains-fallback",
             exam_key: "jee_mains",
-            label: "JEE Main (Session 1)",
+            label: "JEE Main",
             target_exam: "JEE",
             year: targetYear,
             exam_date: `${targetYear}-01-22T09:00:00`,
             is_confirmed: false,
           });
-          fallbackList.push({
+          studentSchedules.push({
             id: "adv-fallback",
             exam_key: "jee_advanced",
             label: "JEE Advanced",
@@ -202,7 +214,7 @@ export default function DashboardPage() {
             is_confirmed: false,
           });
         } else if (targetExam === "NEET") {
-          fallbackList.push({
+          studentSchedules.push({
             id: "neet-fallback",
             exam_key: "neet_ug",
             label: "NEET UG",
@@ -212,19 +224,21 @@ export default function DashboardPage() {
             is_confirmed: false,
           });
         }
-        if (uProf?.wants_boards) {
-          fallbackList.push({
+        // ONLY non-dropper with wants_boards gets boards fallback!
+        if (wantsBoards) {
+          studentSchedules.push({
             id: "boards-fallback",
             exam_key: "board_exam",
-            label: `${uProf?.class_level || "12th"} Board Examination`,
+            label: `${uProf?.class_level || "12th"} Board`,
             target_exam: "Boards",
             year: targetYear,
             exam_date: `${targetYear}-02-15T10:30:00`,
             is_confirmed: false,
           });
         }
-        setExamSchedules(fallbackList);
       }
+
+      setExamSchedules(studentSchedules);
 
       const todayStr = new Date().toISOString().split("T")[0];
 
@@ -462,9 +476,13 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased">
       <AppHeader />
 
-      <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3.5">
-        {/* 1. HIGH-CONTRAST COUNTDOWN BANNER (JEETrack Style) */}
-        <div className="space-y-2">
+      <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
+        {/* 1. COMPACT DUAL/SINGLE COUNTDOWN CAROUSEL */}
+        <div
+          className={`grid gap-2 ${
+            examSchedules.length > 1 ? "grid-cols-2" : "grid-cols-1"
+          }`}
+        >
           {examSchedules.map((exam) => {
             const days = calculateDaysLeft(exam.exam_date);
             const shifts = shiftsMap[exam.id] || [];
@@ -472,52 +490,43 @@ export default function DashboardPage() {
             return (
               <div
                 key={exam.id}
-                className="rounded-2xl p-4 bg-[#0B132B] text-white shadow-lg border border-slate-800 relative overflow-hidden"
+                className="rounded-2xl p-3 bg-[#0B132B] text-white shadow-md border border-slate-800 flex flex-col justify-between"
               >
-                {/* Subtle Amber Glow Accent */}
-                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+                {/* Header Badge */}
+                <div className="flex items-center justify-between gap-1 mb-1.5">
+                  <span className="text-[9.5px] font-black uppercase tracking-wider text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-md border border-amber-400/30 truncate">
+                    {exam.label}
+                  </span>
+                  <span className="text-[8.5px] font-semibold text-slate-400 flex-shrink-0">
+                    {exam.is_confirmed ? "Official" : "Proj."}
+                  </span>
+                </div>
 
-                <div className="flex items-center justify-between relative z-10">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-300 bg-amber-400/20 px-2.5 py-0.5 rounded-md border border-amber-400/30">
-                        {exam.label}
-                      </span>
-                      <span className="text-[10px] font-semibold text-slate-300">
-                        {exam.is_confirmed ? "• Confirmed" : "• Projected"}
-                      </span>
-                    </div>
-                    <div className="text-sm font-bold text-white mt-1.5 tracking-tight">
-                      {new Date(exam.exam_date).toLocaleDateString("en-IN", {
-                        weekday: "short",
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
-                    </div>
+                {/* Days Left Hero & Date */}
+                <div className="flex items-baseline justify-between mt-1 mb-1">
+                  <div className="text-2xl font-black tracking-tight text-amber-400 leading-none">
+                    {days}
+                    <span className="text-[9.5px] font-bold text-slate-300 uppercase ml-1">
+                      Days
+                    </span>
                   </div>
-
-                  {/* Golden-Yellow Days Left Counter */}
-                  <div className="text-right bg-white/10 px-3.5 py-2 rounded-xl border border-white/20 backdrop-blur-md shadow-xs">
-                    <div className="text-2xl font-black tracking-tight text-amber-400 leading-none">
-                      {days}
-                    </div>
-                    <div className="text-[8.5px] font-extrabold uppercase tracking-wider text-slate-200 mt-0.5">
-                      Days Left
-                    </div>
+                  <div className="text-[10px] font-medium text-slate-300">
+                    {new Date(exam.exam_date).toLocaleDateString("en-IN", {
+                      month: "short",
+                      day: "numeric",
+                    })}
                   </div>
                 </div>
 
-                {/* Shift Selector */}
+                {/* Shift Dropdown */}
                 {shifts.length > 0 && (
-                  <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between text-[11px] relative z-10">
-                    <span className="text-slate-300 font-bold">Your Shift Slot:</span>
+                  <div className="mt-1.5 pt-1.5 border-t border-white/10">
                     <select
                       value={selectedShiftId || ""}
                       onChange={(e) => handleShiftSelect(e.target.value)}
-                      className="bg-slate-800 text-white rounded-lg px-2.5 py-1 border border-slate-700 text-xs font-semibold focus:outline-none focus:border-amber-400"
+                      className="w-full bg-slate-800/90 text-white rounded-lg px-2 py-1 border border-slate-700 text-[9.5px] font-medium focus:outline-none focus:border-amber-400 truncate"
                     >
-                      <option value="">Select Exam Shift</option>
+                      <option value="">Select Shift</option>
                       {shifts.map((sh) => (
                         <option key={sh.id} value={sh.id}>
                           {sh.shift_date} ({sh.shift_time})
@@ -541,7 +550,7 @@ export default function DashboardPage() {
           onOpenDoubtSolver={() => setDoubtOpen(true)}
         />
 
-        {/* 3. THREE COCKPIT METRICS (Solid White Cards with Crisp Borders) */}
+        {/* 3. THREE COCKPIT METRICS */}
         <div className="grid grid-cols-3 gap-2">
           {/* Today Focus -> /focus */}
           <button
@@ -580,7 +589,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 4. BACKLOG RADAR WIDGET (Contrast List & 1-Tap Trigger) */}
+        {/* 4. BACKLOG RADAR WIDGET */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <div className="flex items-center gap-2 text-slate-900">
@@ -644,7 +653,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 5. STUDY DISTRIBUTION RATIO (High Contrast Bar) */}
+        {/* 5. STUDY DISTRIBUTION RATIO */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
@@ -683,7 +692,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 6. GITHUB-STYLE 12-WEEK CONSISTENCY HEATMAP */}
+        {/* 6. 12-WEEK CONSISTENCY MATRIX */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
           <div className="flex items-center justify-between text-xs font-black mb-3">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
@@ -694,19 +703,18 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          {/* 84-Tile High-Contrast Matrix */}
           <div className="grid grid-flow-col grid-rows-7 gap-1.5 overflow-x-auto py-1">
             {heatGrid.map((level, idx) => {
               const bg =
                 level === 4
-                  ? "bg-[#065F46] border border-[#047857]" // 6h+ Dark emerald
+                  ? "bg-[#065F46] border border-[#047857]"
                   : level === 3
-                  ? "bg-[#059669] border border-[#10B981]" // 4h+ Vibrant emerald
+                  ? "bg-[#059669] border border-[#10B981]"
                   : level === 2
-                  ? "bg-[#34D399] border border-[#6EE7B7]" // 2h+
+                  ? "bg-[#34D399] border border-[#6EE7B7]"
                   : level === 1
-                  ? "bg-[#A7F3D0] border border-[#D1FAE5]" // 1h+
-                  : "bg-slate-200/80 border border-slate-300/60"; // Zero day
+                  ? "bg-[#A7F3D0] border border-[#D1FAE5]"
+                  : "bg-slate-200/80 border border-slate-300/60";
               return <div key={idx} className={`w-3.5 h-3.5 rounded-sm ${bg}`} />;
             })}
           </div>
@@ -850,11 +858,10 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* 10. HIGH-VISIBILITY BACKLOG MODAL */}
+      {/* 10. BACKLOG MODAL */}
       {showAddBacklogModal && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-300 overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Modal Header */}
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center text-sm shadow-xs font-bold">
@@ -874,7 +881,6 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {/* Segmented Slider Tab */}
             <div className="p-3 border-b border-slate-200 bg-slate-100">
               <div className="grid grid-cols-2 p-1 bg-slate-200 rounded-xl text-xs font-black">
                 <button
@@ -902,7 +908,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Modal Form */}
             <form onSubmit={handleSaveBacklog} className="p-4 space-y-3.5 overflow-y-auto text-xs">
               {backlogMode === "chapter" ? (
                 <>
@@ -993,7 +998,6 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Priority */}
               <div>
                 <label className="block text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                   Priority Urgency
@@ -1035,7 +1039,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Due Date */}
               <div>
                 <label className="block text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                   Target Elimination Date
@@ -1048,7 +1051,6 @@ export default function DashboardPage() {
                 />
               </div>
 
-              {/* Actions */}
               <div className="pt-2 flex gap-2">
                 <button
                   type="button"
