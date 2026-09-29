@@ -798,7 +798,6 @@ export default function DashboardPage() {
             <div className="text-xs font-black text-slate-900">Syllabus Tracker</div>
             <div className="text-[10px] font-semibold text-slate-500">Chapters & Backlogs</div>
           </button>
-
           <button
             type="button"
             onClick={() => router.push("/tests")}
@@ -807,6 +806,24 @@ export default function DashboardPage() {
             <div className="text-xl mb-1">📊</div>
             <div className="text-xs font-black text-slate-900">Test Hub</div>
             <div className="text-[10px] font-semibold text-slate-500">Log & analyze marks</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/error-book")}
+            className="p-3.5 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-[0_2px_8px_rgba(0,0,0,0.04)] active:scale-[0.98] transition-all"
+          >
+            <div className="text-xl mb-1">📕</div>
+            <div className="text-xs font-black text-slate-900">Error Book</div>
+            <div className="text-[10px] font-semibold text-slate-500">Mistakes & Voice Notes</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/groups")}
+            className="p-3.5 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-[0_2px_8px_rgba(0,0,0,0.04)] active:scale-[0.98] transition-all"
+          >
+            <div className="text-xl mb-1">👥</div>
+            <div className="text-xs font-black text-slate-900">Study Groups</div>
+            <div className="text-[10px] font-semibold text-slate-500">PrepWise World Feed</div>
           </button>
         </div>
 
