@@ -1,7 +1,7 @@
 // components/dashboard/AppHeader.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -14,18 +14,66 @@ interface HeaderUserData {
   targetYear: number | null;
 }
 
+interface AppNotification {
+  id: string;
+  title: string;
+  body: string;
+  target_audience: string;
+  action_url: string | null;
+  created_at: string;
+}
+
 export default function AppHeader() {
   const pathname = usePathname();
   const router = useRouter();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [profilePopupOpen, setProfilePopupOpen] = useState(false);
+  const [notifPopupOpen, setNotifPopupOpen] = useState(false);
   const [user, setUser] = useState<HeaderUserData | null>(null);
+
+  // Notifications State
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadIds, setUnreadIds] = useState<string[]>([]);
 
   // Name editing state
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
   const [savingName, setSavingName] = useState(false);
+
+  // Fetch Notifications
+  const fetchNotifications = useCallback(async (userId: string, targetExam: string | null) => {
+    try {
+      const { data: allNotifs } = await supabase
+        .from("notifications")
+        .select("id, title, body, target_audience, action_url, created_at")
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (!allNotifs) return;
+
+      // Filter by exam or all
+      const userExamLower = (targetExam || "jee").toLowerCase();
+      const filtered = allNotifs.filter((n) => {
+        const aud = (n.target_audience || "all").toLowerCase();
+        return aud === "all" || aud === userExamLower;
+      });
+
+      setNotifications(filtered);
+
+      // Check which ones are read
+      const { data: readRows } = await supabase
+        .from("notification_reads")
+        .select("notification_id")
+        .eq("user_id", userId);
+
+      const readSet = new Set((readRows || []).map((r) => r.notification_id));
+      const unreads = filtered.filter((n) => !readSet.has(n.id)).map((n) => n.id);
+      setUnreadIds(unreads);
+    } catch (e) {
+      console.warn("Notifications load error", e);
+    }
+  }, []);
 
   useEffect(() => {
     async function fetchUser() {
@@ -41,17 +89,35 @@ export default function AppHeader() {
 
       const resolvedName =
         profile?.name || authUser.user_metadata?.full_name || "Student";
-      setUser({
+      const uData: HeaderUserData = {
         id: authUser.id,
         name: resolvedName,
         email: authUser.email || profile?.email || "",
         targetExam: profile?.target_exam || null,
         targetYear: profile?.target_year || null,
-      });
+      };
+      setUser(uData);
       setNewName(resolvedName);
+
+      fetchNotifications(authUser.id, profile?.target_exam || null);
     }
     fetchUser();
-  }, []);
+  }, [fetchNotifications]);
+
+  // Mark all as read
+  const markAllAsRead = async () => {
+    if (!user || unreadIds.length === 0) return;
+    const inserts = unreadIds.map((nid) => ({
+      user_id: user.id,
+      notification_id: nid,
+    }));
+    setUnreadIds([]);
+    try {
+      await supabase.from("notification_reads").upsert(inserts);
+    } catch (e) {
+      console.warn("Mark read error", e);
+    }
+  };
 
   async function handleSaveName() {
     if (!newName.trim() || !user) return;
@@ -77,7 +143,6 @@ export default function AppHeader() {
     router.push("/onboarding");
   }
 
-  // 🎯 Updated Hamburger Navigation Items Exactly As Requested:
   const navLinks = [
     { name: "Dashboard", href: "/dashboard", icon: "⚡" },
     { name: "Syllabus", href: "/library", icon: "📚" },
@@ -91,7 +156,6 @@ export default function AppHeader() {
 
   return (
     <>
-      {/* Top Header Bar */}
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-ink/8 px-4 py-3 flex items-center justify-between shadow-xs">
         {/* Left: Hamburger + App Logo */}
         <div className="flex items-center gap-3">
@@ -126,140 +190,233 @@ export default function AppHeader() {
           </Link>
         </div>
 
-        {/* Right: User Avatar + Profile Quick Menu */}
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setProfilePopupOpen(!profilePopupOpen)}
-            className="flex items-center gap-2 p-1 pl-2.5 rounded-full border border-ink/10 hover:border-ink/20 bg-paper/50 active:scale-95 transition-all"
-          >
-            <span className="text-xs font-semibold text-ink max-w-[80px] truncate">
-              {user?.name?.split(" ")[0] || "Profile"}
-            </span>
-            <div className="w-6 h-6 rounded-full bg-ink text-paper text-[11px] font-bold flex items-center justify-center">
-              {user?.name ? user.name[0].toUpperCase() : "U"}
-            </div>
-          </button>
+        {/* Right: Notification Bell 🔔 + User Avatar */}
+        <div className="flex items-center gap-2">
+          {/* 🔔 Notification Bell Button */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setNotifPopupOpen(!notifPopupOpen);
+                setProfilePopupOpen(false);
+                if (!notifPopupOpen && unreadIds.length > 0) {
+                  markAllAsRead();
+                }
+              }}
+              aria-label="Notifications"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-ink/70 hover:text-ink hover:bg-ink/5 relative transition-all"
+            >
+              <span className="text-base leading-none">🔔</span>
+              {unreadIds.length > 0 && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-white animate-pulse" />
+              )}
+            </button>
 
-          {/* Quick Action Profile Popup */}
-          {profilePopupOpen && (
-            <>
-              <div
-                className="fixed inset-0 z-40"
-                onClick={() => setProfilePopupOpen(false)}
-              />
-              <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl border border-ink/12 shadow-xl p-4 z-50 animate-in fade-in zoom-in-95">
-                {/* User Identity Info */}
-                <div className="pb-3 border-b border-ink/8">
-                  <div className="flex items-center justify-between">
-                    {editingName ? (
-                      <div className="flex items-center gap-1.5 w-full">
-                        <input
-                          type="text"
-                          value={newName}
-                          onChange={(e) => setNewName(e.target.value)}
-                          className="w-full text-xs font-bold border border-ink/20 rounded-lg px-2 py-1 focus:outline-none focus:border-teal"
-                          autoFocus
-                        />
-                        <button
-                          onClick={handleSaveName}
-                          disabled={savingName}
-                          className="text-[10px] bg-teal text-white px-2 py-1 rounded-lg font-bold"
-                        >
-                          {savingName ? "…" : "Save"}
-                        </button>
-                        <button
-                          onClick={() => setEditingName(false)}
-                          className="text-[10px] text-slate px-1 py-1"
-                        >
-                          ✕
-                        </button>
+            {/* Notification Dropdown Drawer */}
+            {notifPopupOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setNotifPopupOpen(false)}
+                />
+                <div className="absolute right-0 mt-2 w-80 max-w-[90vw] bg-white rounded-2xl border border-ink/12 shadow-2xl p-4 z-50 animate-in fade-in zoom-in-95">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-ink/8">
+                    <div className="flex items-center gap-1.5">
+                      <h4 className="text-xs font-bold text-ink">Notifications</h4>
+                      {unreadIds.length > 0 && (
+                        <span className="text-[9.5px] px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-700 font-bold">
+                          {unreadIds.length} new
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={markAllAsRead}
+                      className="text-[10px] font-semibold text-teal hover:underline"
+                    >
+                      Mark all read
+                    </button>
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto divide-y divide-ink/5 mt-2">
+                    {notifications.length === 0 ? (
+                      <div className="text-center py-8 text-slate">
+                        <p className="text-xl mb-1">🔕</p>
+                        <p className="text-xs font-medium">No announcements yet</p>
                       </div>
                     ) : (
-                      <div className="flex items-center justify-between w-full">
-                        <h4 className="text-sm font-bold text-ink truncate">
-                          {user?.name}
-                        </h4>
-                        <button
-                          onClick={() => setEditingName(true)}
-                          className="text-[11px] text-teal font-semibold hover:underline"
-                        >
-                          Edit
-                        </button>
+                      notifications.map((n) => {
+                        const isUnread = unreadIds.includes(n.id);
+                        return (
+                          <div
+                            key={n.id}
+                            onClick={() => {
+                              if (n.action_url) router.push(n.action_url);
+                              setNotifPopupOpen(false);
+                            }}
+                            className={`py-2.5 px-1.5 rounded-xl cursor-pointer hover:bg-paper/80 transition-all ${
+                              isUnread ? "bg-teal/5" : ""
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-1.5">
+                              <h5 className="text-xs font-bold text-ink leading-tight">
+                                {n.title}
+                              </h5>
+                              <span className="text-[9px] text-slate shrink-0">
+                                {new Date(n.created_at).toLocaleDateString("en-IN", {
+                                  day: "numeric",
+                                  month: "short",
+                                })}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate mt-1 leading-snug">
+                              {n.body}
+                            </p>
+                            {n.action_url && (
+                              <span className="inline-block mt-1 text-[10px] text-teal font-bold hover:underline">
+                                View Details →
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* User Profile Quick Action */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setProfilePopupOpen(!profilePopupOpen);
+                setNotifPopupOpen(false);
+              }}
+              className="flex items-center gap-2 p-1 pl-2.5 rounded-full border border-ink/10 hover:border-ink/20 bg-paper/50 active:scale-95 transition-all"
+            >
+              <span className="text-xs font-semibold text-ink max-w-[80px] truncate">
+                {user?.name?.split(" ")[0] || "Profile"}
+              </span>
+              <div className="w-6 h-6 rounded-full bg-ink text-paper text-[11px] font-bold flex items-center justify-center">
+                {user?.name ? user.name[0].toUpperCase() : "U"}
+              </div>
+            </button>
+
+            {profilePopupOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setProfilePopupOpen(false)}
+                />
+                <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl border border-ink/12 shadow-xl p-4 z-50 animate-in fade-in zoom-in-95">
+                  <div className="pb-3 border-b border-ink/8">
+                    <div className="flex items-center justify-between">
+                      {editingName ? (
+                        <div className="flex items-center gap-1.5 w-full">
+                          <input
+                            type="text"
+                            value={newName}
+                            onChange={(e) => setNewName(e.target.value)}
+                            className="w-full text-xs font-bold border border-ink/20 rounded-lg px-2 py-1 focus:outline-none focus:border-teal"
+                            autoFocus
+                          />
+                          <button
+                            onClick={handleSaveName}
+                            disabled={savingName}
+                            className="text-[10px] bg-teal text-white px-2 py-1 rounded-lg font-bold"
+                          >
+                            {savingName ? "…" : "Save"}
+                          </button>
+                          <button
+                            onClick={() => setEditingName(false)}
+                            className="text-[10px] text-slate px-1 py-1"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between w-full">
+                          <h4 className="text-sm font-bold text-ink truncate">
+                            {user?.name}
+                          </h4>
+                          <button
+                            onClick={() => setEditingName(true)}
+                            className="text-[11px] text-teal font-semibold hover:underline"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate truncate mt-0.5">
+                      {user?.email}
+                    </p>
+                    {user?.targetExam && (
+                      <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-marigold/10 border border-marigold/20 text-[10px] font-bold text-ink">
+                        <span>🎯</span>
+                        <span>
+                          Targeting {user.targetExam} {user.targetYear || ""}
+                        </span>
                       </div>
                     )}
                   </div>
-                  <p className="text-[11px] text-slate truncate mt-0.5">
-                    {user?.email}
-                  </p>
-                  {user?.targetExam && (
-                    <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-marigold/10 border border-marigold/20 text-[10px] font-bold text-ink">
-                      <span>🎯</span>
-                      <span>
-                        Targeting {user.targetExam} {user.targetYear || ""}
-                      </span>
-                    </div>
-                  )}
-                </div>
 
-                {/* Quick Links */}
-                <div className="py-2 flex flex-col gap-1 border-b border-ink/8">
-                  <Link
-                    href="/profile"
-                    onClick={() => setProfilePopupOpen(false)}
-                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-medium text-ink hover:bg-ink/5 transition-colors"
-                  >
-                    <span>👤</span> View Full Profile & Settings
-                  </Link>
-                  <Link
-                    href="/focus"
-                    onClick={() => setProfilePopupOpen(false)}
-                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-medium text-ink hover:bg-ink/5 transition-colors"
-                  >
-                    <span>⏱️</span> Open Study Timer
-                  </Link>
-                </div>
+                  <div className="py-2 flex flex-col gap-1 border-b border-ink/8">
+                    <Link
+                      href="/profile"
+                      onClick={() => setProfilePopupOpen(false)}
+                      className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-medium text-ink hover:bg-ink/5 transition-colors"
+                    >
+                      <span>👤</span> View Full Profile & Settings
+                    </Link>
+                    <Link
+                      href="/focus"
+                      onClick={() => setProfilePopupOpen(false)}
+                      className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-medium text-ink hover:bg-ink/5 transition-colors"
+                    >
+                      <span>⏱️</span> Open Study Timer
+                    </Link>
+                  </div>
 
-                {/* Logout Button */}
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  className="w-full mt-2 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
-                >
-                  <svg
-                    className="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    viewBox="0 0 24 24"
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="w-full mt-2 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
-                    />
-                  </svg>
-                  Sign Out
-                </button>
-              </div>
-            </>
-          )}
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
+                      />
+                    </svg>
+                    Sign Out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
       {/* Hamburger Navigation Drawer */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 flex">
-          {/* Backdrop */}
           <div
             className="fixed inset-0 bg-ink/40 backdrop-blur-xs transition-opacity"
             onClick={() => setDrawerOpen(false)}
           />
 
-          {/* Slide-over Content */}
           <div className="relative w-72 max-w-[80%] bg-white h-full flex flex-col justify-between p-5 shadow-2xl z-50 animate-in slide-in-from-left duration-200">
             <div>
-              {/* Drawer Header */}
               <div className="flex items-center justify-between pb-4 border-b border-ink/8">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-teal to-emerald-400 flex items-center justify-center text-white font-bold text-sm shadow-sm">
@@ -282,7 +439,6 @@ export default function AppHeader() {
                 </button>
               </div>
 
-              {/* Navigation Menu List */}
               <div className="flex flex-col gap-1.5 mt-5">
                 {navLinks.map((item) => {
                   const isActive = pathname === item.href;
@@ -305,7 +461,6 @@ export default function AppHeader() {
               </div>
             </div>
 
-            {/* Drawer Footer */}
             <div className="pt-4 border-t border-ink/8 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-full bg-ink text-paper text-xs font-bold flex items-center justify-center">
