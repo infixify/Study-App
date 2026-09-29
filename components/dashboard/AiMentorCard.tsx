@@ -20,13 +20,54 @@ export default function AiMentorCard({
   onOpenDoubtSolver,
 }: AiMentorCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"plan" | "diagnostics" | "simulation">("plan");
+  const [activeTab, setActiveTab] = useState<"today" | "subjects" | "week" | "swot" | "rank">("today");
 
   const status = report?.overall_status || "Consistent Momentum";
   const prediction = report?.score_prediction || `Projected: 98.4+ Percentile (${targetExam})`;
   const summary =
     report?.diagnostic_summary ||
-    "Maintain a rigid 1:1.5 Theory-to-Practice ratio. High retention guaranteed with 45+ daily questions.";
+    "Maintain a rigid 1:1.5 Theory-to-Practice ratio. Target 45+ daily numericals to secure top rank.";
+
+  const isNeet = targetExam.toUpperCase().includes("NEET");
+
+  // Dynamic Subject Matrix based on JEE / NEET
+  const subjectAnalysis = report?.subject_analysis || [
+    {
+      name: "Physics",
+      status: "Moderate Velocity",
+      health: 72,
+      recommendation: "Focus on Mechanics & Electrodynamics numericals. Maintain 20 Q/hr pace.",
+      priority: "high",
+    },
+    {
+      name: "Chemistry",
+      status: "High Retention",
+      health: 84,
+      recommendation: isNeet
+        ? "Line-by-line Inorganic NCERT reading required daily. Physical chemistry formulas solid."
+        : "Organic reaction mechanism review needed. Physical numericals are stable.",
+      priority: "medium",
+    },
+    {
+      name: isNeet ? "Biology" : "Mathematics",
+      status: isNeet ? "Accuracy Strong" : "Speed Constraint",
+      health: isNeet ? 88 : 64,
+      recommendation: isNeet
+        ? "Daily 90 Qs timed session to finish section in under 45 minutes on exam day."
+        : "Calculus & Vector-3D calculation shortcuts needed to eliminate negative marks.",
+      priority: isNeet ? "medium" : "high",
+    },
+  ];
+
+  // Today's Action Plan
+  const todayPlan = report?.today_plan || {
+    headline: "Target: 4.5 Hours Focus & 50+ Questions",
+    blocks: [
+      { time: "Block 1 (Morning)", subject: "Physics", action: "25 Numerical Problems (Mechanics/Electro)", duration: "90 mins" },
+      { time: "Block 2 (Afternoon)", subject: isNeet ? "Biology" : "Mathematics", action: "Timed DPP Problem Solving & Shortcut Notes", duration: "90 mins" },
+      { time: "Block 3 (Evening)", subject: "Chemistry", action: "NCERT Active Recall & Formula Revision", duration: "60 mins" },
+    ],
+  };
 
   const isWarning =
     status.toLowerCase().includes("attention") ||
@@ -35,9 +76,9 @@ export default function AiMentorCard({
 
   return (
     <>
-      {/* 1. JEETRACK STYLE COCKPIT CARD ON DASHBOARD */}
+      {/* 1. JEETRACK DASHBOARD COCKPIT CARD */}
       <div className="rounded-2xl p-4 bg-gradient-to-br from-[#0F172A] via-[#1E1B4B] to-[#0F172A] text-white shadow-lg border border-indigo-900/60 relative overflow-hidden">
-        {/* Subtle Neon Radial Glow */}
+        {/* Glow accents */}
         <div className="absolute top-0 right-0 w-36 h-36 bg-indigo-500/15 rounded-full blur-2xl pointer-events-none" />
         <div className="absolute -bottom-10 -left-10 w-28 h-28 bg-teal-500/10 rounded-full blur-xl pointer-events-none" />
 
@@ -70,7 +111,7 @@ export default function AiMentorCard({
           </span>
         </div>
 
-        {/* Key Metrics Mini-Bar (JEETrack Specialty) */}
+        {/* Key Metrics Mini-Bar */}
         <div className="grid grid-cols-3 gap-1.5 my-2.5 relative z-10">
           <div className="bg-white/5 border border-white/10 rounded-xl p-2 text-center backdrop-blur-xs">
             <span className="text-[9px] font-bold text-slate-400 block uppercase">Pace Target</span>
@@ -81,8 +122,8 @@ export default function AiMentorCard({
             <span className="text-xs font-black text-emerald-400">60% Ratio</span>
           </div>
           <div className="bg-white/5 border border-white/10 rounded-xl p-2 text-center backdrop-blur-xs">
-            <span className="text-[9px] font-bold text-slate-400 block uppercase">Retention</span>
-            <span className="text-xs font-black text-indigo-300">High Yield</span>
+            <span className="text-[9px] font-bold text-slate-400 block uppercase">Today Target</span>
+            <span className="text-xs font-black text-indigo-300">50+ Qs</span>
           </div>
         </div>
 
@@ -116,10 +157,10 @@ export default function AiMentorCard({
         </div>
       </div>
 
-      {/* 2. JEETRACK SUITE 3-TAB DIRECTOR'S MODAL */}
+      {/* 2. FULL 5-TAB JEETRACK ACADEMIC AUDIT COCKPIT */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-300 overflow-hidden">
+          <div className="bg-white rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-300 overflow-hidden">
             {/* Modal Header */}
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-[#0B132B] text-white">
               <div className="flex items-center gap-2.5">
@@ -144,59 +185,157 @@ export default function AiMentorCard({
               </button>
             </div>
 
-            {/* 3 Segmented Nav Tabs (JEETrack Standard) */}
-            <div className="grid grid-cols-3 p-1.5 bg-slate-100 border-b border-slate-200 text-xs font-black">
+            {/* 5 Segmented Slider Tabs (JEETrack Full Suite) */}
+            <div className="flex p-1.5 bg-slate-100 border-b border-slate-200 text-[11px] font-black overflow-x-auto gap-1">
               <button
                 type="button"
-                onClick={() => setActiveTab("plan")}
-                className={`py-2 rounded-xl transition-all ${
-                  activeTab === "plan"
+                onClick={() => setActiveTab("today")}
+                className={`py-1.5 px-3 rounded-xl whitespace-nowrap transition-all flex items-center gap-1 ${
+                  activeTab === "today"
                     ? "bg-white text-indigo-950 shadow-xs border border-slate-200"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                🗺️ 7-Day Plan
+                <span>🎯</span> Today's Plan
               </button>
+
               <button
                 type="button"
-                onClick={() => setActiveTab("diagnostics")}
-                className={`py-2 rounded-xl transition-all ${
-                  activeTab === "diagnostics"
+                onClick={() => setActiveTab("subjects")}
+                className={`py-1.5 px-3 rounded-xl whitespace-nowrap transition-all flex items-center gap-1 ${
+                  activeTab === "subjects"
                     ? "bg-white text-indigo-950 shadow-xs border border-slate-200"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                🔬 Audit / SWOT
+                <span>📊</span> Subject Health
               </button>
+
               <button
                 type="button"
-                onClick={() => setActiveTab("simulation")}
-                className={`py-2 rounded-xl transition-all ${
-                  activeTab === "simulation"
+                onClick={() => setActiveTab("week")}
+                className={`py-1.5 px-3 rounded-xl whitespace-nowrap transition-all flex items-center gap-1 ${
+                  activeTab === "week"
                     ? "bg-white text-indigo-950 shadow-xs border border-slate-200"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                📈 Rank Forecast
+                <span>🗺️</span> 7-Day Plan
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("swot")}
+                className={`py-1.5 px-3 rounded-xl whitespace-nowrap transition-all flex items-center gap-1 ${
+                  activeTab === "swot"
+                    ? "bg-white text-indigo-950 shadow-xs border border-slate-200"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <span>🔬</span> SWOT Audit
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("rank")}
+                className={`py-1.5 px-3 rounded-xl whitespace-nowrap transition-all flex items-center gap-1 ${
+                  activeTab === "rank"
+                    ? "bg-white text-indigo-950 shadow-xs border border-slate-200"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <span>📈</span> Rank Forecast
               </button>
             </div>
 
             {/* Modal Body */}
             <div className="p-4 overflow-y-auto space-y-3.5 text-xs flex-1">
-              {/* TAB 1: 7-DAY PRECISION ROADMAP */}
-              {activeTab === "plan" && (
-                <div className="space-y-2">
-                  <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] font-extrabold text-indigo-700 uppercase tracking-wider">
-                        Strategy Focus
-                      </span>
-                      <div className="font-black text-indigo-950 text-xs mt-0.5">
-                        High-Yield Numerical Practice & Formula Drills
-                      </div>
+              {/* TAB 1: TODAY'S ACTION BLUEPRINT */}
+              {activeTab === "today" && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-2xl">
+                    <span className="text-[10px] font-black text-indigo-700 uppercase tracking-wider block">
+                      Daily Blueprint
+                    </span>
+                    <div className="font-black text-indigo-950 text-xs mt-0.5">
+                      {todayPlan.headline}
                     </div>
                   </div>
 
+                  <div className="space-y-2">
+                    {todayPlan.blocks.map((b: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2 shadow-2xs"
+                      >
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-800 font-extrabold text-[9px] rounded">
+                              {b.time}
+                            </span>
+                            <span className="font-black text-slate-900 text-xs">{b.subject}</span>
+                          </div>
+                          <div className="text-slate-600 text-[11px] font-semibold mt-1">
+                            {b.action}
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-2 py-1 rounded-md flex-shrink-0">
+                          {b.duration}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: SUBJECT-WISE HEALTH & VELOCITY ANALYSIS */}
+              {activeTab === "subjects" && (
+                <div className="space-y-2.5">
+                  {subjectAnalysis.map((sub: any, i: number) => (
+                    <div
+                      key={i}
+                      className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 shadow-2xs"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-slate-900 text-xs">{sub.name}</span>
+                          <span
+                            className={`text-[9.5px] font-bold px-2 py-0.5 rounded-full border ${
+                              sub.priority === "high"
+                                ? "bg-rose-50 text-rose-700 border-rose-200"
+                                : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            }`}
+                          >
+                            {sub.status}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs font-black text-indigo-700">{sub.health}%</span>
+                          <span className="text-[9px] text-slate-400 block font-semibold">Mastery</span>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                        <div
+                          style={{ width: `${sub.health}%` }}
+                          className={`h-full ${
+                            sub.health > 75 ? "bg-emerald-500" : sub.health > 60 ? "bg-amber-500" : "bg-rose-500"
+                          }`}
+                        />
+                      </div>
+
+                      <p className="text-[10.5px] text-slate-600 font-medium leading-relaxed">
+                        {sub.recommendation}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* TAB 3: 7-DAY ROADMAP */}
+              {activeTab === "week" && (
+                <div className="space-y-2">
                   <div className="space-y-2">
                     {(report?.seven_day_plan || [
                       { day: "Day 1", focus: "Mechanics & Calculus Drift", target: "45 DPP Qs + 1h Formula Revision" },
@@ -226,8 +365,8 @@ export default function AiMentorCard({
                 </div>
               )}
 
-              {/* TAB 2: DIAGNOSTICS & SWOT */}
-              {activeTab === "diagnostics" && (
+              {/* TAB 4: SWOT & LEAKS */}
+              {activeTab === "swot" && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl">
@@ -284,8 +423,8 @@ export default function AiMentorCard({
                 </div>
               )}
 
-              {/* TAB 3: SIMULATION & RANK BRACKET */}
-              {activeTab === "simulation" && (
+              {/* TAB 5: RANK FORECAST & SIMULATION */}
+              {activeTab === "rank" && (
                 <div className="space-y-3">
                   <div className="p-4 bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-2xl border border-indigo-900 shadow-md">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-300">
@@ -294,7 +433,7 @@ export default function AiMentorCard({
                     <div className="text-xl font-black text-amber-300 mt-1">
                       {prediction}
                     </div>
-                    <p className="text-[10.5px] text-slate-300 mt-1">
+                    <p className="text-[10.5px] text-slate-300 mt-1 font-medium">
                       Calculated on continuous daily study pace, backlog clearing index, and mock test scores.
                     </p>
                   </div>
