@@ -6,8 +6,8 @@ const apiKey =
 
 const MODELS_CASCADE = [
   "gemini-2.5-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-8b",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-pro",
 ];
 
 async function callGeminiDoubt(
@@ -21,7 +21,6 @@ async function callGeminiDoubt(
 
   const parts: any[] = [{ text: userText }];
 
-  // If user uploaded a photo/image of a question
   if (imageBase64) {
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
     parts.unshift({
@@ -84,7 +83,6 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Support query, message, prompt, or messages array sent from frontend!
     let studentQuestion =
       body.query ||
       body.message ||
@@ -93,7 +91,13 @@ export async function POST(req: Request) {
         ? body.messages[body.messages.length - 1]?.content
         : "");
 
-    if (!studentQuestion && !body.image) {
+    const imageFromMessages =
+      !body.image &&
+      !body.imageBase64 &&
+      Array.isArray(body.messages) &&
+      body.messages[body.messages.length - 1]?.image;
+
+    if (!studentQuestion && !body.image && !imageFromMessages) {
       return NextResponse.json({ error: "Missing question query" }, { status: 400 });
     }
 
@@ -128,10 +132,9 @@ ${studentQuestion || "Solve the attached image question step-by-step."}
       systemInstruction,
       fullPrompt,
       apiKey,
-      body.image || body.imageBase64
+      body.image || body.imageBase64 || imageFromMessages
     );
 
-    // Support both "reply" and "text" in response so frontend always gets it
     return NextResponse.json({ reply, text: reply, content: reply });
   } catch (error: any) {
     console.error("AI Doubt Endpoint Error:", error);
