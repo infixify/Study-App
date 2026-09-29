@@ -1,4 +1,3 @@
-// app/resources/page.tsx
 "use client";
 
 import { createElement as e, useEffect, useState } from "react";
@@ -24,191 +23,222 @@ export default function ResourcesPage() {
 
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       const { data: authData } = await supabase.auth.getUser();
       const user = authData?.user;
       if (!user) {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
         return;
       }
+
       const { data: profile } = await supabase
         .from("users")
-        .select("class_level")
+        .select("class_level, target_exam")
         .eq("uid", user.id)
         .maybeSingle();
 
-      const classLevels = classLevelsForContent(profile?.class_level);
+      if (!profile?.class_level || !profile?.target_exam) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
 
-      const [resResult, subjectsResult, chaptersResult] = await Promise.all([
-        supabase.from("resources").select("*"),
-        supabase.from("subjects").select("id, name, display_order").order("display_order"),
+      const classLevels = classLevelsForContent(profile.class_level as any);
+
+      const { data: subjectData } = await supabase
+        .from("subjects")
+        .select("id, name, class_level, display_order")
+        .eq("target_exam", profile.target_exam)
+        .in("class_level", classLevels)
+        .order("display_order", { ascending: true });
+
+      const subjectRows: any[] = subjectData ?? [];
+
+      if (subjectRows.length === 0) {
+        if (!cancelled) {
+          setSubjects([]);
+          setLoading(false);
+        }
+        return;
+      }
+
+      const subjectRowIds: string[] = subjectRows.map((s) => s.id);
+
+      const [chapterRes, chapterResourceRes, subjectResourceRes] = await Promise.all([
         supabase
           .from("chapters")
-          .select("id, subject_id, title, class_level, display_order")
-          .in("class_level", classLevels)
-          .order("display_order"),
+          .select("id, subject_id, title, display_order, in_competitive_syllabus")
+          .in("subject_id", subjectRowIds)
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("resources")
+          .select("id, title, url, category, chapter_id, subject_id, display_order, chapters!inner(subject_id)")
+          .in("chapters.subject_id", subjectRowIds)
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("resources")
+          .select("id, title, url, category, chapter_id, subject_id, display_order")
+          .in("subject_id", subjectRowIds)
+          .is("chapter_id", null)
+          .order("display_order", { ascending: true }),
       ]);
 
-      if (cancelled) return;
-
-      const resList: Resource[] = (resResult.data ?? []).map((r: any) => ({
+      const chapterRows: any[] = chapterRes.data ?? [];
+      const allResources: Resource[] = [
+        ...((chapterResourceRes.data ?? []) as any[]),
+        ...((subjectResourceRes.data ?? []) as any[]),
+      ].map((r) => ({
         id: r.id,
-        chapter_id: r.chapter_id,
-        category: r.category,
         title: r.title,
-        drive_link: r.drive_link,
-        file_size_mb: r.file_size_mb,
-        is_free: r.is_free,
-      }));
-      setResources(resList);
-
-      const rawSubs = subjectsResult.data ?? [];
-      const rawChaps = chaptersResult.data ?? [];
-
-      const byName: Record<string, { name: string; rowIds: string[]; chaps: any[] }> = {};
-      for (const s of rawSubs) {
-        if (!byName[s.name]) {
-          byName[s.name] = { name: s.name, rowIds: [], chaps: [] };
-        }
-        byName[s.name].rowIds.push(s.id);
-      }
-      for (const c of rawChaps) {
-        for (const grp of Object.values(byName)) {
-          if (grp.rowIds.includes(c.subject_id)) {
-            grp.chaps.push({ id: c.id, title: c.title, display_order: c.display_order });
-          }
-        }
-      }
-
-      const merged: SubjectItem[] = Object.entries(byName).map(([name, grp]) => ({
-        id: grp.rowIds[0] || name,
-        name,
-        subjectRowIds: grp.rowIds,
-        chapters: grp.chaps.sort((a, b) => a.display_order - b.display_order),
+        url: r.url,
+        category: r.category,
+        chapter_id: r.chapter_id ?? null,
+        subject_id: r.subject_id ?? null,
       }));
 
-      setSubjects(merged);
-      if (merged.length > 0 && !activeSubjectId) {
-        setActiveSubjectId(merged[0].id);
+      const grouped = new Map<string, SubjectItem>();
+      const sortedSubjectRows = [...subjectRows].sort((a, b) =>
+        a.class_level < b.class_level ? -1 : a.class_level > b.class_level ? 1 : 0
+      );
+
+      for (const s of sortedSubjectRows) {
+        if (!grouped.has(s.name)) {
+          grouped.set(s.name, { id: s.name, name: s.name, subjectRowIds: [], chapters: [] });
+        }
+        const entry = grouped.get(s.name)!;
+        entry.subjectRowIds.push(s.id);
+        const chaptersForRow: ChapterItem[] = chapterRows
+          .filter((c) => c.subject_id === s.id)
+          .filter((c) => {
+            if (s.class_level !== "Dropper") return true;
+            return c.in_competitive_syllabus !== false;
+          })
+          .map((c) => ({ id: c.id, title: c.title, classTag: s.class_level }));
+        entry.chapters.push(...chaptersForRow);
       }
-      setLoading(false);
+
+      if (!cancelled) {
+        setSubjects(Array.from(grouped.values()));
+        setResources(allResources);
+        setLoading(false);
+      }
     }
+
     load();
     return () => {
       cancelled = true;
     };
-  }, [activeSubjectId]);
+  }, []);
 
-  const activeTypeDef = RESOURCE_TYPES.find((t) => t.key === activeType);
-  const activeSubject =
-    subjects.find((s) => s.id === activeSubjectId) || subjects[0] || null;
-
-  function openType(typeKey: string) {
-    setActiveType(typeKey);
+  function subjectHasFiles(subj: SubjectItem, category: string): boolean {
+    return resources.some(
+      (r) =>
+        r.category === category &&
+        ((r.chapter_id !== null && subj.chapters.some((c) => c.id === r.chapter_id)) ||
+          (r.chapter_id === null &&
+            r.subject_id !== null &&
+            subj.subjectRowIds.indexOf(r.subject_id) !== -1))
+    );
   }
 
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] text-slate-900 dark:text-slate-100 pb-28 px-5 pt-7">
-      <div className="max-w-md mx-auto">
-        {!activeType ? (
-          <div>
-            <h1 className="font-display text-2xl font-black mb-1 tracking-tight text-slate-900 dark:text-white">
-              Resource Vault
-            </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 font-medium">
-              Curated study materials, formula books & high-yield notes.
-            </p>
+  function openType(key: string) {
+    const firstWithFiles = subjects.find((s) => subjectHasFiles(s, key));
+    setActiveSubjectId((firstWithFiles ?? subjects[0]).id);
+    setActiveType(key);
+  }
 
-            {loading ? (
-              <div className="py-12 text-center text-xs font-semibold text-slate-400 animate-pulse">
-                Loading resources…
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {RESOURCE_TYPES.map((t) => {
-                  const has = resources.some((r) => r.category === t.key);
-                  return (
-                    <button
-                      key={t.key}
-                      type="button"
-                      disabled={!has}
-                      onClick={() => openType(t.key)}
-                      className={`relative rounded-2xl p-4 flex flex-col items-center justify-between text-center transition-all duration-200 border ${
-                        has
-                          ? "bg-white dark:bg-[#121A29] border-slate-200 dark:border-white/10 shadow-sm hover:border-teal hover:shadow-teal/10 hover:scale-[1.02] cursor-pointer"
-                          : "bg-slate-100/70 dark:bg-white/5 border-slate-200/50 dark:border-white/5 opacity-70 cursor-not-allowed"
-                      }`}
-                    >
-                      <div
-                        className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl mb-2.5 transition-transform ${
-                          has
-                            ? "bg-teal/10 dark:bg-teal/20 text-teal shadow-xs"
-                            : "bg-slate-200/70 dark:bg-white/10"
-                        }`}
-                      >
-                        {t.icon}
-                      </div>
+  if (loading) {
+    return e(
+      "div",
+      { className: "min-h-screen bg-paper flex items-center justify-center" },
+      e("p", { className: "text-ink/60 text-sm" }, "Loading resources…")
+    );
+  }
 
-                      <div>
-                        <span
-                          className={`text-xs font-bold block leading-tight ${
-                            has
-                              ? "text-slate-900 dark:text-white"
-                              : "text-slate-500 dark:text-slate-400"
-                          }`}
-                        >
-                          {t.label}
-                        </span>
+  if (subjects.length === 0) {
+    return e(
+      "div",
+      { className: "min-h-screen bg-paper pb-28" },
+      e(
+        "div",
+        { className: "max-w-md mx-auto px-5 pt-8" },
+        e("h1", { className: "font-display text-3xl text-ink mb-2" }, "Resources"),
+        e("p", { className: "text-ink/60 text-sm" }, "No subjects found yet for your class/exam. Check back soon.")
+      ),
+      e(BottomNav)
+    );
+  }
 
-                        {has ? (
-                          <span className="inline-block mt-1 text-[9.5px] font-bold text-teal dark:text-[#2DD4BF]">
-                            Available ↗
-                          </span>
-                        ) : (
-                          <span className="inline-block mt-1 text-[9px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-slate-300">
-                            Coming soon
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div>
-            <button
-              onClick={() => setActiveType(null)}
-              className="inline-flex items-center gap-1 text-xs font-bold text-teal dark:text-[#2DD4BF] hover:underline mb-4"
-            >
-              ← Back to All Resources
-            </button>
-            <h1 className="font-display text-2xl font-black mb-4 text-slate-900 dark:text-white">
-              {activeTypeDef?.label}
-            </h1>
+  const activeTypeDef = RESOURCE_TYPES.find((t) => t.key === activeType);
+  const activeSubject = subjects.find((s) => s.id === activeSubjectId) ?? subjects[0];
 
-            {activeSubject && (
-              <SubjectTabs
-                subjects={subjects}
-                activeId={activeSubject.id}
-                onChange={setActiveSubjectId}
-              />
-            )}
+  let body;
 
-            {activeSubject && (
-              <div className="mt-4">
-                <ResourceChapterList
-                  category={activeType}
-                  chapters={activeSubject.chapters}
-                  resources={resources.filter((r) => r.category === activeType)}
-                />
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-      <BottomNav />
-    </div>
+  if (!activeTypeDef) {
+    body = e(
+      "div",
+      null,
+      e("h1", { className: "font-display text-3xl text-ink mb-1" }, "Resources"),
+      e("p", { className: "text-slate text-sm mb-6" }, "Pick what you're looking for."),
+      e(
+        "div",
+        { className: "grid grid-cols-3 gap-3" },
+        RESOURCE_TYPES.map((t) => {
+          const has = resources.some((r) => r.category === t.key);
+          return e(
+            "button",
+            {
+              key: t.key,
+              disabled: !has,
+              onClick: () => openType(t.key),
+              className: has
+                ? "bg-white rounded-ticket border border-ink/10 p-3 flex flex-col items-center gap-2 text-center"
+                : "bg-ink/5 rounded-ticket border border-ink/5 p-3 flex flex-col items-center gap-2 text-center opacity-70",
+            },
+            e(
+              "div",
+              {
+                className:
+                  "w-12 h-12 rounded-2xl flex items-center justify-center text-2xl " +
+                  (has ? "bg-ink" : "bg-ink/40"),
+              },
+              t.icon
+            ),
+            e("span", { className: "text-xs font-medium " + (has ? "text-ink" : "text-ink/50") }, t.label),
+            has ? null : e("span", { className: "text-[10px] text-ink/30" }, "Coming soon")
+          );
+        })
+      )
+    );
+  } else {
+    body = e(
+      "div",
+      null,
+      e(
+        "button",
+        { onClick: () => setActiveType(null), className: "text-sm text-slate mb-3" },
+        "← All types"
+      ),
+      e("h1", { className: "font-display text-3xl text-ink mb-4" }, activeTypeDef.label),
+      e(SubjectTabs, {
+        subjects: subjects,
+        activeId: activeSubject.id,
+        onChange: setActiveSubjectId,
+      }),
+      e(ResourceChapterList, {
+        key: activeSubject.id + "-" + activeTypeDef.key,
+        chapters: activeSubject.chapters,
+        subjectRowIds: activeSubject.subjectRowIds,
+        category: activeTypeDef.key,
+        resources: resources,
+      })
+    );
+  }
+
+  return e(
+    "div",
+    { className: "min-h-screen bg-paper pb-28" },
+    e("div", { className: "max-w-md mx-auto px-5 pt-8" }, body),
+    e(BottomNav)
   );
 }
