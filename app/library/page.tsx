@@ -1,3 +1,4 @@
+// app/library/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -34,7 +35,6 @@ export default function LibraryPage() {
 
   useEffect(() => {
     let cancelled = false;
-
     async function load() {
       const { data: authData } = await supabase.auth.getUser();
       const user = authData?.user;
@@ -42,7 +42,6 @@ export default function LibraryPage() {
         setLoading(false);
         return;
       }
-
       const { data: profile } = await supabase
         .from("users")
         .select("class_level, target_exam")
@@ -94,7 +93,6 @@ export default function LibraryPage() {
       );
 
       const grouped = new Map<string, SubjectItem>();
-
       const sortedSubjectRows = [...subjectRows].sort((a, b) =>
         a.class_level < b.class_level ? -1 : a.class_level > b.class_level ? 1 : 0
       );
@@ -129,7 +127,6 @@ export default function LibraryPage() {
       }
 
       const finalSubjects = Array.from(grouped.values());
-
       if (!cancelled) {
         setSubjects(finalSubjects);
         setActiveSubjectId(finalSubjects[0]?.id ?? null);
@@ -137,7 +134,6 @@ export default function LibraryPage() {
         setLoading(false);
       }
     }
-
     load();
     return () => {
       cancelled = true;
@@ -176,18 +172,22 @@ export default function LibraryPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-paper flex items-center justify-center">
-        <p className="text-ink/60 text-sm">Loading your syllabus…</p>
+      <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] flex items-center justify-center">
+        <p className="text-slate-500 dark:text-slate-400 text-xs font-bold animate-pulse">
+          Loading syllabus tracker…
+        </p>
       </div>
     );
   }
 
   if (subjects.length === 0) {
     return (
-      <div className="min-h-screen bg-paper pb-28">
+      <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] pb-28">
         <div className="max-w-md mx-auto px-5 pt-8">
-          <h1 className="font-display text-2xl text-ink mb-4">Syllabus</h1>
-          <p className="text-ink/60 text-sm">
+          <h1 className="font-display text-2xl font-black text-slate-900 dark:text-white mb-2">
+            Syllabus
+          </h1>
+          <p className="text-slate-500 dark:text-slate-400 text-xs">
             No subjects found yet for your class/exam. Check back soon.
           </p>
         </div>
@@ -200,54 +200,69 @@ export default function LibraryPage() {
     subjects.find((s) => s.id === activeSubjectId) ?? subjects[0];
 
   return (
-    <div className="min-h-screen bg-paper pb-28">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] text-slate-900 dark:text-slate-100 pb-28">
       <div className="max-w-md mx-auto px-5 pt-8">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="font-display text-2xl text-ink">Syllabus</h1>
-          <span className="text-xs text-slate font-medium">Chapter tracker & backlogs</span>
+          <h1 className="font-display text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+            Syllabus
+          </h1>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">
+            Chapter tracker & backlogs
+          </span>
         </div>
 
+        {/* Subject Pills (Physics / Chemistry / Maths) */}
         <SubjectTabs
           subjects={subjects}
           activeId={activeSubject.id}
           onChange={setActiveSubjectId}
         />
 
-        <div className="grid grid-cols-2 gap-2 mt-4 mb-2">
+        {/* Subject Progress Summary Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-4 mb-2">
           {subjects.map((subj) => {
             const { done, total, backlogs, pct } = getSubjectStats(subj);
             return (
-              <div key={subj.id} className="rounded-ticket border border-ink/10 bg-white p-3">
+              <div
+                key={subj.id}
+                className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#121A29] p-3 shadow-xs"
+              >
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-ink truncate">{subj.name}</p>
+                  <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                    {subj.name}
+                  </p>
                   {backlogs > 0 && (
-                    <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.2 rounded-full">
+                    <span className="text-[9.5px] font-bold text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400 px-1.5 py-0.5 rounded-full">
                       {backlogs} bl
                     </span>
                   )}
                 </div>
-                <div className="w-full h-1.5 bg-ink/5 rounded-full mt-2 overflow-hidden">
+
+                <div className="w-full h-1.5 bg-slate-100 dark:bg-white/10 rounded-full mt-2.5 overflow-hidden">
                   <div
-                    className="h-full bg-teal transition-all"
+                    className="h-full bg-teal transition-all duration-300 rounded-full"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <p className="text-[10px] text-slate mt-1">{done}/{total} done ({pct}%)</p>
+
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1.5 font-medium">
+                  {done}/{total} done ({pct}%)
+                </p>
               </div>
             );
           })}
         </div>
 
+        {/* Chapters List with Status, Revision & Practice Tracking */}
         <ChapterList
           key={activeSubject.id}
           subjectId={activeSubject.id}
           chapters={activeSubject.chapters}
-          targetExam={targetExam}
+          targetExam={targetExam || undefined}
           onProgressChange={handleProgressChange}
           onBacklogToggle={handleBacklogToggle}
         />
       </div>
-
       <BottomNav />
     </div>
   );
