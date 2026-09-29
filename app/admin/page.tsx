@@ -45,15 +45,13 @@ export default function AdminPage() {
   const [session, setSession] = useState<boolean>(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // --- auth form state ---
-  const [mode, setMode] = useState<"login" | "register">("login");
+  // --- Strict Auth Login State (Registration Permanently Disabled) ---
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
-  const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
 
-  // --- admin data state ---
+  // --- Admin Data State ---
   const [stats, setStats] = useState<Stats | null>(null);
   const [schedule, setSchedule] = useState<ExamScheduleRow[]>([]);
   const [editedDates, setEditedDates] = useState<
@@ -64,19 +62,19 @@ export default function AdminPage() {
     Record<string, ExamShiftRow[]>
   >({});
 
-  // --- shift form state ---
+  // --- Shift Form State ---
   const [selectedScheduleId, setSelectedScheduleId] = useState<string>("");
   const [newShiftDate, setNewShiftDate] = useState("");
   const [newShiftTime, setNewShiftTime] = useState("");
   const [addingShift, setAddingShift] = useState(false);
 
-  // --- NOTIFICATION & PUSH BROADCAST STATE ---
+  // --- Notification & Push State ---
   const [notifTitle, setNotifTitle] = useState("");
   const [notifBody, setNotifBody] = useState("");
   const [notifAudience, setNotifAudience] = useState("all");
   const [notifActionUrl, setNotifActionUrl] = useState("");
-  const [deliveryChannel, setDeliveryChannel] = useState("both"); // 'both' | 'in_app' | 'push_only'
-  const [priority, setPriority] = useState("high"); // 'high' (sound) | 'normal' (silent)
+  const [deliveryChannel, setDeliveryChannel] = useState("both");
+  const [priority, setPriority] = useState("high");
   const [sendingNotif, setSendingNotif] = useState(false);
   const [notifSuccess, setNotifSuccess] = useState<string | null>(null);
   const [recentNotifs, setRecentNotifs] = useState<AdminNotification[]>([]);
@@ -156,7 +154,6 @@ export default function AdminPage() {
       setShiftsBySchedule(grouped);
     }
 
-    // 4. Notifications History
     loadNotifications();
   };
 
@@ -173,34 +170,43 @@ export default function AdminPage() {
     checkAdminStatus();
   }, [checkAdminStatus]);
 
-  // Auth Submit
+  // Pure Admin Login Only (No Sign Up)
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthBusy(true);
     setAuthError(null);
-    setAuthNotice(null);
 
     try {
-      if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        setAuthNotice("Account created. Check email if confirmation is required.");
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) throw error;
+
+      // Verify admin role immediately
+      const { data: profile } = await supabase
+        .from("users")
+        .select("role")
+        .eq("uid", data.user.id)
+        .maybeSingle();
+
+      if (profile?.role !== "admin") {
+        await supabase.auth.signOut();
+        throw new Error("Access Denied: This account does not have Admin privileges.");
       }
-      checkAdminStatus();
+
+      setSession(true);
+      setIsAdmin(true);
+      loadAdminData();
     } catch (err: any) {
-      setAuthError(err?.message ?? "Authentication failed");
+      setAuthError(err?.message ?? "Invalid admin credentials");
     } finally {
       setAuthBusy(false);
     }
   };
 
-  // Broadcast Notification (In-App + Firebase FCM)
+  // Broadcast Notification
   const handleSendNotification = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!notifTitle.trim() || !notifBody.trim()) return;
@@ -208,7 +214,6 @@ export default function AdminPage() {
     setNotifSuccess(null);
 
     try {
-      // 1. Insert into Supabase if In-App is selected
       if (deliveryChannel === "both" || deliveryChannel === "in_app") {
         const { error } = await supabase.from("notifications").insert({
           title: notifTitle.trim(),
@@ -219,7 +224,6 @@ export default function AdminPage() {
         if (error) throw error;
       }
 
-      // 2. Trigger Firebase Push API Route if Push is selected
       if (deliveryChannel === "both" || deliveryChannel === "push_only") {
         await fetch("/api/admin/send-notification", {
           method: "POST",
@@ -240,7 +244,7 @@ export default function AdminPage() {
       setNotifActionUrl("");
       loadNotifications();
     } catch (err: any) {
-      alert("Failed to broadcast notification: " + err.message);
+      alert("Failed to broadcast: " + err.message);
     } finally {
       setSendingNotif(false);
     }
@@ -255,7 +259,6 @@ export default function AdminPage() {
     }
   };
 
-  // Save Exam Date
   const saveDate = async (row: ExamScheduleRow) => {
     const edit = editedDates[row.id];
     if (!edit) return;
@@ -278,7 +281,6 @@ export default function AdminPage() {
     }
   };
 
-  // Add Shift
   const addShift = async () => {
     if (!selectedScheduleId || !newShiftDate || !newShiftTime) return;
     setAddingShift(true);
@@ -311,55 +313,69 @@ export default function AdminPage() {
   if (checking) {
     return (
       <div className="min-h-screen bg-paper flex items-center justify-center p-6 text-sm text-slate">
-        Checking admin access…
+        Checking admin clearance…
       </div>
     );
   }
 
+  // Pure Secure Login View (No Registration Possible)
   if (!session || !isAdmin) {
     return (
       <div className="min-h-screen bg-paper flex items-center justify-center p-6">
-        <div className="w-full max-w-sm rounded-ticket border border-ink/10 bg-white p-6 shadow-sm">
-          <h1 className="font-display text-xl font-bold mb-1">Admin Portal</h1>
-          <p className="text-xs text-slate mb-4">
-            {session
-              ? "Access denied. Your account does not have the admin role."
-              : "Sign in with admin credentials to access."}
+        <div className="w-full max-w-sm rounded-3xl border border-ink/10 bg-white p-7 shadow-xl">
+          <div className="w-10 h-10 rounded-2xl bg-ink text-white flex items-center justify-center mb-3 text-lg font-bold">
+            🛡️
+          </div>
+          <h1 className="font-display text-xl font-bold text-ink">
+            Admin Authentication
+          </h1>
+          <p className="text-xs text-slate mt-1 mb-5">
+            Strict Access: Only registered Super Admins can log in. Public registration is locked.
           </p>
 
-          {!session && (
-            <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3">
+          <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3.5">
+            <div>
+              <label className="text-[10px] font-bold text-slate block mb-1">
+                Admin Email
+              </label>
               <input
                 type="email"
-                placeholder="Admin email"
+                placeholder="admin@prepwise.app"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold"
+                className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold outline-none focus:border-teal"
                 required
               />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold text-slate block mb-1">
+                Master Password
+              </label>
               <input
                 type="password"
-                placeholder="Password"
+                placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold"
+                className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold outline-none focus:border-teal"
                 required
               />
-              {authError && (
-                <p className="text-xs text-rose-600 font-medium">{authError}</p>
-              )}
-              {authNotice && (
-                <p className="text-xs text-teal font-medium">{authNotice}</p>
-              )}
-              <button
-                type="submit"
-                disabled={authBusy}
-                className="bg-teal text-white rounded-xl py-2.5 text-xs font-bold shadow-xs hover:bg-teal/90 disabled:opacity-40"
-              >
-                {authBusy ? "Verifying…" : "Sign In as Admin"}
-              </button>
-            </form>
-          )}
+            </div>
+
+            {authError && (
+              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium">
+                ⚠️ {authError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={authBusy}
+              className="mt-1 bg-ink text-white rounded-xl py-3 text-xs font-bold shadow-md hover:bg-ink-100 disabled:opacity-40 transition-all"
+            >
+              {authBusy ? "Authenticating Clearance…" : "Authorize Admin Access 🔐"}
+            </button>
+          </form>
         </div>
       </div>
     );
@@ -370,17 +386,22 @@ export default function AdminPage() {
       {/* Header */}
       <header className="border-b border-ink/8 bg-white px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="font-display text-2xl font-bold text-ink">
-              Admin Console
-            </h1>
-            <p className="text-xs text-slate mt-0.5">
-              PrepWise Operations & Notifications Center
-            </p>
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-xl bg-ink text-white flex items-center justify-center font-bold text-xs">
+              🛡️
+            </span>
+            <div>
+              <h1 className="font-display text-xl font-bold text-ink">
+                Admin Console
+              </h1>
+              <p className="text-[11px] text-slate">
+                Authorized Super-Admin Session Active
+              </p>
+            </div>
           </div>
           <button
             onClick={() => supabase.auth.signOut().then(() => setSession(false))}
-            className="text-xs text-rose-600 font-bold hover:underline"
+            className="text-xs text-rose-600 font-bold hover:underline px-3 py-1.5 rounded-lg hover:bg-rose-50"
           >
             Sign Out
           </button>
@@ -388,7 +409,7 @@ export default function AdminPage() {
       </header>
 
       <div className="max-w-4xl mx-auto px-6 pt-6 flex flex-col gap-8">
-        {/* 1. STATS SECTION */}
+        {/* 1. STATS */}
         {stats && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Total Aspirants" value={stats.totalUsers} />
@@ -398,7 +419,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* 2. 📢 BROADCAST PUSH NOTIFICATION SECTION */}
+        {/* 2. BROADCAST NOTIFICATION */}
         <section className="rounded-ticket border border-ink/10 bg-white p-6 shadow-xs">
           <div className="flex items-center justify-between mb-3">
             <div>
@@ -519,7 +540,6 @@ export default function AdminPage() {
             </button>
           </form>
 
-          {/* Recent Sent Notifications */}
           {recentNotifs.length > 0 && (
             <div className="mt-6 pt-5 border-t border-ink/8 space-y-2">
               <h4 className="text-xs font-bold text-slate uppercase tracking-wider">
