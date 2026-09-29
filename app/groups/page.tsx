@@ -22,7 +22,7 @@ interface PrivateGroup {
   member_count: number;
 }
 
-export default function GroupsPage() {
+export default function CommunityPage() {
   const [currentTab, setCurrentTab] = useState<"world" | "custom">("world");
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMsg, setInputMsg] = useState("");
@@ -126,11 +126,9 @@ export default function GroupsPage() {
             }))
           );
         } else {
-          // Empty if no messages sent yet by real users
           setMessages([]);
         }
       } catch (err) {
-        // Localstorage fallback
         const localMsgs = localStorage.getItem(`msgs_${currentFeedId}`);
         if (localMsgs) {
           try {
@@ -172,10 +170,8 @@ export default function GroupsPage() {
     setMessages(nextMsgs);
     setInputMsg("");
 
-    // Persist to local storage
     localStorage.setItem(`msgs_${currentFeedId}`, JSON.stringify(nextMsgs));
 
-    // Persist to Supabase
     try {
       await supabase.from("group_messages").insert({
         group_id: currentFeedId,
@@ -184,11 +180,11 @@ export default function GroupsPage() {
         content: optimisticMsg.content,
       });
     } catch (e) {
-      console.warn("DB insert error, stored locally");
+      console.warn("Stored locally");
     }
   };
 
-  // Delete message (Admin or Author)
+  // Delete message
   const handleDeleteMessage = async (id: string) => {
     const updated = messages.filter((m) => m.id !== id);
     setMessages(updated);
@@ -215,12 +211,10 @@ export default function GroupsPage() {
     const nextGroups = [newGroup, ...groups];
     setGroups(nextGroups);
 
-    // Auto join the creator
     const nextJoined = [...myJoinedGroupIds, newGroup.id];
     setMyJoinedGroupIds(nextJoined);
     localStorage.setItem("prepwise_joined_groups", JSON.stringify(nextJoined));
 
-    // Save to Supabase if table exists
     try {
       await supabase.from("study_groups").insert({
         id: newGroup.id,
@@ -265,9 +259,9 @@ export default function GroupsPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="font-display text-2xl text-ink">👥 Study Groups</h1>
+            <h1 className="font-display text-2xl text-ink">👥 Community</h1>
             <p className="text-[11px] text-slate mt-0.5">
-              Live peer accountability & doubt chat
+              Live peer accountability & study rooms
             </p>
           </div>
           {currentTab === "custom" && (
@@ -293,7 +287,7 @@ export default function GroupsPage() {
                 : "bg-white text-slate border-ink/10"
             }`}
           >
-            🌍 PrepWise World
+            🌍 Global Feed
           </button>
           <button
             onClick={() => setCurrentTab("custom")}
@@ -303,19 +297,19 @@ export default function GroupsPage() {
                 : "bg-white text-slate border-ink/10"
             }`}
           >
-            🔒 Private Rooms ({groups.length})
+            🔒 Study Rooms ({groups.length})
           </button>
         </div>
 
-        {/* VIEW 1: PREPWISE WORLD FEED */}
+        {/* VIEW 1: GLOBAL FEED */}
         {currentTab === "world" && !activeGroupId && (
           <div className="bg-white rounded-ticket border border-ink/10 p-4 shadow-xs flex flex-col gap-3">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8 text-xs font-bold text-ink">
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                PrepWise Public Feed
+                Community Live Chat
               </span>
-              <span className="text-[10px] text-slate">Live Discussion</span>
+              <span className="text-[10px] text-slate">All Aspirants</span>
             </div>
 
             {/* Chat List */}
@@ -366,7 +360,7 @@ export default function GroupsPage() {
             <form onSubmit={handleSendMessage} className="flex gap-1.5 pt-1">
               <input
                 type="text"
-                placeholder="Share your daily study target or ask a doubt..."
+                placeholder="Share your target or question with community..."
                 value={inputMsg}
                 onChange={(e) => setInputMsg(e.target.value)}
                 className="flex-1 px-3 py-2 text-xs font-medium rounded-xl border border-ink/15 bg-white outline-none focus:border-teal"
@@ -381,18 +375,17 @@ export default function GroupsPage() {
           </div>
         )}
 
-        {/* VIEW 2: PRIVATE ROOMS LIST OR ACTIVE PRIVATE CHAT */}
+        {/* VIEW 2: STUDY ROOMS */}
         {(currentTab === "custom" || activeGroupId) && (
           <>
             {activeGroupId ? (
-              /* Inside a Private Room */
               <div className="bg-white rounded-ticket border border-ink/10 p-4 shadow-xs flex flex-col gap-3">
                 <div className="flex items-center justify-between pb-2 border-b border-ink/8">
                   <div>
                     <h3 className="font-bold text-xs text-ink">
-                      {groups.find((g) => g.id === activeGroupId)?.name || "Private Room"}
+                      {groups.find((g) => g.id === activeGroupId)?.name || "Study Room"}
                     </h3>
-                    <span className="text-[10px] text-teal font-semibold">🔒 Private Chat</span>
+                    <span className="text-[10px] text-teal font-semibold">🔒 Private Room</span>
                   </div>
                   <button
                     onClick={() => setActiveGroupId(null)}
@@ -402,12 +395,11 @@ export default function GroupsPage() {
                   </button>
                 </div>
 
-                {/* Messages inside private room */}
                 <div className="h-80 overflow-y-auto space-y-2.5 pr-1">
                   {messages.length === 0 ? (
                     <div className="text-center py-12 text-slate space-y-1">
                       <p className="text-2xl">🔒</p>
-                      <p className="text-xs font-bold text-ink">Group Room Ready</p>
+                      <p className="text-xs font-bold text-ink">Room Ready</p>
                       <p className="text-[11px]">Say hi to your study partners!</p>
                     </div>
                   ) : (
@@ -459,10 +451,9 @@ export default function GroupsPage() {
                 </form>
               </div>
             ) : (
-              /* List of Private Groups to Join */
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs font-bold text-slate px-1">
-                  <span>Available Private Rooms</span>
+                  <span>Available Study Rooms</span>
                   <span>{groups.length} active</span>
                 </div>
 
@@ -518,7 +509,7 @@ export default function GroupsPage() {
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <h3 className="text-sm font-bold text-ink">Create Private Room</h3>
+              <h3 className="text-sm font-bold text-ink">Create Study Room</h3>
               <button
                 onClick={() => setShowCreateModal(false)}
                 className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60"
