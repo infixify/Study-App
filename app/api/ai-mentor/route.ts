@@ -1,34 +1,47 @@
 // app/api/ai-mentor/route.ts
 import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
 import { supabase } from "@/lib/supabase";
 
-// Dedicated Key for Mentor or default
-const apiKey = process.env.GEMINI_API_KEY_MENTOR || process.env.GEMINI_API_KEY || "";
+const apiKey =
+  process.env.GEMINI_API_KEY_MENTOR || process.env.GEMINI_API_KEY || "";
 
-// Multi-Model Cascade for 0% overload downtime
 const MODELS_CASCADE = [
   "gemini-2.5-flash",
   "gemini-1.5-flash",
   "gemini-1.5-flash-8b",
 ];
 
-async function generateWithFallback(ai: GoogleGenAI, prompt: string) {
-  let lastError: any = null;
+async function callGeminiApi(model: string, prompt: string, key: string) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        temperature: 0.4,
+      },
+    }),
+  });
 
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Model ${model} returned ${res.status}: ${errText}`);
+  }
+
+  const json = await res.json();
+  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error(`Model ${model} gave empty response`);
+  return text;
+}
+
+async function generateWithFallback(prompt: string, key: string) {
+  let lastError: any = null;
   for (const model of MODELS_CASCADE) {
     try {
-      const response = await ai.models.generateContent({
-        model: model,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          temperature: 0.4,
-        },
-      });
-      if (response && response.text) {
-        return response.text;
-      }
+      const result = await callGeminiApi(model, prompt, key);
+      return result;
     } catch (err: any) {
       console.warn(`Model ${model} overloaded or failed, falling back to next...`, err?.message);
       lastError = err;
@@ -48,11 +61,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
     }
 
-    // 1. If not force refresh, check if recent report exists
+    // Check cache first if not forced
     if (!forceRefresh) {
       const { data: existingUser } = await supabase
         .from("users")
-        .select("ai_mentor_report, updated_at")
+        .select("ai_mentor_report")
         .eq("uid", userId)
         .maybeSingle();
 
@@ -61,7 +74,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2. Fetch full historical telemetry from Supabase
+    // Fetch student telemetry
     const [
       { data: profile },
       { data: pastLogs },
@@ -142,21 +155,21 @@ Required JSON Output schema strictly matching:
   "subject_analysis": [
     {
       "name": "Physics",
-      "status": "e.g. Velocity Focus / Strong / Weak",
+      "status": "Velocity Focus / Strong / Weak",
       "health": 75,
       "recommendation": "One crisp specific tip",
       "priority": "high"
     },
     {
       "name": "Chemistry",
-      "status": "e.g. Reaction Retention / Formula Stable",
+      "status": "Reaction Retention / Formula Stable",
       "health": 80,
       "recommendation": "One crisp specific tip",
       "priority": "medium"
     },
     {
       "name": "${targetExam.includes("NEET") ? "Biology" : "Mathematics"}",
-      "status": "e.g. Speed Constraint / High Accuracy",
+      "status": "Speed Constraint / High Accuracy",
       "health": 68,
       "recommendation": "One crisp specific tip",
       "priority": "high"
@@ -176,11 +189,9 @@ Required JSON Output schema strictly matching:
 }
 `;
 
-    const ai = new GoogleGenAI({ apiKey });
-    const textOutput = await generateWithFallback(ai, prompt);
-    const parsed = JSON.parse(textOutput);
+    const rawJson = await generateWithFallback(prompt, apiKey);
+    const parsed = JSON.parse(rawJson);
 
-    // Save to user profile for future fast reloads
     await supabase
       .from("users")
       .update({ ai_mentor_report: parsed })
