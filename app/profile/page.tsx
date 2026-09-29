@@ -30,13 +30,11 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Editable fields
   const [studyMode, setStudyMode] = useState<StudyMode>("Online");
   const [batch, setBatch] = useState<string>("");
   const [editingBatch, setEditingBatch] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Name editing
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -146,7 +144,6 @@ export default function ProfilePage() {
           Signed in as <span className="font-semibold text-slate-800 dark:text-slate-200">{profile.email}</span>
         </p>
 
-        {/* Section 1: Editable Settings */}
         <div className="flex items-center justify-between mb-2.5">
           <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Personal & Study Settings
@@ -156,7 +153,6 @@ export default function ProfilePage() {
           </span>
         </div>
 
-        {/* Name Card */}
         {editingName ? (
           <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-3.5 mb-2.5 bg-white dark:bg-[#121A29] flex items-center gap-2 shadow-sm">
             <input
@@ -214,7 +210,6 @@ export default function ProfilePage() {
           />
         )}
 
-        {/* Section 2: Academic Track (Locked) */}
         <div className="flex items-center justify-between mt-6 mb-2.5">
           <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Academic Track
@@ -305,11 +300,11 @@ function BatchEditor({
   const [selectedBatch, setSelectedBatch] = useState<string>(currentBatch);
   const [customBatch, setCustomBatch] = useState<string>("");
 
-  const rawOptions: readonly string[] =
+  const rawOptions: any[] =
     mode === "Online"
-      ? (ONLINE_BATCHES as readonly string[])
+      ? (ONLINE_BATCHES as any)
       : mode === "Offline"
-      ? (OFFLINE_INSTITUTES as readonly string[])
+      ? (OFFLINE_INSTITUTES as any)
       : [];
 
   const isCustom = !rawOptions.includes(selectedBatch) && selectedBatch !== "";
@@ -342,18 +337,18 @@ function BatchEditor({
 
       {mode !== "Self" && (
         <div className="space-y-1.5 max-h-40 overflow-y-auto">
-          {rawOptions.map((opt) => (
+          {rawOptions.map((opt: any) => (
             <button
-              key={opt}
+              key={String(opt)}
               type="button"
-              onClick={() => setSelectedBatch(opt)}
+              onClick={() => setSelectedBatch(String(opt))}
               className={`w-full text-left p-2.5 rounded-xl text-xs font-semibold border transition-all ${
-                selectedBatch === opt
+                selectedBatch === String(opt)
                   ? "bg-teal/15 dark:bg-teal/20 text-teal dark:text-[#2DD4BF] border-teal/40 font-bold"
                   : "bg-slate-50 dark:bg-white/5 border-slate-200/60 dark:border-white/5 text-slate-700 dark:text-slate-300"
               }`}
             >
-              {opt}
+              {String(opt)}
             </button>
           ))}
           <button
