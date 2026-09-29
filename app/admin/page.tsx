@@ -31,6 +31,15 @@ type Stats = {
   boardsOnly: number;
 };
 
+type AdminNotification = {
+  id: string;
+  title: string;
+  body: string;
+  target_audience: string;
+  action_url: string | null;
+  created_at: string;
+};
+
 export default function AdminPage() {
   const [checking, setChecking] = useState(true);
   const [session, setSession] = useState<boolean>(false);
@@ -47,239 +56,290 @@ export default function AdminPage() {
   // --- admin data state ---
   const [stats, setStats] = useState<Stats | null>(null);
   const [schedule, setSchedule] = useState<ExamScheduleRow[]>([]);
-  const [editedDates, setEditedDates] = useState<Record<string, { exam_date: string; is_confirmed: boolean }>>({});
+  const [editedDates, setEditedDates] = useState<
+    Record<string, { exam_date: string; is_confirmed: boolean }>
+  >({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [shiftsBySchedule, setShiftsBySchedule] = useState<
+    Record<string, ExamShiftRow[]>
+  >({});
 
-  const [shifts, setShifts] = useState<ExamShiftRow[]>([]);
+  // --- shift form state ---
   const [selectedScheduleId, setSelectedScheduleId] = useState<string>("");
   const [newShiftDate, setNewShiftDate] = useState("");
   const [newShiftTime, setNewShiftTime] = useState("");
   const [addingShift, setAddingShift] = useState(false);
 
-  const checkAccess = useCallback(async () => {
+  // --- NOTIFICATION BROADCAST STATE ---
+  const [notifTitle, setNotifTitle] = useState("");
+  const [notifBody, setNotifBody] = useState("");
+  const [notifAudience, setNotifAudience] = useState("all");
+  const [notifActionUrl, setNotifActionUrl] = useState("");
+  const [sendingNotif, setSendingNotif] = useState(false);
+  const [notifSuccess, setNotifSuccess] = useState<string | null>(null);
+  const [recentNotifs, setRecentNotifs] = useState<AdminNotification[]>([]);
+
+  const checkAdminStatus = useCallback(async () => {
+    setChecking(true);
     try {
-      const { data: authData } = await supabase.auth.getUser();
-      const user = authData?.user;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       if (!user) {
         setSession(false);
         setIsAdmin(false);
-        setChecking(false);
         return;
       }
+
       setSession(true);
 
-      const { data: adminCheck, error: rpcError } = await supabase.rpc("is_admin");
-      if (rpcError) {
-        setAuthError("Admin check failed: " + rpcError.message);
-      } else if (adminCheck) {
-        setIsAdmin(true);
-        await loadAdminData();
+      const { data: profile } = await supabase
+        .from("users")
+        .select("role")
+        .eq("uid", user.id)
+        .maybeSingle();
+
+      const hasAdmin = profile?.role === "admin";
+      setIsAdmin(hasAdmin);
+
+      if (hasAdmin) {
+        loadAdminData();
       }
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : "Could not verify admin access.");
+    } finally {
+      setChecking(false);
     }
-    setChecking(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const loadAdminData = async () => {
+    // 1. Stats
+    const { data: users } = await supabase
+      .from("users")
+      .select("target_exam, class_level");
+
+    if (users) {
+      setStats({
+        totalUsers: users.length,
+        jeeUsers: users.filter((u) => u.target_exam === "JEE").length,
+        neetUsers: users.filter((u) => u.target_exam === "NEET").length,
+        boardsOnly: users.filter((u) => u.target_exam === "BOARDS").length,
+      });
+    }
+
+    // 2. Schedule
+    const { data: schedules } = await supabase
+      .from("exam_schedules")
+      .select("*")
+      .order("year", { ascending: true });
+
+    if (schedules) {
+      setSchedule(schedules);
+      if (schedules.length > 0 && !selectedScheduleId) {
+        setSelectedScheduleId(schedules[0].id);
+      }
+    }
+
+    // 3. Shifts
+    const { data: shifts } = await supabase
+      .from("exam_shifts")
+      .select("*")
+      .order("display_order", { ascending: true });
+
+    if (shifts) {
+      const grouped: Record<string, ExamShiftRow[]> = {};
+      for (const s of shifts) {
+        if (!grouped[s.exam_schedule_id]) grouped[s.exam_schedule_id] = [];
+        grouped[s.exam_schedule_id].push(s);
+      }
+      setShiftsBySchedule(grouped);
+    }
+
+    // 4. Notifications History
+    loadNotifications();
+  };
+
+  const loadNotifications = async () => {
+    const { data } = await supabase
+      .from("notifications")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(10);
+    if (data) setRecentNotifs(data);
+  };
 
   useEffect(() => {
-    checkAccess();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    checkAdminStatus();
+  }, [checkAdminStatus]);
 
-  async function handleAuthSubmit() {
+  // Auth Submit
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthBusy(true);
     setAuthError(null);
     setAuthNotice(null);
-    setAuthBusy(true);
 
     try {
-      if (mode === "register") {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) {
-          setAuthError(error.message);
-        } else {
-          setAuthNotice(
-            "Registered. If email confirmation is on for this project, check your inbox and confirm before logging in — otherwise you're already signed in."
-          );
-          await checkAccess();
-        }
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) {
-          setAuthError(error.message);
-        } else {
-          await checkAccess();
-        }
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        setAuthNotice("Account created. Check email if confirmation is required.");
       }
+      checkAdminStatus();
+    } catch (err: any) {
+      setAuthError(err?.message ?? "Authentication failed");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  // Broadcast Notification
+  const handleSendNotification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!notifTitle.trim() || !notifBody.trim()) return;
+    setSendingNotif(true);
+    setNotifSuccess(null);
+
+    try {
+      const { error } = await supabase.from("notifications").insert({
+        title: notifTitle.trim(),
+        body: notifBody.trim(),
+        target_audience: notifAudience,
+        action_url: notifActionUrl.trim() || null,
+      });
+
+      if (error) throw error;
+
+      setNotifSuccess("Notification broadcasted successfully to all devices!");
+      setNotifTitle("");
+      setNotifBody("");
+      setNotifActionUrl("");
+      loadNotifications();
+    } catch (err: any) {
+      alert("Failed to broadcast notification: " + err.message);
+    } finally {
+      setSendingNotif(false);
+    }
+  };
+
+  const handleDeleteNotification = async (id: string) => {
+    try {
+      await supabase.from("notifications").delete().eq("id", id);
+      setRecentNotifs((prev) => prev.filter((n) => n.id !== id));
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : "Something went wrong. Try again.");
+      console.error(err);
     }
+  };
 
-    setAuthBusy(false);
-  }
-
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    setSession(false);
-    setIsAdmin(false);
-  }
-
-  const loadAdminData = useCallback(async () => {
-    const [{ count: totalUsers }, { count: jeeUsers }, { count: neetUsers }, { count: boardsOnly }] =
-      await Promise.all([
-        supabase.from("users").select("*", { count: "exact", head: true }),
-        supabase.from("users").select("*", { count: "exact", head: true }).eq("target_exam", "JEE"),
-        supabase.from("users").select("*", { count: "exact", head: true }).eq("target_exam", "NEET"),
-        supabase.from("users").select("*", { count: "exact", head: true }).eq("target_exam", "Boards"),
-      ]);
-
-    setStats({
-      totalUsers: totalUsers ?? 0,
-      jeeUsers: jeeUsers ?? 0,
-      neetUsers: neetUsers ?? 0,
-      boardsOnly: boardsOnly ?? 0,
-    });
-
-    const { data: scheduleRows } = await supabase
-      .from("exam_schedule")
-      .select("id, exam_key, label, target_exam, year, exam_date, is_confirmed, notes")
-      .order("year", { ascending: true })
-      .order("display_order", { ascending: true });
-
-    const rows = (scheduleRows as ExamScheduleRow[] | null) ?? [];
-    setSchedule(rows);
-
-    const initialEdits: Record<string, { exam_date: string; is_confirmed: boolean }> = {};
-    rows.forEach((r) => {
-      initialEdits[r.id] = { exam_date: r.exam_date, is_confirmed: r.is_confirmed };
-    });
-    setEditedDates(initialEdits);
-
-    setSelectedScheduleId((prev) => prev || (rows[0]?.id ?? ""));
-  }, []);
-
-  const loadShifts = useCallback(async (scheduleId: string) => {
-    if (!scheduleId) {
-      setShifts([]);
-      return;
-    }
-    const { data } = await supabase
-      .from("exam_shifts")
-      .select("id, exam_schedule_id, shift_date, shift_time, display_order")
-      .eq("exam_schedule_id", scheduleId)
-      .order("display_order", { ascending: true });
-    setShifts((data as ExamShiftRow[] | null) ?? []);
-  }, []);
-
-  useEffect(() => {
-    if (selectedScheduleId) loadShifts(selectedScheduleId);
-  }, [selectedScheduleId, loadShifts]);
-
-  async function saveScheduleRow(row: ExamScheduleRow) {
+  // Save Exam Date
+  const saveDate = async (row: ExamScheduleRow) => {
     const edit = editedDates[row.id];
     if (!edit) return;
     setSavingId(row.id);
-    await supabase
-      .from("exam_schedule")
-      .update({ exam_date: edit.exam_date, is_confirmed: edit.is_confirmed })
-      .eq("id", row.id);
-    await loadAdminData();
-    setSavingId(null);
-  }
 
-  async function addShift() {
+    try {
+      await supabase
+        .from("exam_schedules")
+        .update({
+          exam_date: edit.exam_date,
+          is_confirmed: edit.is_confirmed,
+        })
+        .eq("id", row.id);
+
+      setSchedule((prev) =>
+        prev.map((s) => (s.id === row.id ? { ...s, ...edit } : s))
+      );
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  // Add Shift
+  const addShift = async () => {
     if (!selectedScheduleId || !newShiftDate || !newShiftTime) return;
     setAddingShift(true);
-    await supabase.from("exam_shifts").insert({
-      exam_schedule_id: selectedScheduleId,
-      shift_date: newShiftDate,
-      shift_time: newShiftTime,
-      display_order: shifts.length + 1,
-    });
-    setNewShiftDate("");
-    setNewShiftTime("");
-    await loadShifts(selectedScheduleId);
-    setAddingShift(false);
-  }
 
-  async function deleteShift(id: string) {
-    await supabase.from("exam_shifts").delete().eq("id", id);
-    await loadShifts(selectedScheduleId);
-  }
+    try {
+      const { data, error } = await supabase
+        .from("exam_shifts")
+        .insert({
+          exam_schedule_id: selectedScheduleId,
+          shift_date: newShiftDate,
+          shift_time: newShiftTime,
+          display_order: 1,
+        })
+        .select()
+        .single();
 
-  // ---------------- Render states ----------------
+      if (!error && data) {
+        setShiftsBySchedule((prev) => ({
+          ...prev,
+          [selectedScheduleId]: [...(prev[selectedScheduleId] || []), data],
+        }));
+        setNewShiftDate("");
+        setNewShiftTime("");
+      }
+    } finally {
+      setAddingShift(false);
+    }
+  };
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-paper flex items-center justify-center">
-        <p className="text-ink/60 text-sm">Checking access…</p>
+      <div className="min-h-screen bg-paper flex items-center justify-center p-6 text-sm text-slate">
+        Checking admin access…
       </div>
     );
   }
 
   if (!session || !isAdmin) {
     return (
-      <div className="min-h-screen bg-paper flex flex-col items-center justify-center px-6">
-        <div className="w-full max-w-sm">
-          <h1 className="font-display text-2xl font-semibold mb-1">Admin Panel</h1>
-          <p className="text-slate text-sm mb-6">
-            {session && !isAdmin
-              ? "You're signed in, but this account isn't the admin account."
-              : mode === "register"
-              ? "Create the admin login (first time only)."
-              : "Sign in to continue."}
+      <div className="min-h-screen bg-paper flex items-center justify-center p-6">
+        <div className="w-full max-w-sm rounded-ticket border border-ink/10 bg-white p-6 shadow-sm">
+          <h1 className="font-display text-xl font-bold mb-1">Admin Portal</h1>
+          <p className="text-xs text-slate mb-4">
+            {session
+              ? "Access denied. Your account does not have the admin role."
+              : "Sign in with admin credentials to access."}
           </p>
 
-          {session && !isAdmin && (
-            <button
-              onClick={handleSignOut}
-              className="w-full mb-4 border border-ink/15 rounded-ticket py-3 text-sm font-medium"
-            >
-              Sign out this account
-            </button>
-          )}
-
-          {(!session || (session && !isAdmin)) && (
-            <div className="flex flex-col gap-3">
+          {!session && (
+            <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3">
               <input
                 type="email"
-                placeholder="Email"
+                placeholder="Admin email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="rounded-ticket border border-ink/15 bg-white p-3 text-sm"
+                className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold"
+                required
               />
               <input
                 type="password"
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="rounded-ticket border border-ink/15 bg-white p-3 text-sm"
+                className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold"
+                required
               />
-
-              {authError && <p className="text-xs text-coral">{authError}</p>}
-              {authNotice && <p className="text-xs text-teal">{authNotice}</p>}
-
+              {authError && (
+                <p className="text-xs text-rose-600 font-medium">{authError}</p>
+              )}
+              {authNotice && (
+                <p className="text-xs text-teal font-medium">{authNotice}</p>
+              )}
               <button
-                onClick={handleAuthSubmit}
-                disabled={authBusy || !email || !password}
-                className="bg-ink text-paper rounded-ticket py-3 text-sm font-medium disabled:opacity-30"
+                type="submit"
+                disabled={authBusy}
+                className="bg-teal text-white rounded-xl py-2.5 text-xs font-bold shadow-xs hover:bg-teal/90 disabled:opacity-40"
               >
-                {authBusy ? "Please wait…" : mode === "register" ? "Register" : "Log in"}
+                {authBusy ? "Verifying…" : "Sign In as Admin"}
               </button>
-
-              <button
-                onClick={() => {
-                  setMode(mode === "login" ? "register" : "login");
-                  setAuthError(null);
-                  setAuthNotice(null);
-                }}
-                className="text-xs text-slate"
-              >
-                {mode === "login"
-                  ? "First time here? Register instead"
-                  : "Already registered? Log in instead"}
-              </button>
-            </div>
+            </form>
           )}
         </div>
       </div>
@@ -287,158 +347,228 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-paper pb-16">
-      <div className="max-w-2xl mx-auto px-5 pt-8">
-        <div className="flex items-center justify-between mb-1">
-          <h1 className="font-display text-2xl font-semibold">Admin Panel</h1>
-          <button onClick={handleSignOut} className="text-xs text-slate">
-            Sign out
+    <div className="min-h-screen bg-paper pb-24">
+      <header className="border-b border-ink/8 bg-white px-6 py-4">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div>
+            <h1 className="font-display text-2xl font-bold">Admin Console</h1>
+            <p className="text-xs text-slate mt-0.5">
+              PrepWise Operations & Notifications Center
+            </p>
+          </div>
+          <button
+            onClick={() => supabase.auth.signOut().then(() => setSession(false))}
+            className="text-xs text-rose-600 font-bold hover:underline"
+          >
+            Sign Out
           </button>
         </div>
-        <p className="text-slate text-sm mb-6">Exam dates, shifts, resources, and basic user stats.</p>
+      </header>
 
+      <div className="max-w-4xl mx-auto px-6 pt-6 flex flex-col gap-8">
+        {/* 1. STATS */}
         {stats && (
-          <div className="grid grid-cols-2 gap-3 mb-8">
-            <StatCard label="Total users" value={stats.totalUsers} />
-            <StatCard label="JEE aspirants" value={stats.jeeUsers} />
-            <StatCard label="NEET aspirants" value={stats.neetUsers} />
-            <StatCard label="Boards only" value={stats.boardsOnly} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard label="Total Aspirants" value={stats.totalUsers} />
+            <StatCard label="JEE Students" value={stats.jeeUsers} />
+            <StatCard label="NEET Students" value={stats.neetUsers} />
+            <StatCard label="Boards Only" value={stats.boardsOnly} />
           </div>
         )}
 
-        <section className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-3">Exam Schedule</h2>
-          <div className="flex flex-col gap-3">
-            {schedule.map((row) => {
-              const edit = editedDates[row.id] ?? { exam_date: row.exam_date, is_confirmed: row.is_confirmed };
-              const dirty =
-                edit.exam_date !== row.exam_date || edit.is_confirmed !== row.is_confirmed;
-              return (
-                <div key={row.id} className="rounded-ticket border border-ink/10 bg-white p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-medium">
-                      {row.label} <span className="text-slate text-xs">({row.year})</span>
-                    </p>
-                    <span className="text-xs text-slate">{row.exam_key}</span>
-                  </div>
+        {/* 2. 📢 BROADCAST PUSH NOTIFICATION SECTION */}
+        <section className="rounded-ticket border border-ink/10 bg-white p-6 shadow-xs">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="font-display text-lg font-bold text-ink">
+                📢 Broadcast Push Notification
+              </h2>
+              <p className="text-xs text-slate">
+                Sends live in-app notifications and Firebase push to all students.
+              </p>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Live Connected
+            </span>
+          </div>
 
-                  <div className="flex items-center gap-3 flex-wrap">
+          {notifSuccess && (
+            <div className="p-3 mb-4 rounded-xl bg-teal/10 border border-teal/20 text-xs font-bold text-teal">
+              ✓ {notifSuccess}
+            </div>
+          )}
+
+          <form onSubmit={handleSendNotification} className="space-y-3">
+            <div>
+              <label className="text-[10px] font-bold text-slate block mb-0.5">
+                Notification Title
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. 🎯 JEE Mains 2026 Session 1 Schedule Released!"
+                value={notifTitle}
+                onChange={(e) => setNotifTitle(e.target.value)}
+                className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 outline-none focus:border-teal"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold text-slate block mb-0.5">
+                Message Body
+              </label>
+              <textarea
+                rows={2}
+                placeholder="e.g. NTA has announced exam dates. Check updated shifts and revision planner."
+                value={notifBody}
+                onChange={(e) => setNotifBody(e.target.value)}
+                className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 outline-none focus:border-teal"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate block mb-0.5">
+                  Target Audience
+                </label>
+                <select
+                  value={notifAudience}
+                  onChange={(e) => setNotifAudience(e.target.value)}
+                  className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 bg-white"
+                >
+                  <option value="all">🌍 All Aspirants</option>
+                  <option value="jee">⚡ JEE Students Only</option>
+                  <option value="neet">🩺 NEET Students Only</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate block mb-0.5">
+                  Action Link / Route (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. /tests or /resources"
+                  value={notifActionUrl}
+                  onChange={(e) => setNotifActionUrl(e.target.value)}
+                  className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 outline-none focus:border-teal"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={sendingNotif}
+              className="w-full py-3 bg-teal text-white rounded-xl text-xs font-bold shadow-md shadow-teal/20 hover:bg-teal/90 disabled:opacity-40 transition-all"
+            >
+              {sendingNotif ? "Broadcasting..." : "Broadcast Notification to Students 🚀"}
+            </button>
+          </form>
+
+          {/* Recent Sent Notifications */}
+          {recentNotifs.length > 0 && (
+            <div className="mt-6 pt-5 border-t border-ink/8 space-y-2">
+              <h4 className="text-xs font-bold text-slate uppercase tracking-wider">
+                Recent Broadcasts
+              </h4>
+              <div className="space-y-2">
+                {recentNotifs.map((rn) => (
+                  <div
+                    key={rn.id}
+                    className="p-3 rounded-xl bg-paper/60 border border-ink/8 flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-ink/5 text-ink/70">
+                          {rn.target_audience.toUpperCase()}
+                        </span>
+                        <span className="font-bold text-ink">{rn.title}</span>
+                      </div>
+                      <p className="text-[11px] text-slate mt-0.5">{rn.body}</p>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteNotification(rn.id)}
+                      className="text-xs text-rose-600 hover:underline font-bold shrink-0"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* 3. EXAM DATES & SHIFTS */}
+        <section className="rounded-ticket border border-ink/10 bg-white p-6 shadow-xs">
+          <h2 className="font-display text-lg font-bold mb-3">
+            Exam Schedules & Shifts
+          </h2>
+          <div className="space-y-4">
+            {schedule.map((row) => (
+              <div
+                key={row.id}
+                className="p-3.5 rounded-xl bg-paper/60 border border-ink/8 flex flex-col md:flex-row md:items-center justify-between gap-3"
+              >
+                <div>
+                  <h4 className="text-xs font-bold text-ink">{row.label}</h4>
+                  <p className="text-[10px] text-slate">
+                    {row.target_exam} {row.year} • Key: {row.exam_key}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={editedDates[row.id]?.exam_date ?? row.exam_date}
+                    onChange={(e) =>
+                      setEditedDates((prev) => ({
+                        ...prev,
+                        [row.id]: {
+                          exam_date: e.target.value,
+                          is_confirmed:
+                            editedDates[row.id]?.is_confirmed ?? row.is_confirmed,
+                        },
+                      }))
+                    }
+                    className="p-1.5 text-xs font-semibold rounded-lg border border-ink/15 bg-white"
+                  />
+                  <label className="flex items-center gap-1 text-[11px] font-semibold text-slate">
                     <input
-                      type="date"
-                      value={edit.exam_date}
+                      type="checkbox"
+                      checked={
+                        editedDates[row.id]?.is_confirmed ?? row.is_confirmed
+                      }
                       onChange={(e) =>
                         setEditedDates((prev) => ({
                           ...prev,
-                          [row.id]: { ...edit, exam_date: e.target.value },
+                          [row.id]: {
+                            exam_date:
+                              editedDates[row.id]?.exam_date ?? row.exam_date,
+                            is_confirmed: e.target.checked,
+                          },
                         }))
                       }
-                      className="rounded-lg border border-ink/15 px-2 py-1.5 text-sm"
                     />
-
-                    <label className="flex items-center gap-1.5 text-xs text-slate">
-                      <input
-                        type="checkbox"
-                        checked={edit.is_confirmed}
-                        onChange={(e) =>
-                          setEditedDates((prev) => ({
-                            ...prev,
-                            [row.id]: { ...edit, is_confirmed: e.target.checked },
-                          }))
-                        }
-                        className="accent-marigold"
-                      />
-                      Officially confirmed
-                    </label>
-
-                    <button
-                      onClick={() => saveScheduleRow(row)}
-                      disabled={!dirty || savingId === row.id}
-                      className="ml-auto bg-ink text-paper rounded-full px-4 py-1.5 text-xs font-medium disabled:opacity-30"
-                    >
-                      {savingId === row.id ? "Saving…" : "Save"}
-                    </button>
-                  </div>
-
-                  {row.notes && <p className="text-xs text-slate mt-2">{row.notes}</p>}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="mb-8">
-          <h2 className="font-display text-lg font-semibold mb-3">Exam Shifts</h2>
-          <p className="text-xs text-slate mb-3">
-            Add specific dates/shifts once NTA releases them — this is what turns on the shift
-            picker for students on the dashboard.
-          </p>
-
-          <select
-            value={selectedScheduleId}
-            onChange={(e) => setSelectedScheduleId(e.target.value)}
-            className="w-full rounded-ticket border border-ink/15 bg-white p-3 text-sm mb-3"
-          >
-            {schedule.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.label} ({row.year})
-              </option>
-            ))}
-          </select>
-
-          <div className="rounded-ticket border border-ink/10 bg-white p-4">
-            <div className="flex flex-col gap-2 mb-4">
-              {shifts.length === 0 && (
-                <p className="text-xs text-slate">No shifts added yet for this session.</p>
-              )}
-              {shifts.map((s) => (
-                <div key={s.id} className="flex items-center justify-between text-sm">
-                  <span>
-                    {new Date(s.shift_date).toLocaleDateString("en-IN", {
-                      day: "numeric",
-                      month: "short",
-                    })}{" "}
-                    — {s.shift_time}
-                  </span>
-                  <button onClick={() => deleteShift(s.id)} className="text-xs text-coral">
-                    Remove
+                    Confirmed
+                  </label>
+                  <button
+                    onClick={() => saveDate(row)}
+                    disabled={savingId === row.id}
+                    className="px-3 py-1.5 bg-ink text-paper rounded-lg text-xs font-bold hover:bg-ink-100"
+                  >
+                    {savingId === row.id ? "…" : "Save"}
                   </button>
                 </div>
-              ))}
-            </div>
-
-            <div className="flex flex-col gap-2 pt-3 border-t border-ink/8">
-              <div className="flex gap-2">
-                <input
-                  type="date"
-                  value={newShiftDate}
-                  onChange={(e) => setNewShiftDate(e.target.value)}
-                  className="flex-1 rounded-lg border border-ink/15 px-2 py-1.5 text-sm"
-                />
-                <input
-                  type="text"
-                  placeholder="e.g. Morning (9 AM–12 PM)"
-                  value={newShiftTime}
-                  onChange={(e) => setNewShiftTime(e.target.value)}
-                  className="flex-[2] rounded-lg border border-ink/15 px-2 py-1.5 text-sm"
-                />
               </div>
-              <button
-                onClick={addShift}
-                disabled={!newShiftDate || !newShiftTime || addingShift}
-                className="bg-marigold text-ink rounded-full py-2 text-sm font-medium disabled:opacity-30"
-              >
-                {addingShift ? "Adding…" : "Add shift"}
-              </button>
-            </div>
+            ))}
           </div>
         </section>
 
-        <section>
-          <h2 className="font-display text-lg font-semibold mb-3">Resources</h2>
-          <p className="text-xs text-slate mb-3">
-            Upload Notes, Short Notes, Formula Sheets, PYQs, and Mock Tests directly as files
-            (NCERT links are already seeded and don't need this).
-          </p>
+        {/* 4. RESOURCE UPLOADER */}
+        <section className="rounded-ticket border border-ink/10 bg-white p-6 shadow-xs">
+          <h2 className="font-display text-lg font-bold mb-3">Resource Vault</h2>
           <ResourceUploader />
         </section>
       </div>
@@ -449,8 +579,8 @@ export default function AdminPage() {
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-ticket border border-ink/10 bg-white p-4">
-      <p className="font-display text-2xl font-semibold">{value}</p>
+      <p className="font-display text-2xl font-bold">{value}</p>
       <p className="text-xs text-slate mt-0.5">{label}</p>
     </div>
   );
-                        }
+}
