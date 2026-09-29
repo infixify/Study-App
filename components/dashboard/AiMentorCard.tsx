@@ -22,50 +22,65 @@ export default function AiMentorCard({
   const [modalOpen, setModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"today" | "subjects" | "week" | "swot" | "rank">("today");
 
+  const isNeet = targetExam.toUpperCase().includes("NEET");
+
   const status = report?.overall_status || "Consistent Momentum";
   const prediction = report?.score_prediction || `Projected: 98.4+ Percentile (${targetExam})`;
   const summary =
     report?.diagnostic_summary ||
-    "Maintain a rigid 1:1.5 Theory-to-Practice ratio. Target 45+ daily numericals to secure top rank.";
+    `Prioritize high-yield numerical practice over passive video watching. Aim for a 60% problem-solving ratio to secure a top rank in ${targetExam}.`;
 
-  const isNeet = targetExam.toUpperCase().includes("NEET");
-
-  // Dynamic Subject Matrix based on JEE / NEET
+  // Dynamic Subject Analysis (Adapts to real report or intelligent personalized targets)
   const subjectAnalysis = report?.subject_analysis || [
     {
       name: "Physics",
-      status: "Moderate Velocity",
+      status: "Problem Velocity Focus",
       health: 72,
-      recommendation: "Focus on Mechanics & Electrodynamics numericals. Maintain 20 Q/hr pace.",
+      recommendation: `Solve at least 25 numericals today. Focus on formula vector forms and boundary conditions.`,
       priority: "high",
     },
     {
       name: "Chemistry",
-      status: "High Retention",
+      status: isNeet ? "NCERT Retention Focus" : "Reaction Mechanism Focus",
       health: 84,
       recommendation: isNeet
-        ? "Line-by-line Inorganic NCERT reading required daily. Physical chemistry formulas solid."
-        : "Organic reaction mechanism review needed. Physical numericals are stable.",
+        ? "Line-by-line Inorganic NCERT active recall. Solve 30 statement-type practice questions."
+        : "Organic reaction mechanism review + Physical chemistry numerical calculation shortcuts.",
       priority: "medium",
     },
     {
       name: isNeet ? "Biology" : "Mathematics",
-      status: isNeet ? "Accuracy Strong" : "Speed Constraint",
+      status: isNeet ? "Speed & Accuracy" : "Calculus & Algebra Velocity",
       health: isNeet ? 88 : 64,
       recommendation: isNeet
-        ? "Daily 90 Qs timed session to finish section in under 45 minutes on exam day."
-        : "Calculus & Vector-3D calculation shortcuts needed to eliminate negative marks.",
+        ? "Target 90 questions under 45 minutes to build real examination pace."
+        : "Solve 20 high-weightage DPP questions. Minimize multi-step negative marking traps.",
       priority: isNeet ? "medium" : "high",
     },
   ];
 
-  // Today's Action Plan
+  // Flexible, non-rigid task blocks (Do them whenever free during the day)
   const todayPlan = report?.today_plan || {
-    headline: "Target: 4.5 Hours Focus & 50+ Questions",
+    headline: `Target Tasks for Today • ${targetExam} Focus`,
     blocks: [
-      { time: "Block 1 (Morning)", subject: "Physics", action: "25 Numerical Problems (Mechanics/Electro)", duration: "90 mins" },
-      { time: "Block 2 (Afternoon)", subject: isNeet ? "Biology" : "Mathematics", action: "Timed DPP Problem Solving & Shortcut Notes", duration: "90 mins" },
-      { time: "Block 3 (Evening)", subject: "Chemistry", action: "NCERT Active Recall & Formula Revision", duration: "60 mins" },
+      {
+        tag: "High Priority",
+        subject: "Physics",
+        action: "25 Numerical Problems (Target 20 Q/hr solving speed)",
+        flexiNote: "Complete when concentration is sharpest",
+      },
+      {
+        tag: "Practice Sprint",
+        subject: isNeet ? "Biology" : "Mathematics",
+        action: isNeet ? "50 High-Yield NCERT-based Practice MCQs" : "20 Timed DPP Problems with zero answer checking in between",
+        flexiNote: "Flexible 60-90 min session",
+      },
+      {
+        tag: "Retention Lock",
+        subject: "Chemistry",
+        action: "Formula Sheet drills + Active revision of pending backlogs",
+        flexiNote: "Review before calling it a day",
+      },
     ],
   };
 
@@ -76,13 +91,12 @@ export default function AiMentorCard({
 
   return (
     <>
-      {/* 1. JEETRACK DASHBOARD COCKPIT CARD */}
+      {/* 1. DASHBOARD CARD */}
       <div className="rounded-2xl p-4 bg-gradient-to-br from-[#0F172A] via-[#1E1B4B] to-[#0F172A] text-white shadow-lg border border-indigo-900/60 relative overflow-hidden">
-        {/* Glow accents */}
         <div className="absolute top-0 right-0 w-36 h-36 bg-indigo-500/15 rounded-full blur-2xl pointer-events-none" />
         <div className="absolute -bottom-10 -left-10 w-28 h-28 bg-teal-500/10 rounded-full blur-xl pointer-events-none" />
 
-        {/* Top Header Row */}
+        {/* Top Header */}
         <div className="flex items-center justify-between gap-2 mb-2 relative z-10">
           <div className="flex items-center gap-2">
             <span className="w-7 h-7 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center text-xs shadow-md font-bold">
@@ -91,7 +105,7 @@ export default function AiMentorCard({
             <div>
               <div className="flex items-center gap-1.5">
                 <h2 className="text-xs font-black tracking-tight text-white uppercase">
-                  Director's AI Diagnostic
+                  Academic Strategy Engine
                 </h2>
                 <span className="text-[9px] font-black text-indigo-300 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-700/60">
                   {targetExam}
@@ -122,8 +136,8 @@ export default function AiMentorCard({
             <span className="text-xs font-black text-emerald-400">60% Ratio</span>
           </div>
           <div className="bg-white/5 border border-white/10 rounded-xl p-2 text-center backdrop-blur-xs">
-            <span className="text-[9px] font-bold text-slate-400 block uppercase">Today Target</span>
-            <span className="text-xs font-black text-indigo-300">50+ Qs</span>
+            <span className="text-[9px] font-bold text-slate-400 block uppercase">Daily Goal</span>
+            <span className="text-xs font-black text-indigo-300">3 Modular Tasks</span>
           </div>
         </div>
 
@@ -137,7 +151,7 @@ export default function AiMentorCard({
           </p>
         </div>
 
-        {/* Dual Primary Action Buttons */}
+        {/* Action Buttons */}
         <div className="grid grid-cols-2 gap-2 relative z-10">
           <button
             type="button"
@@ -157,7 +171,7 @@ export default function AiMentorCard({
         </div>
       </div>
 
-      {/* 2. FULL 5-TAB JEETRACK ACADEMIC AUDIT COCKPIT */}
+      {/* 2. FULL 5-TAB ACADEMIC AUDIT COCKPIT */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-300 overflow-hidden">
@@ -169,10 +183,10 @@ export default function AiMentorCard({
                 </span>
                 <div>
                   <h3 className="text-sm font-black tracking-tight text-white">
-                    Kota Academic Audit Cockpit
+                    PrepWise Academic Strategy Audit
                   </h3>
                   <p className="text-[10px] text-slate-300 font-medium">
-                    Personalized Guidance Engine • {targetExam}
+                    National Level Performance Engine • {targetExam}
                   </p>
                 </div>
               </div>
@@ -185,7 +199,7 @@ export default function AiMentorCard({
               </button>
             </div>
 
-            {/* 5 Segmented Slider Tabs (JEETrack Full Suite) */}
+            {/* 5 Segmented Slider Tabs */}
             <div className="flex p-1.5 bg-slate-100 border-b border-slate-200 text-[11px] font-black overflow-x-auto gap-1">
               <button
                 type="button"
@@ -196,7 +210,7 @@ export default function AiMentorCard({
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                <span>🎯</span> Today's Plan
+                <span>🎯</span> Today's Tasks
               </button>
 
               <button
@@ -250,45 +264,43 @@ export default function AiMentorCard({
 
             {/* Modal Body */}
             <div className="p-4 overflow-y-auto space-y-3.5 text-xs flex-1">
-              {/* TAB 1: TODAY'S ACTION BLUEPRINT */}
+              {/* TAB 1: TODAY'S FLEXIBLE TASKS */}
               {activeTab === "today" && (
                 <div className="space-y-3">
                   <div className="p-3 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-2xl">
                     <span className="text-[10px] font-black text-indigo-700 uppercase tracking-wider block">
-                      Daily Blueprint
+                      Personalized Action Plan
                     </span>
                     <div className="font-black text-indigo-950 text-xs mt-0.5">
                       {todayPlan.headline}
                     </div>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     {todayPlan.blocks.map((b: any, idx: number) => (
                       <div
                         key={idx}
-                        className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2 shadow-2xs"
+                        className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 shadow-2xs hover:border-indigo-300 transition-all"
                       >
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-800 font-extrabold text-[9px] rounded">
-                              {b.time}
-                            </span>
-                            <span className="font-black text-slate-900 text-xs">{b.subject}</span>
-                          </div>
-                          <div className="text-slate-600 text-[11px] font-semibold mt-1">
-                            {b.action}
-                          </div>
+                        <div className="flex items-center justify-between">
+                          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 font-extrabold text-[10px] rounded-md">
+                            {b.tag}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-500">
+                            {b.flexiNote}
+                          </span>
                         </div>
-                        <span className="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-2 py-1 rounded-md flex-shrink-0">
-                          {b.duration}
-                        </span>
+                        <div className="font-black text-slate-900 text-xs">{b.subject}</div>
+                        <div className="text-slate-700 text-[11px] font-medium leading-relaxed">
+                          {b.action}
+                        </div>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* TAB 2: SUBJECT-WISE HEALTH & VELOCITY ANALYSIS */}
+              {/* TAB 2: SUBJECT-WISE HEALTH */}
               {activeTab === "subjects" && (
                 <div className="space-y-2.5">
                   {subjectAnalysis.map((sub: any, i: number) => (
@@ -315,7 +327,6 @@ export default function AiMentorCard({
                         </div>
                       </div>
 
-                      {/* Progress Bar */}
                       <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
                         <div
                           style={{ width: `${sub.health}%` }}
@@ -336,36 +347,34 @@ export default function AiMentorCard({
               {/* TAB 3: 7-DAY ROADMAP */}
               {activeTab === "week" && (
                 <div className="space-y-2">
-                  <div className="space-y-2">
-                    {(report?.seven_day_plan || [
-                      { day: "Day 1", focus: "Mechanics & Calculus Drift", target: "45 DPP Qs + 1h Formula Revision" },
-                      { day: "Day 2", focus: "Electrodynamics High Yields", target: "60 Numerical Practice + Error Log" },
-                      { day: "Day 3", focus: "Physical Chemistry Numericals", target: "50 Standard Coaching Module Qs" },
-                      { day: "Day 4", focus: "Full Length Mock & Speed Test", target: "3h Timed Test + Negative Marking Audit" },
-                      { day: "Day 5", focus: "Weak Chapters Elimination", target: "Target backlog chapters identified in Radar" },
-                      { day: "Day 6", focus: "Inorganic NCERT & Shortcuts", target: "Memory line-by-line active recall" },
-                      { day: "Day 7", focus: "Weekly Review & Milestone Test", target: "Score Target: +15 Marks over previous" },
-                    ]).map((step: any, i: number) => (
-                      <div
-                        key={i}
-                        className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-start gap-2.5 shadow-2xs hover:border-indigo-300 transition-all"
-                      >
-                        <span className="px-2 py-1 rounded-lg bg-indigo-600 text-white font-black text-[10px] flex-shrink-0 shadow-xs">
-                          {step.day}
-                        </span>
-                        <div className="flex-1">
-                          <div className="font-black text-slate-900 text-xs">{step.focus}</div>
-                          <div className="text-slate-600 text-[10.5px] font-semibold mt-0.5">
-                            {step.target}
-                          </div>
+                  {(report?.seven_day_plan || [
+                    { day: "Day 1", focus: "Core Numerical Problem Solving", target: "45 DPP Qs + Formula Revision" },
+                    { day: "Day 2", focus: "High-Yield Topics Drill", target: "50 Timed Questions with Error Log" },
+                    { day: "Day 3", focus: "Backlog Clearing Block", target: "Clear pending chapters marked in Radar" },
+                    { day: "Day 4", focus: "Timed Exam Simulation", target: "Speed drill + Negative Marking Audit" },
+                    { day: "Day 5", focus: "Weak Subject Reinforcement", target: "Target lowest confidence subject" },
+                    { day: "Day 6", focus: "NCERT & Formula Sheets", target: "Active memory recall session" },
+                    { day: "Day 7", focus: "Milestone Review", target: "Assess progress vs target percentile" },
+                  ]).map((step: any, i: number) => (
+                    <div
+                      key={i}
+                      className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-start gap-2.5 shadow-2xs hover:border-indigo-300 transition-all"
+                    >
+                      <span className="px-2 py-1 rounded-lg bg-indigo-600 text-white font-black text-[10px] flex-shrink-0 shadow-xs">
+                        {step.day}
+                      </span>
+                      <div className="flex-1">
+                        <div className="font-black text-slate-900 text-xs">{step.focus}</div>
+                        <div className="text-slate-600 text-[10.5px] font-semibold mt-0.5">
+                          {step.target}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {/* TAB 4: SWOT & LEAKS */}
+              {/* TAB 4: SWOT AUDIT */}
               {activeTab === "swot" && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
@@ -378,7 +387,7 @@ export default function AiMentorCard({
                       </div>
                       <ul className="space-y-1.5 text-[11px] text-emerald-900 font-semibold">
                         {(report?.strengths || [
-                          "Formula retention in Mechanics",
+                          "Formula retention in key chapters",
                           "High consistency in daily check-ins",
                           "Positive accuracy in easy-medium questions",
                         ]).map((s: string, i: number) => (
@@ -414,7 +423,7 @@ export default function AiMentorCard({
 
                   <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
                     <h4 className="text-xs font-black text-slate-900 mb-1 flex items-center gap-1.5">
-                      <span>📝</span> Comprehensive Kota Audit Summary
+                      <span>📝</span> Academic Strategist Summary
                     </h4>
                     <p className="text-[11px] text-slate-700 leading-relaxed font-medium">
                       {summary}
@@ -423,7 +432,7 @@ export default function AiMentorCard({
                 </div>
               )}
 
-              {/* TAB 5: RANK FORECAST & SIMULATION */}
+              {/* TAB 5: RANK FORECAST */}
               {activeTab === "rank" && (
                 <div className="space-y-3">
                   <div className="p-4 bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-2xl border border-indigo-900 shadow-md">
@@ -456,7 +465,7 @@ export default function AiMentorCard({
                 </div>
               )}
 
-              {/* PROMINENT REFRESH BUTTON (Inside Modal) */}
+              {/* REFRESH BUTTON */}
               <div className="pt-2">
                 <button
                   type="button"
@@ -465,10 +474,10 @@ export default function AiMentorCard({
                   className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-50 shadow-md"
                 >
                   <span className={loading ? "animate-spin" : ""}>🔄</span>
-                  {loading ? "Re-Analyzing Kota Telemetry…" : "UPDATE & REFRESH PROGRESS"}
+                  {loading ? "Re-Analyzing Telemetry Data…" : "UPDATE & REFRESH PROGRESS"}
                 </button>
                 <p className="text-[9.5px] text-center text-slate-500 mt-1 font-medium">
-                  Triggers Gemini AI diagnostic with latest questions, hours & test scores.
+                  Triggers AI diagnostic with latest questions, hours & test scores.
                 </p>
               </div>
             </div>
