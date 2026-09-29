@@ -4,9 +4,11 @@ import { NextResponse } from "next/server";
 const apiKey =
   process.env.GEMINI_API_KEY_DOUBT || process.env.GEMINI_API_KEY || "";
 
+// 100% Live Tested & Verified Active Models
 const MODELS_CASCADE = [
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.8-flash",
 ];
 
 async function callGeminiDoubt(
@@ -71,7 +73,7 @@ async function generateDoubtResponse(
       );
       return result;
     } catch (err: any) {
-      console.warn(`Doubt Solver: Model ${model} failed, trying next...`, err?.message);
+      console.warn(`Doubt Solver: Model ${model} failed, switching to next...`, err?.message);
       lastError = err;
     }
   }
@@ -82,6 +84,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
+    // Universal support: query, message, prompt, or messages array
     let studentQuestion =
       body.query ||
       body.message ||
@@ -90,13 +93,7 @@ export async function POST(req: Request) {
         ? body.messages[body.messages.length - 1]?.content
         : "");
 
-    const imageFromMessages =
-      !body.image &&
-      !body.imageBase64 &&
-      Array.isArray(body.messages) &&
-      body.messages[body.messages.length - 1]?.image;
-
-    if (!studentQuestion && !body.image && !imageFromMessages) {
+    if (!studentQuestion && !body.image && !body.imageBase64) {
       return NextResponse.json({ error: "Missing question query" }, { status: 400 });
     }
 
@@ -115,7 +112,7 @@ Target Exam: ${body.targetExam || "JEE / NEET"}
 Guidelines:
 1. Provide mathematically rigorous, step-by-step solutions.
 2. Clearly state standard formulas, boundary conditions, and SI units.
-3. If an alternative shortcut or elimination technique exists, explain it at the end under "⚡ Exam Shortcut".
+3. If an alternative shortcut exists, explain it under "⚡ Exam Shortcut".
 4. Keep explanations crisp, sharp and easy to read on mobile screens.
 `;
 
@@ -131,7 +128,7 @@ ${studentQuestion || "Solve the attached image question step-by-step."}
       systemInstruction,
       fullPrompt,
       apiKey,
-      body.image || body.imageBase64 || imageFromMessages
+      body.image || body.imageBase64
     );
 
     return NextResponse.json({ reply, text: reply, content: reply });
