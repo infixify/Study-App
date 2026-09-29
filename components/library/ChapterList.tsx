@@ -24,7 +24,7 @@ interface Chapter {
 interface ChapterListProps {
   subjectId: string;
   chapters: Chapter[];
-  targetExam?: string | null;
+  targetExam?: string;
   onProgressChange?: (chapterId: string, status: ProgressStatus) => void;
   onBacklogToggle?: (chapterId: string, isBacklog: boolean) => void;
 }
@@ -36,9 +36,12 @@ const STATUS_LABELS: Record<ProgressStatus, string> = {
 };
 
 const STATUS_STYLES: Record<ProgressStatus, string> = {
-  not_started: "bg-ink/5 text-slate border-ink/10",
-  in_progress: "bg-amber-500 text-white border-amber-600 shadow-xs",
-  done: "bg-teal-600 text-white border-teal-700 shadow-xs",
+  not_started:
+    "bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-200",
+  in_progress:
+    "bg-amber-500 text-white border-amber-600 shadow-sm shadow-amber-500/25 font-bold",
+  done:
+    "bg-teal text-white border-teal shadow-sm shadow-teal/25 font-bold",
 };
 
 export default function ChapterList({
@@ -105,28 +108,8 @@ export default function ChapterList({
     );
   }
 
-  // 3. Backlog Toggle
-  async function toggleBacklog(chapterId: string, currentVal: boolean) {
-    const newVal = !currentVal;
-    const { data: authData } = await supabase.auth.getUser();
-    const user = authData?.user;
-    if (!user) return;
-
-    await supabase.from("chapter_progress").upsert(
-      {
-        user_id: user.id,
-        chapter_id: chapterId,
-        is_backlog: newVal,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id,chapter_id" }
-    );
-    onBacklogToggle?.(chapterId, newVal);
-  }
-
-  // 4. Save Question Practice with Anti-Duplication
-  async function handleSavePractice(e: React.FormEvent) {
-    e.preventDefault();
+  // 3. Save Question Practice Log
+  async function handleSavePractice() {
     if (!activeModalChapter) return;
     setIsSavingPractice(true);
 
@@ -135,51 +118,44 @@ export default function ChapterList({
       const user = authData?.user;
       if (!user) return;
 
-      const startMin =
-        parseInt(startTime.split(":")[0]) * 60 + parseInt(startTime.split(":")[1]);
-      const endMin =
-        parseInt(endTime.split(":")[0]) * 60 + parseInt(endTime.split(":")[1]);
-      const durationMin = Math.max(
-        1,
-        endMin >= startMin ? endMin - startMin : 1440 - startMin + endMin
-      );
-      const computedAccuracy =
+      const calcAccuracy =
         attempted > 0 ? Math.round((correct / attempted) * 100) : 0;
 
-      // Update question_logs / local storage
-      const existing = practiceStatsMap[activeModalChapter.id] || {
-        solved: 0,
-        accuracy: 0,
-      };
-      const newTotal = existing.solved + attempted;
-      const newAcc =
-        existing.solved === 0
-          ? computedAccuracy
-          : Math.round((existing.accuracy + computedAccuracy) / 2);
+      await supabase.from("question_practice_logs").insert({
+        user_id: user.id,
+        chapter_id: activeModalChapter.id,
+        attempted,
+        correct,
+        incorrect,
+        unattempted,
+        attempt_date: attemptDate,
+        start_time: startTime,
+        end_time: endTime,
+        accuracy: calcAccuracy,
+      });
 
+      const currentSolved =
+        practiceStatsMap[activeModalChapter.id]?.solved ??
+        activeModalChapter.total_questions_solved ??
+        0;
       setPracticeStatsMap((prev) => ({
         ...prev,
-        [activeModalChapter.id]: { solved: newTotal, accuracy: newAcc },
-      }));
-
-      // Also persist to Supabase safely
-      await supabase.from("chapter_progress").upsert(
-        {
-          user_id: user.id,
-          chapter_id: activeModalChapter.id,
-          total_questions_solved: newTotal,
-          accuracy: newAcc,
-          updated_at: new Date().toISOString(),
+        [activeModalChapter.id]: {
+          solved: currentSolved + attempted,
+          accuracy: calcAccuracy,
         },
-        { onConflict: "user_id,chapter_id" }
-      );
+      }));
 
       setActiveModalChapter(null);
     } catch (err) {
-      console.error("Failed to log practice:", err);
+      console.error("Error saving practice log:", err);
     } finally {
       setIsSavingPractice(false);
     }
+  }
+
+  function toggleBacklog(chapterId: string, current: boolean) {
+    onBacklogToggle?.(chapterId, !current);
   }
 
   return (
@@ -193,6 +169,7 @@ export default function ChapterList({
           targetExam === "JEE" && ch.jeeScope === "advanced_only";
         const showNeetOnlyBadge =
           targetExam === "NEET" && ch.neetScope === "neet_only";
+
         const status = ch.progressStatus ?? "not_started";
         const isBacklog = ch.isBacklog ?? false;
         const revCount = revisionMap[ch.id] ?? ch.revision_count ?? 0;
@@ -204,21 +181,21 @@ export default function ChapterList({
         return (
           <div
             key={ch.id}
-            className={`bg-white rounded-ticket border px-4 py-3 flex flex-col gap-2.5 transition-all shadow-2xs ${
+            className={`rounded-2xl border p-4 flex flex-col gap-3 transition-all duration-200 shadow-sm ${
               isBacklog
-                ? "border-rose-300 shadow-sm shadow-rose-100"
-                : "border-ink/10"
+                ? "bg-rose-50/50 dark:bg-rose-950/20 border-rose-300 dark:border-rose-900/50"
+                : "bg-white dark:bg-[#121A29] border-slate-200 dark:border-white/10"
             }`}
           >
-            {/* Header: Title + Backlog Pill */}
+            {/* Header: Title + Class Badge + Backlog Pill */}
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-start gap-2 flex-1">
                 {ch.classTag && (
-                  <span className="shrink-0 mt-0.5 text-[10px] font-semibold text-ink/60 bg-ink/5 px-2 py-0.5 rounded-full">
+                  <span className="shrink-0 mt-0.5 text-[9.5px] font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/10 px-2 py-0.5 rounded-md">
                     {ch.classTag === "Dropper" ? "Dropper" : `Class ${ch.classTag}`}
                   </span>
                 )}
-                <span className="text-sm font-semibold text-ink leading-tight">
+                <span className="text-sm font-bold text-slate-900 dark:text-white leading-snug">
                   {ch.title}
                 </span>
               </div>
@@ -227,267 +204,232 @@ export default function ChapterList({
                 type="button"
                 onClick={() => toggleBacklog(ch.id, isBacklog)}
                 title={isBacklog ? "Clear backlog" : "Mark as backlog"}
-                className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${
+                className={`shrink-0 text-[10px] font-bold px-2.5 py-0.5 rounded-full border transition-all ${
                   isBacklog
                     ? "bg-rose-500 text-white border-rose-600 shadow-xs"
-                    : "bg-white text-slate border-ink/10 hover:border-rose-300 hover:text-rose-500"
+                    : "bg-slate-50 dark:bg-white/5 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:border-rose-400 hover:text-rose-500"
                 }`}
               >
                 {isBacklog ? "🚨 Backlog" : "+ Backlog"}
               </button>
             </div>
 
-            {/* Badges */}
+            {/* Scope Badges */}
             {(showOffSyllabusBadge ||
               showAdvancedOnlyBadge ||
               showNeetOnlyBadge ||
-              ch.isToughTopic ||
-              isBacklog) && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {isBacklog && (
-                  <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
-                    Needs Attention
-                  </span>
-                )}
+              ch.isToughTopic) && (
+              <div className="flex flex-wrap gap-1.5">
                 {showOffSyllabusBadge && (
-                  <span className="text-[10px] font-semibold text-ink/50 bg-ink/5 px-2 py-0.5 rounded-full whitespace-nowrap">
-                    Not in {targetExam}
+                  <span className="text-[9px] font-bold text-slate-500 bg-slate-200 dark:bg-white/10 px-2 py-0.5 rounded-md">
+                    Boards Only
                   </span>
                 )}
                 {showAdvancedOnlyBadge && (
-                  <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full whitespace-nowrap">
-                    Advanced only
+                  <span className="text-[9px] font-bold text-amber-700 bg-amber-100 dark:bg-amber-950 dark:text-amber-300 px-2 py-0.5 rounded-md">
+                    JEE Advanced Only
                   </span>
                 )}
                 {showNeetOnlyBadge && (
-                  <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full whitespace-nowrap">
-                    NEET only
+                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-300 px-2 py-0.5 rounded-md">
+                    NEET Specific
                   </span>
                 )}
                 {ch.isToughTopic && (
-                  <span className="text-[10px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">
-                    Tough topic
+                  <span className="text-[9px] font-bold text-rose-700 bg-rose-100 dark:bg-rose-950 dark:text-rose-300 px-2 py-0.5 rounded-md">
+                    High Yield / Tough
                   </span>
                 )}
               </div>
             )}
 
-            {/* 1. Progress Status Selector: Not Started | Ongoing | Completed */}
-            <div className="flex gap-1.5 mt-1">
-              {(["not_started", "in_progress", "done"] as ProgressStatus[]).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => updateStatus(ch.id, s)}
-                  className={`flex-1 text-[11px] font-bold py-1.5 rounded-full border transition-all ${
-                    status === s
-                      ? STATUS_STYLES[s]
-                      : "border-ink/10 text-ink/40 bg-white hover:bg-ink/5"
-                  }`}
-                >
-                  {STATUS_LABELS[s]}
-                </button>
-              ))}
+            {/* 3 Status Switcher Buttons */}
+            <div className="grid grid-cols-3 gap-1.5">
+              {(["not_started", "in_progress", "done"] as ProgressStatus[]).map(
+                (st) => {
+                  const active = status === st;
+                  return (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => updateStatus(ch.id, st)}
+                      className={`py-2 text-[11px] font-bold rounded-xl border transition-all ${
+                        active
+                          ? STATUS_STYLES[st]
+                          : "bg-slate-50 dark:bg-white/5 text-slate-500 dark:text-slate-400 border-slate-200/70 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-white/10"
+                      }`}
+                    >
+                      {STATUS_LABELS[st]}
+                    </button>
+                  );
+                }
+              )}
             </div>
 
-            {/* 2. Revision (+ / -) & Question Practice Modules */}
-            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-ink/5">
-              {/* Revision Module with (+ / -) */}
-              <div className="flex items-center justify-between bg-ink/5 rounded-xl px-2.5 py-1.5 border border-ink/5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] font-bold text-ink/70">Rev:</span>
-                  <span className="text-xs font-black text-indigo-600 bg-white px-1.5 py-0.2 rounded border border-indigo-100">
+            {/* Revision & Practice Tracking Sub-Row */}
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-white/5">
+              {/* Revision Box */}
+              <div className="flex items-center justify-between bg-slate-50 dark:bg-[#162032] px-2.5 py-1.5 rounded-xl border border-slate-200/60 dark:border-white/5">
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  Rev:{" "}
+                  <b className="text-teal dark:text-[#2DD4BF] font-black">
                     {revCount}x
-                  </span>
-                </div>
+                  </b>
+                </span>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => handleRevisionDelta(ch.id, -1)}
-                    disabled={revCount === 0}
-                    className="w-6 h-6 rounded bg-white border border-ink/10 flex items-center justify-center text-xs font-bold text-ink/70 disabled:opacity-30 hover:bg-ink/5"
+                    className="w-5 h-5 rounded-md bg-white dark:bg-slate-700 text-slate-700 dark:text-white border border-slate-200 dark:border-white/10 font-black text-xs flex items-center justify-center hover:bg-slate-100 active:scale-95"
                   >
                     -
                   </button>
                   <button
                     type="button"
                     onClick={() => handleRevisionDelta(ch.id, 1)}
-                    className="w-6 h-6 rounded bg-indigo-600 text-white flex items-center justify-center text-xs font-bold hover:bg-indigo-700"
+                    className="w-5 h-5 rounded-md bg-teal text-white font-black text-xs flex items-center justify-center hover:bg-teal/90 active:scale-95 shadow-xs"
                   >
                     +
                   </button>
                 </div>
               </div>
 
-              {/* Question Practice Module */}
-              <div className="flex items-center justify-between bg-ink/5 rounded-xl px-2.5 py-1.5 border border-ink/5">
-                <div className="truncate pr-1">
-                  <span className="text-[10px] font-semibold text-slate block leading-none">
+              {/* Practice Log Box */}
+              <button
+                type="button"
+                onClick={() => setActiveModalChapter(ch)}
+                className="flex items-center justify-between bg-slate-50 dark:bg-[#162032] px-2.5 py-1.5 rounded-xl border border-slate-200/60 dark:border-white/5 hover:border-teal text-left transition-colors"
+              >
+                <div>
+                  <span className="text-[10px] text-slate-400 block leading-none">
                     Practice
                   </span>
-                  <span className="text-[11px] font-extrabold text-ink leading-tight">
-                    {pStats.solved > 0 ? `${pStats.solved} Qs (${pStats.accuracy}%)` : "0 Qs"}
+                  <span className="text-[11px] font-bold text-slate-800 dark:text-white">
+                    {pStats.solved} Qs
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveModalChapter(ch)}
-                  className="px-2 py-1 rounded bg-teal-600 hover:bg-teal-700 text-white text-[10px] font-extrabold shadow-2xs shrink-0"
-                >
+                <span className="text-[10px] font-bold text-teal dark:text-[#2DD4BF]">
                   + Log
-                </button>
-              </div>
+                </span>
+              </button>
             </div>
           </div>
         );
       })}
 
-      {chapters.length === 0 && (
-        <p className="text-sm text-slate text-center py-8">No chapters yet.</p>
-      )}
-
-      {/* Question Practice Popup Modal */}
+      {/* QUESTION PRACTICE LOGGING MODAL */}
       {activeModalChapter && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-ink/10 animate-in fade-in duration-150">
-            <div className="flex items-start justify-between pb-2 border-b border-ink/10 mb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#141C2B] text-slate-900 dark:text-white border border-slate-200 dark:border-white/10 p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-white/10">
               <div>
-                <h4 className="font-bold text-sm text-ink">Log Question Practice</h4>
-                <p className="text-[11px] text-slate truncate max-w-[220px]">
+                <h3 className="font-display text-base font-black text-slate-900 dark:text-white">
+                  Log Question Practice
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[220px]">
                   {activeModalChapter.title}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setActiveModalChapter(null)}
-                className="w-6 h-6 rounded-full bg-ink/5 text-ink/60 hover:text-ink text-xs font-bold flex items-center justify-center"
+                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs font-bold"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleSavePractice} className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-bold text-ink/70 block mb-0.5">
-                    Attempted Qs
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={attempted}
-                    onChange={(e) => setAttempted(parseInt(e.target.value) || 0)}
-                    className="w-full px-2.5 py-1.5 bg-ink/5 border border-ink/10 rounded-lg text-xs font-bold outline-none"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-teal-700 block mb-0.5">
-                    Correct (✅)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max={attempted}
-                    value={correct}
-                    onChange={(e) => setCorrect(parseInt(e.target.value) || 0)}
-                    className="w-full px-2.5 py-1.5 bg-teal-50 border border-teal-200 rounded-lg text-xs font-bold outline-none text-teal-800"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-bold text-rose-700 block mb-0.5">
-                    Incorrect (❌)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={incorrect}
-                    onChange={(e) => setIncorrect(parseInt(e.target.value) || 0)}
-                    className="w-full px-2.5 py-1.5 bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold outline-none text-rose-800"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate block mb-0.5">
-                    Unattempted
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={unattempted}
-                    onChange={(e) => setUnattempted(parseInt(e.target.value) || 0)}
-                    className="w-full px-2.5 py-1.5 bg-ink/5 border border-ink/10 rounded-lg text-xs font-bold outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-bold text-ink/70 block mb-0.5">
-                    Start Time
-                  </label>
-                  <input
-                    type="time"
-                    value={startTime}
-                    onChange={(e) => setStartTime(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-ink/5 border border-ink/10 rounded-lg text-xs"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-ink/70 block mb-0.5">
-                    End Time
-                  </label>
-                  <input
-                    type="time"
-                    value={endTime}
-                    onChange={(e) => setEndTime(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-ink/5 border border-ink/10 rounded-lg text-xs"
-                    required
-                  />
-                </div>
-              </div>
-
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[10px] font-bold text-ink/70 block mb-0.5">
-                  Date
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  Attempted Qs
                 </label>
                 <input
-                  type="date"
-                  value={attemptDate}
-                  onChange={(e) => setAttemptDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-ink/5 border border-ink/10 rounded-lg text-xs"
-                  required
+                  type="number"
+                  value={attempted}
+                  onChange={(e) => setAttempted(Number(e.target.value))}
+                  className="w-full p-2 rounded-xl text-xs font-bold bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white border border-slate-200 dark:border-white/10 outline-none focus:border-teal"
                 />
               </div>
 
-              <div className="p-2 bg-ink/5 rounded-lg flex items-center justify-between text-xs">
-                <span className="text-slate text-[11px]">Accuracy:</span>
-                <span className="font-black text-teal-700">
-                  {attempted > 0 ? Math.round((correct / attempted) * 100) : 0}%
-                </span>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  Correct (✅)
+                </label>
+                <input
+                  type="number"
+                  value={correct}
+                  onChange={(e) => setCorrect(Number(e.target.value))}
+                  className="w-full p-2 rounded-xl text-xs font-bold bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white border border-slate-200 dark:border-white/10 outline-none focus:border-teal"
+                />
               </div>
 
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setActiveModalChapter(null)}
-                  className="flex-1 py-2 rounded-xl border border-ink/10 text-xs font-semibold text-slate hover:bg-ink/5"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingPractice}
-                  className="flex-1 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs disabled:opacity-50"
-                >
-                  {isSavingPractice ? "Saving..." : "Save Log"}
-                </button>
+              <div>
+                <label className="text-[10px] font-bold text-rose-500 block mb-1">
+                  Incorrect (❌)
+                </label>
+                <input
+                  type="number"
+                  value={incorrect}
+                  onChange={(e) => setIncorrect(Number(e.target.value))}
+                  className="w-full p-2 rounded-xl text-xs font-bold bg-rose-50/50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40 outline-none"
+                />
               </div>
-            </form>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  Unattempted
+                </label>
+                <input
+                  type="number"
+                  value={unattempted}
+                  onChange={(e) => setUnattempted(Number(e.target.value))}
+                  className="w-full p-2 rounded-xl text-xs font-bold bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white border border-slate-200 dark:border-white/10 outline-none focus:border-teal"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  Start Time
+                </label>
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  className="w-full p-2 rounded-xl text-xs font-bold bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white border border-slate-200 dark:border-white/10"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  End Time
+                </label>
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  className="w-full p-2 rounded-xl text-xs font-bold bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white border border-slate-200 dark:border-white/10"
+                />
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-teal/10 dark:bg-teal/15 flex items-center justify-between text-xs font-bold text-teal dark:text-[#2DD4BF]">
+              <span>Calculated Accuracy:</span>
+              <span>
+                {attempted > 0 ? Math.round((correct / attempted) * 100) : 0}%
+              </span>
+            </div>
+
+            <button
+              type="button"
+              disabled={isSavingPractice}
+              onClick={handleSavePractice}
+              className="w-full py-3 bg-teal text-white rounded-xl text-xs font-bold shadow-md shadow-teal/20 hover:bg-teal/90 disabled:opacity-50"
+            >
+              {isSavingPractice ? "Saving Practice Log…" : "Save Practice Session"}
+            </button>
           </div>
         </div>
       )}
