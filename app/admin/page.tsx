@@ -70,11 +70,13 @@ export default function AdminPage() {
   const [newShiftTime, setNewShiftTime] = useState("");
   const [addingShift, setAddingShift] = useState(false);
 
-  // --- NOTIFICATION BROADCAST STATE ---
+  // --- NOTIFICATION & PUSH BROADCAST STATE ---
   const [notifTitle, setNotifTitle] = useState("");
   const [notifBody, setNotifBody] = useState("");
   const [notifAudience, setNotifAudience] = useState("all");
   const [notifActionUrl, setNotifActionUrl] = useState("");
+  const [deliveryChannel, setDeliveryChannel] = useState("both"); // 'both' | 'in_app' | 'push_only'
+  const [priority, setPriority] = useState("high"); // 'high' (sound) | 'normal' (silent)
   const [sendingNotif, setSendingNotif] = useState(false);
   const [notifSuccess, setNotifSuccess] = useState<string | null>(null);
   const [recentNotifs, setRecentNotifs] = useState<AdminNotification[]>([]);
@@ -198,7 +200,7 @@ export default function AdminPage() {
     }
   };
 
-  // Broadcast Notification
+  // Broadcast Notification (In-App + Firebase FCM)
   const handleSendNotification = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!notifTitle.trim() || !notifBody.trim()) return;
@@ -206,16 +208,33 @@ export default function AdminPage() {
     setNotifSuccess(null);
 
     try {
-      const { error } = await supabase.from("notifications").insert({
-        title: notifTitle.trim(),
-        body: notifBody.trim(),
-        target_audience: notifAudience,
-        action_url: notifActionUrl.trim() || null,
-      });
+      // 1. Insert into Supabase if In-App is selected
+      if (deliveryChannel === "both" || deliveryChannel === "in_app") {
+        const { error } = await supabase.from("notifications").insert({
+          title: notifTitle.trim(),
+          body: notifBody.trim(),
+          target_audience: notifAudience,
+          action_url: notifActionUrl.trim() || null,
+        });
+        if (error) throw error;
+      }
 
-      if (error) throw error;
+      // 2. Trigger Firebase Push API Route if Push is selected
+      if (deliveryChannel === "both" || deliveryChannel === "push_only") {
+        await fetch("/api/admin/send-notification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: notifTitle.trim(),
+            body: notifBody.trim(),
+            target_audience: notifAudience,
+            action_url: notifActionUrl.trim() || null,
+            priority,
+          }),
+        });
+      }
 
-      setNotifSuccess("Notification broadcasted successfully to all devices!");
+      setNotifSuccess("Notification broadcasted successfully!");
       setNotifTitle("");
       setNotifBody("");
       setNotifActionUrl("");
@@ -348,10 +367,13 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-paper pb-24">
+      {/* Header */}
       <header className="border-b border-ink/8 bg-white px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div>
-            <h1 className="font-display text-2xl font-bold">Admin Console</h1>
+            <h1 className="font-display text-2xl font-bold text-ink">
+              Admin Console
+            </h1>
             <p className="text-xs text-slate mt-0.5">
               PrepWise Operations & Notifications Center
             </p>
@@ -366,7 +388,7 @@ export default function AdminPage() {
       </header>
 
       <div className="max-w-4xl mx-auto px-6 pt-6 flex flex-col gap-8">
-        {/* 1. STATS */}
+        {/* 1. STATS SECTION */}
         {stats && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Total Aspirants" value={stats.totalUsers} />
@@ -384,11 +406,11 @@ export default function AdminPage() {
                 📢 Broadcast Push Notification
               </h2>
               <p className="text-xs text-slate">
-                Sends live in-app notifications and Firebase push to all students.
+                Sends instant In-App Bell notifications and Firebase Device Push.
               </p>
             </div>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-              Live Connected
+              FCM & Supabase Connected
             </span>
           </div>
 
@@ -405,7 +427,7 @@ export default function AdminPage() {
               </label>
               <input
                 type="text"
-                placeholder="e.g. 🎯 JEE Mains 2026 Session 1 Schedule Released!"
+                placeholder="e.g. 🎯 JEE Mains 2026 Shift Timings Released!"
                 value={notifTitle}
                 onChange={(e) => setNotifTitle(e.target.value)}
                 className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 outline-none focus:border-teal"
@@ -427,7 +449,7 @@ export default function AdminPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="text-[10px] font-bold text-slate block mb-0.5">
                   Target Audience
@@ -457,12 +479,43 @@ export default function AdminPage() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate block mb-0.5">
+                  Delivery Channels
+                </label>
+                <select
+                  value={deliveryChannel}
+                  onChange={(e) => setDeliveryChannel(e.target.value)}
+                  className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 bg-white"
+                >
+                  <option value="both">🔔 In-App + 📲 Device Push (FCM)</option>
+                  <option value="in_app">🔔 In-App Bell Only</option>
+                  <option value="push_only">📲 Device Push Only</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate block mb-0.5">
+                  Push Priority (Alert Sound)
+                </label>
+                <select
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value)}
+                  className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 bg-white"
+                >
+                  <option value="high">🚨 High Priority (Phone Sound & Vibrate)</option>
+                  <option value="normal">💬 Normal (Silent in notification bar)</option>
+                </select>
+              </div>
+            </div>
+
             <button
               type="submit"
               disabled={sendingNotif}
-              className="w-full py-3 bg-teal text-white rounded-xl text-xs font-bold shadow-md shadow-teal/20 hover:bg-teal/90 disabled:opacity-40 transition-all"
+              className="w-full py-3 bg-teal text-white rounded-xl text-xs font-bold shadow-md shadow-teal/20 hover:bg-teal/90 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
             >
-              {sendingNotif ? "Broadcasting..." : "Broadcast Notification to Students 🚀"}
+              <span>{sendingNotif ? "Broadcasting..." : "Send Notification Now 🚀"}</span>
             </button>
           </form>
 
