@@ -10,22 +10,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "var(--color-ink, #0F172A)",
-        paper: "var(--bg-paper, #F8F9FA)",
-        surface: "var(--color-surface, #FFFFFF)",
-        marigold: "#F59E0B",   // warm exam energy
-        teal: "#0D9488",       // modern vibrant teal
-        coral: "#EF4444",      // alerts & warnings
-        slate: "var(--color-slate, #64748B)",
-        "ink-100": "var(--color-ink-subtle, #1E293B)",
-        "ink-50": "var(--color-surface-elevated, #243044)",
+        ink: "#0F172A",
+        paper: "#F8FAFC",
+        marigold: "#F59E0B",
+        teal: "#0D9488",
+        coral: "#EF4444",
+        slate: "#64748B",
       },
       fontFamily: {
         display: ["var(--font-space-grotesk)", "sans-serif"],
         body: ["var(--font-inter)", "sans-serif"],
       },
       borderRadius: {
-        ticket: "14px",
+        ticket: "16px",
       },
     },
   },
