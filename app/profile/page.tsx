@@ -305,14 +305,14 @@ function BatchEditor({
   const [selectedBatch, setSelectedBatch] = useState<string>(currentBatch);
   const [customBatch, setCustomBatch] = useState<string>("");
 
-  const options =
+  const rawOptions: readonly string[] =
     mode === "Online"
-      ? ONLINE_BATCHES
+      ? (ONLINE_BATCHES as readonly string[])
       : mode === "Offline"
-      ? OFFLINE_INSTITUTES
+      ? (OFFLINE_INSTITUTES as readonly string[])
       : [];
 
-  const isCustom = !options.includes(selectedBatch) && selectedBatch !== "";
+  const isCustom = !rawOptions.includes(selectedBatch) && selectedBatch !== "";
 
   return (
     <div className="rounded-2xl border border-teal/30 p-4 mb-4 bg-white dark:bg-[#151D2A] shadow-md space-y-3">
@@ -342,7 +342,7 @@ function BatchEditor({
 
       {mode !== "Self" && (
         <div className="space-y-1.5 max-h-40 overflow-y-auto">
-          {options.map((opt) => (
+          {rawOptions.map((opt) => (
             <button
               key={opt}
               type="button"
