@@ -1,9 +1,8 @@
 // app/api/ai-doubt/route.ts
 import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
 
-// Dedicated Key for Doubt Solver or default
-const apiKey = process.env.GEMINI_API_KEY_DOUBT || process.env.GEMINI_API_KEY || "";
+const apiKey =
+  process.env.GEMINI_API_KEY_DOUBT || process.env.GEMINI_API_KEY || "";
 
 const MODELS_CASCADE = [
   "gemini-2.5-flash",
@@ -11,24 +10,39 @@ const MODELS_CASCADE = [
   "gemini-1.5-flash-8b",
 ];
 
-async function generateDoubtResponse(ai: GoogleGenAI, systemInstruction: string, prompt: string) {
-  let lastError: any = null;
+async function callGeminiDoubt(model: string, systemText: string, userText: string, key: string) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemText }] },
+      contents: [{ parts: [{ text: userText }] }],
+      generationConfig: {
+        temperature: 0.3,
+      },
+    }),
+  });
 
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Model ${model} returned ${res.status}: ${errText}`);
+  }
+
+  const json = await res.json();
+  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error(`Model ${model} gave empty response`);
+  return text;
+}
+
+async function generateDoubtResponse(systemText: string, userText: string, key: string) {
+  let lastError: any = null;
   for (const model of MODELS_CASCADE) {
     try {
-      const response = await ai.models.generateContent({
-        model: model,
-        contents: prompt,
-        config: {
-          systemInstruction: systemInstruction,
-          temperature: 0.3, // low temperature for precise mathematical/scientific accuracy
-        },
-      });
-      if (response && response.text) {
-        return response.text;
-      }
+      const result = await callGeminiDoubt(model, systemText, userText, key);
+      return result;
     } catch (err: any) {
-      console.warn(`Doubt Solver: Model ${model} busy/failed, switching to next...`, err?.message);
+      console.warn(`Doubt Solver: Model ${model} failed, switching to next...`, err?.message);
       lastError = err;
     }
   }
@@ -67,9 +81,7 @@ Student Doubt:
 ${query}
 `;
 
-    const ai = new GoogleGenAI({ apiKey });
-    const reply = await generateDoubtResponse(ai, systemInstruction, fullPrompt);
-
+    const reply = await generateDoubtResponse(systemInstruction, fullPrompt, apiKey);
     return NextResponse.json({ reply });
   } catch (error: any) {
     console.error("AI Doubt Endpoint Error:", error);
