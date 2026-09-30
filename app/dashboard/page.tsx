@@ -77,7 +77,7 @@ interface ContentCardItem {
   badge: string;
 }
 
-// ─── COLOR THEME PRESETS (AUTO-PICKED FOR ADMIN ENTRIES) ─────────────────────
+// ─── COLOR THEME PRESETS (AUTO-PICKED FOR DYNAMIC ENTRIES) ───────────────────
 const COLOR_PRESETS = [
   { color: "from-sky-500 to-indigo-600", bg: "bg-sky-50", border: "border-sky-200", text: "text-sky-950", badge: "bg-sky-500" },
   { color: "from-amber-500 to-orange-600", bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-950", badge: "bg-amber-500" },
@@ -94,7 +94,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "Dream is not that which you see while sleeping, it is something that does not let you sleep.",
     character: "Dr. A.P.J. Abdul Kalam",
     show: "Wings of Fire",
-    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b0/A._P._J._Abdul_Kalam_in_2015.jpg/220px-A._P._J._Abdul_Kalam_in_2015.jpg",
+    icon_or_sticker: "🚀",
     color: "from-sky-500 to-indigo-600",
     bg: "bg-sky-50",
     border: "border-sky-200",
@@ -106,7 +106,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "Arise, awake, and stop not until the goal is reached. Strength is life, weakness is death.",
     character: "Swami Vivekananda",
     show: "Rousing Call to Youth",
-    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Swami_Vivekananda_1893-09-signed.jpg/220px-Swami_Vivekananda_1893-09-signed.jpg",
+    icon_or_sticker: "⚡",
     color: "from-amber-500 to-orange-600",
     bg: "bg-amber-50",
     border: "border-amber-200",
@@ -118,7 +118,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "I do not believe in taking right decisions. I take decisions and then make them right.",
     character: "Ratan Tata",
     show: "Industrial Legend",
-    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/Ratan_Tata_photo.jpg/220px-Ratan_Tata_photo.jpg",
+    icon_or_sticker: "🏛️",
     color: "from-slate-700 to-slate-900",
     bg: "bg-slate-50",
     border: "border-slate-300",
@@ -130,7 +130,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "I have no special talents. I am only passionately curious. Solve the next problem.",
     character: "Albert Einstein",
     show: "Theoretical Physics",
-    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/Einstein_1921_by_F_Schmutzer_-_restoration.jpg/220px-Einstein_1921_by_F_Schmutzer_-_restoration.jpg",
+    icon_or_sticker: "💡",
     color: "from-purple-600 to-indigo-600",
     bg: "bg-purple-50",
     border: "border-purple-200",
@@ -142,7 +142,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "Nothing in life is to be feared, it is only to be understood. Now is the time to understand more.",
     character: "Marie Curie",
     show: "Double Nobel Laureate",
-    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Marie_Curie_c._1920s.jpg/220px-Marie_Curie_c._1920s.jpg",
+    icon_or_sticker: "🧪",
     color: "from-teal-600 to-cyan-600",
     bg: "bg-teal-50",
     border: "border-teal-200",
@@ -151,14 +151,14 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   },
 ];
 
-// ─── MEMES / ROASTS (GIF & STORAGE READY) ────────────────────────────────────
+// ─── MEMES / ROASTS (GIF & URL READY) ────────────────────────────────────────
 const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
   {
     id: "meme-1",
     quote: "PAKAD PAKAD PAKAD... Isne aaj tak numericals solve nahi kiye! Daya, iska phone tod do! 😂",
     character: "ACP Pradyuman",
     show: "CID (Meme Edition)",
-    icon_or_sticker: "https://media.giphy.com/media/26AHONQ99Rn7m4VGs/giphy.gif",
+    icon_or_sticker: "👮",
     color: "from-gray-600 to-gray-800",
     bg: "bg-gray-50",
     border: "border-gray-300",
@@ -167,10 +167,10 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
   },
   {
     id: "meme-2",
-    quote: "Iske paas Doraemon hai, lekin rank laane ke liye khud padhna padega! Insta band karo!",
+    quote: "Iske paas Doraemon hai, lekin rank laane ke liye khud padhna padega! Insta reels band karo!",
     character: "Nobita Nobi",
     show: "Doraemon",
-    icon_or_sticker: "https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif",
+    icon_or_sticker: "👓",
     color: "from-blue-500 to-cyan-500",
     bg: "bg-blue-50",
     border: "border-blue-200",
@@ -179,10 +179,10 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
   },
   {
     id: "meme-3",
-    quote: "Training? Homework? Test? Sab theek hai... par tune aaj kitne questions kiye? OK. 🤨",
+    quote: "Training? Homework? Test? Sab theek hai... par tune aaj kitne questions solve kiye? OK. 🤨",
     character: "Saitama",
     show: "One Punch Man",
-    icon_or_sticker: "https://media.giphy.com/media/VXJWha41vv5g4/giphy.gif",
+    icon_or_sticker: "🥊",
     color: "from-yellow-500 to-amber-500",
     bg: "bg-yellow-50",
     border: "border-yellow-200",
@@ -194,7 +194,7 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
     quote: "[Insert Meme / Roast Text Here - e.g. Kal subah 4 baje uthke padhenge... aur fir 10 baje aankh khuli]",
     character: "[Insert Character / Name]",
     show: "[Insert Show / Meme]",
-    icon_or_sticker: "https://media.giphy.com/media/l41lFw057lAJQMwg0/giphy.gif",
+    icon_or_sticker: "🍫",
     color: "from-purple-500 to-indigo-500",
     bg: "bg-purple-50",
     border: "border-purple-200",
@@ -206,7 +206,7 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
     quote: "[Insert Meme / Roast Text Here - e.g. Formula yaad kiya tha mechanics ka, exam me thermo pooch liya]",
     character: "[Insert Character / Name]",
     show: "[Insert Show / Meme]",
-    icon_or_sticker: "https://media.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif",
+    icon_or_sticker: "📱",
     color: "from-emerald-500 to-teal-500",
     bg: "bg-emerald-50",
     border: "border-emerald-200",
@@ -319,7 +319,6 @@ function HeroWidget({
 
     let unseen = deck.filter((item) => !seenIds.includes(item.id));
 
-    // If all items seen, reset seen tracker automatically
     if (unseen.length === 0) {
       seenIds = [];
       localStorage.removeItem(storageKey);
@@ -435,9 +434,9 @@ function HeroWidget({
             className={`w-full text-left rounded-2xl border ${currentItem.border} ${currentItem.bg} p-2.5 sm:p-3 active:scale-[0.98] transition-all relative overflow-hidden group shadow-2xs`}
           >
             <div className="flex items-center gap-3">
-              {/* ENLARGED MEDIA BOX (88px) — PROMINENT FOR ANIMATED GIFS & PORTRAITS */}
+              {/* ENLARGED MEDIA BOX (80px) — PROMINENT FOR ANIMATED GIFS & PORTRAITS */}
               <div
-                className={`w-20 h-20 sm:w-22 sm:h-22 rounded-2xl flex-shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden bg-black/5 relative`}
+                className={`w-20 h-20 rounded-2xl flex-shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden bg-black/5 relative`}
               >
                 {isExternalImage && !imgError ? (
                   <img
@@ -463,7 +462,7 @@ function HeroWidget({
                     — {currentItem.character}
                     <span className="font-medium text-slate-400"> · {currentItem.show}</span>
                   </p>
-                  <span className="text-[9px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1 shadow-2xs group-hover:bg-slate-100 transition-all">
+                  <span className="text-[9.5px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1 shadow-2xs group-hover:bg-slate-100 transition-all">
                     Tap ↻
                   </span>
                 </div>
@@ -568,7 +567,6 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
 
   return (
     <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] space-y-3">
-      {/* Header & 3-Way Mode Toggle */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
@@ -650,7 +648,7 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
               <div
                 key={idx}
                 onClick={() => setSelectedDay(d)}
-                className={`flex-1 min-w-[20px] max-w-[48px] h-full flex flex-col justify-end items-center cursor-pointer group transition-all`}
+                className="flex-1 min-w-[20px] max-w-[48px] h-full flex flex-col justify-end items-center cursor-pointer group transition-all"
               >
                 {d.totalMins > 0 ? (
                   <div
@@ -742,26 +740,21 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // AI Mentor & Doubt state
   const [mentorReport, setMentorReport] = useState<any>(null);
   const [mentorLoading, setMentorLoading] = useState(false);
   const [doubtOpen, setDoubtOpen] = useState(false);
 
-  // Telemetry metrics
   const [todayFocusMins, setTodayFocusMins] = useState(0);
   const [todayQuestions, setTodayQuestions] = useState(0);
   const [totalQuestionsAllTime, setTotalQuestionsAllTime] = useState(0);
   const [streak, setStreak] = useState(0);
 
-  // Raw past daily logs for history timeline
   const [allPastLogs, setAllPastLogs] = useState<DailyLogItem[]>([]);
 
-  // Backlogs List & Modal States
   const [backlogsList, setBacklogsList] = useState<TaskItem[]>([]);
   const [showAddBacklogModal, setShowAddBacklogModal] = useState(false);
   const [backlogMode, setBacklogMode] = useState<"chapter" | "other">("chapter");
 
-  // Form Fields
   const [selectedClass, setSelectedClass] = useState<string>("");
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
   const [selectedChapterId, setSelectedChapterId] = useState<string>("");
@@ -769,25 +762,21 @@ export default function DashboardPage() {
   const [backlogPriority, setBacklogPriority] = useState<"high" | "medium" | "low">("high");
   const [backlogDueDate, setBacklogDueDate] = useState<string>("");
 
-  // Dynamic Subjects & Chapters
   const [allSubjects, setAllSubjects] = useState<SubjectItem[]>([]);
   const [filteredSubjects, setFilteredSubjects] = useState<SubjectItem[]>([]);
   const [chaptersList, setChaptersList] = useState<ChapterItem[]>([]);
   const [submittingBacklog, setSubmittingBacklog] = useState(false);
 
-  // Study Distribution Today
   const [splitRatio, setSplitRatio] = useState({
     theory: 0,
     practice: 0,
     revision: 0,
   });
 
-  // Action tasks & mock logs
   const [todayTasks, setTodayTasks] = useState<TaskItem[]>([]);
   const [recentTests, setRecentTests] = useState<TestLog[]>([]);
   const [heatGrid, setHeatGrid] = useState<number[]>([]);
 
-  // Admin Connected Exam Schedules & Shifts
   const [examSchedules, setExamSchedules] = useState<ExamScheduleItem[]>([]);
   const [shiftsMap, setShiftsMap] = useState<Record<string, ExamShift[]>>({});
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
@@ -804,7 +793,6 @@ export default function DashboardPage() {
       }
       setUser(session.user);
 
-      // 1. Fetch User Profile
       const { data: uProf } = await supabase
         .from("users")
         .select("*")
@@ -850,7 +838,6 @@ export default function DashboardPage() {
       const isDropper = uProf?.class_level === "Dropper";
       const wantsBoards = !isDropper && Boolean(uProf?.wants_boards);
 
-      // 2. FETCH REAL ADMIN EXAM SCHEDULES
       const { data: schedules } = await supabase
         .from("exam_schedule")
         .select("*")
@@ -932,7 +919,6 @@ export default function DashboardPage() {
 
       const todayStr = new Date().toISOString().split("T")[0];
 
-      // 3. Daily Logs & Study Split
       const { data: pastLogs } = await supabase
         .from("daily_logs")
         .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, streak_count, log_date")
@@ -954,7 +940,6 @@ export default function DashboardPage() {
         revision: todayLog?.revision_minutes || 0,
       });
 
-      // 4. Questions Solved
       const { data: qLogs } = await supabase
         .from("question_logs")
         .select("question_count, log_date")
@@ -969,7 +954,6 @@ export default function DashboardPage() {
       const totalQ = (qLogs || []).reduce((acc, q) => acc + (q.question_count || 0), 0);
       setTotalQuestionsAllTime(totalQ);
 
-      // Build 84-day heatmap grid
       const grid = new Array(84).fill(0);
       if (pastLogs) {
         pastLogs.forEach((l) => {
@@ -988,7 +972,6 @@ export default function DashboardPage() {
       }
       setHeatGrid(grid);
 
-      // 5. Backlogs & Action Tasks
       const { data: userTasks } = await supabase
         .from("tasks")
         .select("id, title, priority, status, task_type, due_date")
@@ -1003,7 +986,6 @@ export default function DashboardPage() {
         setTodayTasks(regularTasks.slice(0, 4));
       }
 
-      // 6. Recent Mock Tests
       const { data: testData } = await supabase
         .from("test_logs")
         .select("id, test_name, total_marks, max_marks, accuracy, test_date")
@@ -1809,4 +1791,4 @@ export default function DashboardPage() {
       <BottomNav />
     </div>
   );
-}p
+}
