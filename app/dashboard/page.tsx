@@ -1,7 +1,7 @@
 // app/dashboard/page.tsx
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { supabase, classLevelsForContent } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import BottomNav from "@/components/dashboard/BottomNav";
@@ -56,275 +56,208 @@ interface ChapterItem {
   subject_id: string;
 }
 
+interface DailyLogItem {
+  log_date: string;
+  study_time_minutes: number;
+  theory_minutes?: number;
+  practice_minutes?: number;
+  revision_minutes?: number;
+}
+
 // ─── SVG STICKERS ────────────────────────────────────────────────────────────
-// Each returns a small SVG face/icon as a React element
 const STICKERS: Record<string, JSX.Element> = {
   nobita: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Nobita - round face, glasses, sleepy eyes */}
       <circle cx="20" cy="21" r="14" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1.2"/>
-      {/* Hair */}
       <ellipse cx="20" cy="9" rx="10" ry="5" fill="#222"/>
       <rect x="10" y="9" width="20" height="4" fill="#222"/>
-      {/* Glasses */}
       <circle cx="15" cy="21" r="4.5" fill="none" stroke="#333" strokeWidth="1.5"/>
       <circle cx="25" cy="21" r="4.5" fill="none" stroke="#333" strokeWidth="1.5"/>
       <line x1="19.5" y1="21" x2="20.5" y2="21" stroke="#333" strokeWidth="1.5"/>
       <line x1="10.5" y1="21" x2="9" y2="20" stroke="#333" strokeWidth="1.5"/>
       <line x1="29.5" y1="21" x2="31" y2="20" stroke="#333" strokeWidth="1.5"/>
-      {/* Sleepy eyes */}
       <line x1="13" y1="21" x2="17" y2="21" stroke="#555" strokeWidth="1.5"/>
       <line x1="23" y1="21" x2="27" y2="21" stroke="#555" strokeWidth="1.5"/>
-      {/* Mouth - droopy */}
       <path d="M16 27 Q20 25 24 27" stroke="#C0706A" strokeWidth="1.2" fill="none"/>
-      {/* Blush */}
       <ellipse cx="12" cy="26" rx="3" ry="1.5" fill="#FFB3B3" opacity="0.6"/>
       <ellipse cx="28" cy="26" rx="3" ry="1.5" fill="#FFB3B3" opacity="0.6"/>
-      {/* ZZZ */}
       <text x="30" y="12" fontSize="6" fill="#888" fontWeight="bold">z</text>
       <text x="33" y="8" fontSize="5" fill="#888" fontWeight="bold">z</text>
     </svg>
   ),
   daya: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* CID Daya - moustache cop face */}
       <circle cx="20" cy="21" r="14" fill="#D4956A" stroke="#A0673A" strokeWidth="1.2"/>
-      {/* Hair - black side parted */}
       <ellipse cx="20" cy="9" rx="11" ry="5" fill="#111"/>
       <rect x="9" y="9" width="22" height="5" fill="#111"/>
-      {/* Eyebrows - angry thick */}
       <rect x="12" y="16" width="6" height="2" rx="1" fill="#111" transform="rotate(-10 15 17)"/>
       <rect x="22" y="16" width="6" height="2" rx="1" fill="#111" transform="rotate(10 25 17)"/>
-      {/* Eyes - determined */}
       <ellipse cx="15" cy="20" rx="2.5" ry="2" fill="#111"/>
       <ellipse cx="25" cy="20" rx="2.5" ry="2" fill="#111"/>
       <circle cx="15.5" cy="19.5" r="0.8" fill="white"/>
       <circle cx="25.5" cy="19.5" r="0.8" fill="white"/>
-      {/* Big Moustache */}
       <path d="M13 25 Q17 22 20 24 Q23 22 27 25 Q23 28 20 26 Q17 28 13 25Z" fill="#111"/>
-      {/* CID badge hint */}
       <rect x="16" y="31" width="8" height="4" rx="1" fill="#FFD700" opacity="0.8"/>
       <text x="17.5" y="34.5" fontSize="3.5" fill="#333" fontWeight="bold">CID</text>
     </svg>
   ),
   naruto: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Naruto - spiky yellow hair, whiskers */}
       <circle cx="20" cy="22" r="13" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      {/* Spiky hair */}
       {[14,17,20,23,26].map((x,i) => (
         <polygon key={i} points={`${x},12 ${x+2},4 ${x+4},12`} fill="#F5C518"/>
       ))}
       <ellipse cx="20" cy="12" rx="11" ry="5" fill="#F5C518"/>
-      {/* Headband */}
       <rect x="9" y="13" width="22" height="4" rx="1" fill="#4A7FC1"/>
       <rect x="16" y="13" width="8" height="4" fill="#8BA8D4"/>
-      {/* Eyes - determined squint */}
       <ellipse cx="15" cy="22" rx="2.5" ry="2.5" fill="#4A90D9"/>
       <ellipse cx="25" cy="22" rx="2.5" ry="2.5" fill="#4A90D9"/>
       <circle cx="15" cy="22" r="1.2" fill="#111"/>
       <circle cx="25" cy="22" r="1.2" fill="#111"/>
-      {/* Whisker marks */}
       <line x1="9" y1="22" x2="13" y2="23" stroke="#C8956A" strokeWidth="1"/>
       <line x1="9" y1="25" x2="13" y2="25" stroke="#C8956A" strokeWidth="1"/>
       <line x1="27" y1="23" x2="31" y2="22" stroke="#C8956A" strokeWidth="1"/>
       <line x1="27" y1="25" x2="31" y2="25" stroke="#C8956A" strokeWidth="1"/>
-      {/* Smile */}
       <path d="M15 28 Q20 32 25 28" stroke="#C0706A" strokeWidth="1.5" fill="none"/>
     </svg>
   ),
   saitama: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Saitama - bald, dead inside face */}
       <circle cx="20" cy="21" r="14" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      {/* Completely bald - no hair */}
-      {/* Flat dead eyes */}
       <ellipse cx="15" cy="19" rx="3" ry="2" fill="white" stroke="#555" strokeWidth="0.8"/>
       <ellipse cx="25" cy="19" rx="3" ry="2" fill="white" stroke="#555" strokeWidth="0.8"/>
       <circle cx="15" cy="19.5" r="1.2" fill="#333"/>
       <circle cx="25" cy="19.5" r="1.2" fill="#333"/>
-      {/* Flat mouth - utter boredom */}
       <line x1="16" y1="27" x2="24" y2="27" stroke="#999" strokeWidth="1.5"/>
-      {/* Cape collar hint */}
       <path d="M10 33 Q20 36 30 33" fill="#FFFF00" stroke="#CCC" strokeWidth="0.8"/>
-      {/* "OK" text */}
       <text x="31" y="14" fontSize="5.5" fill="#888" fontWeight="bold">ok.</text>
     </svg>
   ),
   rocklee: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Rock Lee - bowl cut, thick eyebrows, determined */}
       <circle cx="20" cy="22" r="13" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      {/* Bowl cut black hair */}
       <ellipse cx="20" cy="13" rx="13" ry="7" fill="#111"/>
       <rect x="7" y="13" width="26" height="5" fill="#111"/>
-      {/* THICK eyebrows */}
       <rect x="11" y="18" width="7" height="2.5" rx="1.2" fill="#111"/>
       <rect x="22" y="18" width="7" height="2.5" rx="1.2" fill="#111"/>
-      {/* Round determined eyes */}
       <circle cx="15" cy="23" r="3" fill="#4A4A00"/>
       <circle cx="25" cy="23" r="3" fill="#4A4A00"/>
       <circle cx="14.5" cy="22.5" r="1" fill="white"/>
       <circle cx="24.5" cy="22.5" r="1" fill="white"/>
-      {/* Fire smile */}
       <path d="M14 29 Q20 34 26 29" stroke="#C0706A" strokeWidth="1.8" fill="none"/>
-      {/* Sweat drop - training hard */}
       <ellipse cx="32" cy="18" rx="1.5" ry="2.5" fill="#88CCFF" opacity="0.8"/>
     </svg>
   ),
   shinchan: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Shinchan - round head, tiny eyes, big mouth */}
       <circle cx="20" cy="22" r="14" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1.2"/>
-      {/* Black hair top */}
       <ellipse cx="20" cy="10" rx="12" ry="6" fill="#111"/>
       <rect x="8" y="10" width="24" height="5" fill="#111"/>
-      {/* TINY dot eyes */}
       <circle cx="15" cy="21" r="2" fill="#111"/>
       <circle cx="25" cy="21" r="2" fill="#111"/>
       <circle cx="14.5" cy="20.5" r="0.6" fill="white"/>
       <circle cx="24.5" cy="20.5" r="0.6" fill="white"/>
-      {/* Big cheeky grin */}
       <path d="M12 27 Q20 33 28 27" fill="#E8A0A0" stroke="#C0706A" strokeWidth="1"/>
       <path d="M14 27 Q20 31 26 27" fill="#FF8888"/>
-      {/* Blush circles */}
       <circle cx="11" cy="26" r="3" fill="#FFB3B3" opacity="0.5"/>
       <circle cx="29" cy="26" r="3" fill="#FFB3B3" opacity="0.5"/>
-      {/* Naughty eyebrow */}
       <path d="M12 18 Q15 16 18 18" stroke="#111" strokeWidth="1.5" fill="none"/>
       <path d="M22 18 Q25 16 28 18" stroke="#111" strokeWidth="1.5" fill="none"/>
     </svg>
   ),
   doraemon: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Doraemon - blue round face, white face patch, red nose */}
       <circle cx="20" cy="21" r="14" fill="#00AADD"/>
-      {/* White face patch */}
       <ellipse cx="20" cy="24" rx="10" ry="9" fill="white"/>
-      {/* Eyes */}
       <circle cx="15" cy="16" r="4" fill="white"/>
       <circle cx="25" cy="16" r="4" fill="white"/>
       <circle cx="15.5" cy="16.5" r="2.5" fill="#111"/>
       <circle cx="25.5" cy="16.5" r="2.5" fill="#111"/>
       <circle cx="15" cy="15.5" r="0.8" fill="white"/>
-      <circle cx="25" cy="15.5" r="0.8" fill="white"/>
-      {/* Red nose */}
+      <circle cx="25.5" cy="15.5" r="0.8" fill="white"/>
       <circle cx="20" cy="22" r="2.5" fill="#FF3333"/>
-      {/* Whiskers */}
       <line x1="5" y1="22" x2="15" y2="24" stroke="#555" strokeWidth="0.8"/>
       <line x1="5" y1="26" x2="15" y2="26" stroke="#555" strokeWidth="0.8"/>
       <line x1="25" y1="24" x2="35" y2="22" stroke="#555" strokeWidth="0.8"/>
       <line x1="25" y1="26" x2="35" y2="26" stroke="#555" strokeWidth="0.8"/>
-      {/* Big smile */}
       <path d="M12 28 Q20 34 28 28" fill="#FF3333" stroke="#CC0000" strokeWidth="0.8"/>
-      {/* Bell */}
       <circle cx="20" cy="35" r="2.5" fill="#FFD700" stroke="#CCA000" strokeWidth="0.8"/>
     </svg>
   ),
   luffy: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Luffy - straw hat, scar under eye, big grin */}
       <circle cx="20" cy="23" r="13" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      {/* Straw hat */}
       <ellipse cx="20" cy="12" rx="16" ry="4" fill="#D4A840" stroke="#A07820" strokeWidth="1"/>
       <path d="M10 12 Q20 18 30 12" fill="#C89030" stroke="#A07820" strokeWidth="0.8"/>
-      {/* Red hat band */}
       <path d="M8 13 Q20 19 32 13" stroke="#CC2222" strokeWidth="2" fill="none"/>
-      {/* Eyes - wide excited */}
       <circle cx="15" cy="23" r="3" fill="#1A1A1A"/>
       <circle cx="25" cy="23" r="3" fill="#1A1A1A"/>
       <circle cx="14.2" cy="22.2" r="1" fill="white"/>
       <circle cx="24.2" cy="22.2" r="1" fill="white"/>
-      {/* Scar under left eye */}
       <line x1="13" y1="27" x2="17" y2="29" stroke="#CC4444" strokeWidth="1.5"/>
-      {/* HUGE grin */}
       <path d="M11 29 Q20 36 29 29" fill="#FF8888" stroke="#CC4444" strokeWidth="1"/>
       <path d="M13 29 Q20 34 27 29" fill="#FF6666"/>
     </svg>
   ),
   vegeta: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Vegeta - pointy widow's peak, scowl, Prince attitude */}
       <circle cx="20" cy="22" r="13" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      {/* Widow's peak spiky hair */}
       <polygon points="20,6 14,14 26,14" fill="#111"/>
       <polygon points="12,10 8,16 16,16" fill="#111"/>
       <polygon points="28,10 24,16 32,16" fill="#111"/>
       <rect x="8" y="14" width="24" height="5" fill="#111"/>
-      {/* Angry scowl eyebrows */}
       <line x1="11" y1="18" x2="18" y2="20" stroke="#111" strokeWidth="2.5"/>
       <line x1="29" y1="18" x2="22" y2="20" stroke="#111" strokeWidth="2.5"/>
-      {/* Sharp eyes */}
       <ellipse cx="15" cy="23" rx="2.5" ry="2" fill="#111"/>
       <ellipse cx="25" cy="23" rx="2.5" ry="2" fill="#111"/>
       <circle cx="14.5" cy="22.5" r="0.7" fill="white"/>
       <circle cx="24.5" cy="22.5" r="0.7" fill="white"/>
-      {/* Scowl */}
       <path d="M15 29 Q20 27 25 29" stroke="#A06050" strokeWidth="1.5" fill="none"/>
-      {/* "9000!" */}
       <text x="28" y="10" fontSize="4.5" fill="#FF4400" fontWeight="bold">9000!</text>
     </svg>
   ),
   light: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Light Yagami - Death Note, genius smirk */}
       <circle cx="20" cy="22" r="13" fill="#F5DEB3" stroke="#DEB887" strokeWidth="1"/>
-      {/* Brown hair */}
       <ellipse cx="20" cy="11" rx="11" ry="5" fill="#8B4513"/>
       <rect x="9" y="11" width="22" height="5" fill="#8B4513"/>
-      {/* Side swept hair */}
       <path d="M9 13 Q13 10 18 12" fill="#8B4513"/>
-      {/* Sharp calculating eyes */}
       <ellipse cx="15" cy="22" rx="2.8" ry="2.2" fill="#8B4513"/>
       <ellipse cx="25" cy="22" rx="2.8" ry="2.2" fill="#8B4513"/>
       <circle cx="14.5" cy="21.8" r="0.8" fill="white"/>
       <circle cx="24.5" cy="21.8" r="0.8" fill="white"/>
-      {/* Smug genius smirk */}
       <path d="M16 28 Q20 31 24 28" stroke="#C08060" strokeWidth="1.2" fill="none"/>
-      {/* Death note corner */}
       <rect x="26" y="28" width="8" height="10" rx="1" fill="#111"/>
       <text x="27" y="35" fontSize="3.5" fill="white">NOTE</text>
     </svg>
   ),
   itachi: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Itachi - long face, Sharingan, calm */}
       <ellipse cx="20" cy="22" rx="12" ry="14" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      {/* Long black hair */}
       <ellipse cx="20" cy="10" rx="12" ry="6" fill="#111"/>
       <rect x="8" y="10" width="4" height="20" fill="#111"/>
       <rect x="28" y="10" width="4" height="20" fill="#111"/>
-      {/* Headband */}
       <rect x="8" y="14" width="24" height="3" fill="#444"/>
-      {/* Sharingan eyes */}
       <circle cx="15" cy="23" r="3" fill="#CC1111"/>
       <circle cx="25" cy="23" r="3" fill="#CC1111"/>
       <circle cx="15" cy="23" r="1.5" fill="#111"/>
       <circle cx="25" cy="23" r="1.5" fill="#111"/>
-      {/* Calm mouth */}
       <line x1="16" y1="30" x2="24" y2="30" stroke="#C0706A" strokeWidth="1"/>
-      {/* Clan marks */}
       <line x1="10" y1="26" x2="13" y2="28" stroke="#8B0000" strokeWidth="1"/>
       <line x1="27" y1="28" x2="30" y2="26" stroke="#8B0000" strokeWidth="1"/>
     </svg>
   ),
   gru: (
     <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      {/* Gru - long nose, bald, striped scarf, meme face */}
       <ellipse cx="20" cy="20" rx="11" ry="13" fill="#B8B8C8" stroke="#8888AA" strokeWidth="1"/>
-      {/* Bald head shine */}
       <ellipse cx="16" cy="12" rx="3" ry="2" fill="white" opacity="0.3"/>
-      {/* Tiny eyes */}
       <circle cx="16" cy="19" r="2" fill="#222"/>
       <circle cx="24" cy="19" r="2" fill="#222"/>
       <circle cx="15.5" cy="18.5" r="0.6" fill="white"/>
       <circle cx="23.5" cy="18.5" r="0.6" fill="white"/>
-      {/* LONG nose */}
       <ellipse cx="20" cy="25" rx="3" ry="6" fill="#A8A8B8" stroke="#8888AA" strokeWidth="0.8"/>
-      {/* Scarf stripes */}
       <rect x="9" y="31" width="22" height="3" rx="1" fill="#888"/>
       <rect x="9" y="34" width="22" height="2" rx="1" fill="#555"/>
-      {/* Meme plan arms */}
       <line x1="9" y1="25" x2="3" y2="20" stroke="#B8B8C8" strokeWidth="3"/>
       <line x1="31" y1="25" x2="37" y2="20" stroke="#B8B8C8" strokeWidth="3"/>
     </svg>
@@ -489,17 +422,14 @@ function HeroWidget({
 }) {
   const [hour, setHour] = useState(new Date().getHours());
   const [quoteIdx, setQuoteIdx] = useState(() => {
-    // Rotate daily based on date so it changes each day but stays same in session
     return new Date().getDate() % ANIME_QUOTES.length;
   });
 
   useEffect(() => {
-    // Update hour every minute
     const interval = setInterval(() => setHour(new Date().getHours()), 60_000);
     return () => clearInterval(interval);
   }, []);
 
-  // Tap to cycle quote
   const cycleQuote = () => setQuoteIdx((i) => (i + 1) % ANIME_QUOTES.length);
 
   const q = ANIME_QUOTES[quoteIdx];
@@ -508,11 +438,9 @@ function HeroWidget({
 
   return (
     <div className="rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-slate-200/80 bg-white">
-      {/* Top bar — gradient accent */}
       <div className={`h-1.5 w-full bg-gradient-to-r ${q.color}`} />
 
       <div className="p-4 pb-3">
-        {/* Greeting row */}
         <div className="flex items-start justify-between gap-2 mb-3">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">
@@ -523,7 +451,6 @@ function HeroWidget({
             </h2>
           </div>
 
-          {/* Streak badge */}
           <div
             className={`flex-shrink-0 flex flex-col items-center justify-center rounded-2xl px-3 py-2 ${
               streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"
@@ -543,7 +470,6 @@ function HeroWidget({
           </div>
         </div>
 
-        {/* Stats row */}
         <div className="flex items-center gap-2 mb-3">
           <div className="flex-1 bg-teal-50 border border-teal-100 rounded-xl px-3 py-2 flex items-center gap-2">
             <span className="text-base">⏱️</span>
@@ -561,14 +487,12 @@ function HeroWidget({
           </div>
         </div>
 
-        {/* Anime Quote Card — tap to change */}
         <button
           type="button"
           onClick={cycleQuote}
           className={`w-full text-left rounded-xl border ${q.border} ${q.bg} p-3 active:scale-[0.98] transition-all`}
         >
           <div className="flex items-start gap-2.5">
-            {/* SVG Character Sticker */}
             <div
               className={`w-11 h-11 rounded-2xl flex-shrink-0 flex items-center justify-center ${q.badge} shadow-sm overflow-hidden p-0.5`}
             >
@@ -592,7 +516,6 @@ function HeroWidget({
           </div>
         </button>
 
-        {/* Streak message */}
         {streak > 0 && (
           <p className="text-[10px] font-bold text-orange-600 text-center mt-2.5">
             {streak >= 7
@@ -607,6 +530,267 @@ function HeroWidget({
             Start a focus session today to build your streak! 💪
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── NEW WIDGET: MULTI-DAY STUDY SPLIT TIMELINE (Weekly / Monthly / Custom) ─────
+function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
+  const [rangeMode, setRangeMode] = useState<"weekly" | "monthly" | "custom">("weekly");
+  const [customStart, setCustomStart] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().split("T")[0];
+  });
+  const [customEnd, setCustomEnd] = useState<string>(() => {
+    return new Date().toISOString().split("T")[0];
+  });
+  const [selectedDay, setSelectedDay] = useState<any | null>(null);
+
+  // Filter logs according to selected range
+  const chartData = useMemo(() => {
+    const today = new Date();
+    let numDays = 7;
+    let startDate = new Date();
+
+    if (rangeMode === "weekly") {
+      numDays = 7;
+      startDate.setDate(today.getDate() - 6);
+    } else if (rangeMode === "monthly") {
+      numDays = 30;
+      startDate.setDate(today.getDate() - 29);
+    } else {
+      const s = new Date(customStart);
+      const e = new Date(customEnd);
+      const diff = Math.max(1, Math.ceil((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+      numDays = Math.min(diff, 60); // Cap at 60 for mobile performance
+      startDate = s;
+    }
+
+    const logMap = new Map<string, DailyLogItem>();
+    logs.forEach((l) => logMap.set(l.log_date, l));
+
+    const result = [];
+    for (let i = 0; i < numDays; i++) {
+      const current = new Date(startDate);
+      current.setDate(startDate.getDate() + i);
+      const dateKey = current.toISOString().split("T")[0];
+      const found = logMap.get(dateKey);
+
+      const totalMins = found?.study_time_minutes || 0;
+      const theory = found?.theory_minutes || 0;
+      const practice = found?.practice_minutes || 0;
+      const revision = found?.revision_minutes || 0;
+
+      result.push({
+        dateKey,
+        label: current.toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: numDays > 14 ? "numeric" : "short",
+          weekday: numDays <= 7 ? "narrow" : undefined,
+        }),
+        fullDate: current.toLocaleDateString("en-IN", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        }),
+        totalMins,
+        totalHours: totalMins / 60,
+        theoryHours: theory / 60,
+        practiceHours: practice / 60,
+        revisionHours: revision / 60,
+      });
+    }
+    return result;
+  }, [logs, rangeMode, customStart, customEnd]);
+
+  // Overall metrics in selected range
+  const totalMinsInRange = chartData.reduce((acc, d) => acc + d.totalMins, 0);
+  const avgMinsInRange = chartData.length > 0 ? totalMinsInRange / chartData.length : 0;
+  const maxHours = Math.max(8, ...chartData.map((d) => d.totalHours)); // Ceiling of at least 8h
+
+  // Set default active day if none selected
+  const activeDetail = selectedDay || chartData[chartData.length - 1];
+
+  return (
+    <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] space-y-3">
+      {/* Header & 3-Way Mode Toggle */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+            <span>📊</span> Study Split History
+          </h3>
+          <p className="text-[10px] font-semibold text-slate-500">
+            Daily duration & subject activity breakdown
+          </p>
+        </div>
+
+        {/* 3 Range Toggle Buttons */}
+        <div className="flex p-0.5 bg-slate-100 rounded-xl border border-slate-200 text-[10px] font-black self-start sm:self-auto">
+          {(["weekly", "monthly", "custom"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setRangeMode(m)}
+              className={`px-2.5 py-1 rounded-lg transition-all capitalize ${
+                rangeMode === m
+                  ? "bg-white text-slate-900 shadow-2xs font-black"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Custom Date Pickers (Shown only when Custom is active) */}
+      {rangeMode === "custom" && (
+        <div className="flex items-center gap-2 p-2 bg-slate-50 rounded-xl border border-slate-200 text-[10px] font-bold">
+          <div className="flex-1">
+            <span className="text-slate-500 block mb-0.5">From</span>
+            <input
+              type="date"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+              className="w-full bg-white p-1 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800"
+            />
+          </div>
+          <div className="flex-1">
+            <span className="text-slate-500 block mb-0.5">To</span>
+            <input
+              type="date"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+              className="w-full bg-white p-1 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Summary KPI Pills */}
+      <div className="grid grid-cols-2 gap-2 text-center text-xs">
+        <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2">
+          <span className="text-[9px] font-bold text-slate-500 uppercase block">Total Focused</span>
+          <span className="text-sm font-black text-slate-900">
+            {(totalMinsInRange / 60).toFixed(1)}h
+          </span>
+        </div>
+        <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2">
+          <span className="text-[9px] font-bold text-slate-500 uppercase block">Daily Average</span>
+          <span className="text-sm font-black text-teal-700">
+            {(avgMinsInRange / 60).toFixed(1)}h / day
+          </span>
+        </div>
+      </div>
+
+      {/* ─── 3-COLORED STACKED BARS CHART ─── */}
+      <div className="pt-2">
+        <div className="h-36 flex items-end gap-1.5 sm:gap-2 px-1 border-b border-slate-200 pb-1.5 overflow-x-auto no-scrollbar">
+          {chartData.map((d, idx) => {
+            const isSelected = activeDetail?.dateKey === d.dateKey;
+            // Total height percentage relative to max scale
+            const totalPct = Math.min(100, Math.round((d.totalHours / maxHours) * 100));
+
+            // Breakdown proportions inside the bar
+            const totalHoursClean = d.totalHours > 0 ? d.totalHours : 1;
+            const theoryFrac = d.theoryHours / totalHoursClean;
+            const practiceFrac = d.practiceHours / totalHoursClean;
+            const revisionFrac = d.revisionHours / totalHoursClean;
+
+            return (
+              <div
+                key={idx}
+                onClick={() => setSelectedDay(d)}
+                className={`flex-1 min-w-[20px] max-w-[48px] h-full flex flex-col justify-end items-center cursor-pointer group transition-all`}
+              >
+                {/* 3-colored stacked bar */}
+                {d.totalMins > 0 ? (
+                  <div
+                    style={{ height: `${Math.max(totalPct, 8)}%` }}
+                    className={`w-full rounded-t-md overflow-hidden flex flex-col-reverse shadow-xs transition-transform ${
+                      isSelected ? "ring-2 ring-slate-900 scale-105" : "hover:opacity-90"
+                    }`}
+                  >
+                    {/* Theory segment (Bottom/Stack) */}
+                    <div
+                      style={{ height: `${Math.round(theoryFrac * 100)}%` }}
+                      className="w-full bg-amber-500"
+                      title={`Theory: ${d.theoryHours.toFixed(1)}h`}
+                    />
+                    {/* Practice segment (Middle) */}
+                    <div
+                      style={{ height: `${Math.round(practiceFrac * 100)}%` }}
+                      className="w-full bg-teal-600"
+                      title={`Practice: ${d.practiceHours.toFixed(1)}h`}
+                    />
+                    {/* Revision segment (Top) */}
+                    <div
+                      style={{ height: `${Math.round(revisionFrac * 100)}%` }}
+                      className="w-full bg-indigo-600"
+                      title={`Revision: ${d.revisionHours.toFixed(1)}h`}
+                    />
+                  </div>
+                ) : (
+                  /* Zero study time subtle dot indicator */
+                  <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mb-1" />
+                )}
+
+                {/* Day label below */}
+                <span
+                  className={`text-[9px] mt-1 font-bold truncate ${
+                    isSelected ? "text-slate-900 font-black" : "text-slate-400"
+                  }`}
+                >
+                  {d.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Selected Day Inspect Card */}
+      {activeDetail && (
+        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+          <div>
+            <span className="text-[10px] font-bold text-slate-500 block">
+              {activeDetail.fullDate}
+            </span>
+            <span className="text-sm font-black text-slate-900">
+              {activeDetail.totalHours.toFixed(1)}h Total
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2.5 text-[10px] font-bold">
+            <span className="flex items-center gap-1 text-amber-800">
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
+              {activeDetail.theoryHours.toFixed(1)}h Theory
+            </span>
+            <span className="flex items-center gap-1 text-teal-800">
+              <span className="w-2 h-2 rounded-full bg-teal-600" />
+              {activeDetail.practiceHours.toFixed(1)}h Practice
+            </span>
+            <span className="flex items-center gap-1 text-indigo-800">
+              <span className="w-2 h-2 rounded-full bg-indigo-600" />
+              {activeDetail.revisionHours.toFixed(1)}h Rev
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Legend */}
+      <div className="flex items-center justify-center gap-4 text-[10px] font-bold text-slate-500 pt-1">
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm bg-amber-500" /> Theory
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm bg-teal-600" /> Practice
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm bg-indigo-600" /> Revision
+        </span>
       </div>
     </div>
   );
@@ -630,6 +814,9 @@ export default function DashboardPage() {
   const [totalQuestionsAllTime, setTotalQuestionsAllTime] = useState(0);
   const [streak, setStreak] = useState(0);
 
+  // Raw past daily logs for history timeline
+  const [allPastLogs, setAllPastLogs] = useState<DailyLogItem[]>([]);
+
   // Backlogs List & Modal States
   const [backlogsList, setBacklogsList] = useState<TaskItem[]>([]);
   const [showAddBacklogModal, setShowAddBacklogModal] = useState(false);
@@ -649,7 +836,7 @@ export default function DashboardPage() {
   const [chaptersList, setChaptersList] = useState<ChapterItem[]>([]);
   const [submittingBacklog, setSubmittingBacklog] = useState(false);
 
-  // Study Distribution
+  // Study Distribution Today
   const [splitRatio, setSplitRatio] = useState({
     theory: 0,
     practice: 0,
@@ -815,6 +1002,10 @@ export default function DashboardPage() {
         .eq("user_id", session.user.id)
         .order("log_date", { ascending: false })
         .limit(84);
+
+      if (pastLogs) {
+        setAllPastLogs(pastLogs);
+      }
 
       const todayLog = pastLogs?.find((l) => l.log_date === todayStr);
       setTodayFocusMins(todayLog?.study_time_minutes || 0);
@@ -1046,7 +1237,6 @@ export default function DashboardPage() {
     user?.user_metadata?.full_name ||
     user?.user_metadata?.name ||
     "Champion";
-  // Use first name only
   const firstName = studentName.split(" ")[0];
 
   return (
@@ -1232,7 +1422,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 5. STUDY DISTRIBUTION RATIO */}
+        {/* 5. TODAY'S STUDY DISTRIBUTION RATIO */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
@@ -1271,7 +1461,10 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 6. 12-WEEK CONSISTENCY MATRIX */}
+        {/* 6. NEW: MULTI-DAY STUDY SPLIT TIMELINE (Weekly / Monthly / Custom) */}
+        <StudySplitTimelineWidget logs={allPastLogs} />
+
+        {/* 7. 12-WEEK CONSISTENCY MATRIX */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
           <div className="flex items-center justify-between text-xs font-black mb-3">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
@@ -1315,7 +1508,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 7. PRIORITY ACTION ITEMS */}
+        {/* 8. PRIORITY ACTION ITEMS */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
@@ -1363,7 +1556,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 8. QUICK ROUTE CARDS */}
+        {/* 9. QUICK ROUTE CARDS */}
         <div className="grid grid-cols-2 gap-2.5">
           <button
             type="button"
@@ -1403,7 +1596,7 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {/* 9. RECENT MOCK TESTS */}
+        {/* 10. RECENT MOCK TESTS */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
@@ -1458,7 +1651,7 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* 10. BACKLOG MODAL */}
+      {/* 11. BACKLOG MODAL */}
       {showAddBacklogModal && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-300 overflow-hidden flex flex-col max-h-[90vh]">
