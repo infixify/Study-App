@@ -32,6 +32,22 @@ export default function OnboardingPage() {
     batchOrBranch: null,
   });
 
+  async function goToStep2IfNotOnboarded(userId: string, name: string) {
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("onboarding_completed")
+      .eq("uid", userId)
+      .maybeSingle();
+
+    if (userRow?.onboarding_completed) {
+      router.replace("/dashboard");
+      return;
+    }
+
+    setUserName(name);
+    setStep((s) => (s === 1 ? 2 : s));
+  }
+
   useEffect(() => {
     async function checkSession() {
       const { data: sessionData } = await supabase.auth.getUser();
@@ -41,8 +57,7 @@ export default function OnboardingPage() {
           sessionData.user.user_metadata?.name ||
           sessionData.user.email ||
           "there";
-        setUserName(name);
-        setStep(2);
+        await goToStep2IfNotOnboarded(sessionData.user.id, name);
       }
       setCheckingSession(false);
     }
@@ -55,12 +70,12 @@ export default function OnboardingPage() {
           session.user.user_metadata?.name ||
           session.user.email ||
           "there";
-        setUserName(name);
-        setStep((s) => (s === 1 ? 2 : s));
+        goToStep2IfNotOnboarded(session.user.id, name);
       }
     });
 
     return () => listener.subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const next = () => setStep((s) => Math.min(s + 1, TOTAL_STEPS));
