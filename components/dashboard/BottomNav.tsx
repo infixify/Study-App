@@ -13,7 +13,7 @@ export default function BottomNav() {
     { label: "Resources", href: "/resources", icon: "📖" },
     { label: "Study", href: "/focus", icon: "⏱️" },
     { label: "Test", href: "/tests", icon: "📊" },
-    { label: "STUDY GROUPS", href: "/groups", icon: "👥" },
+    { label: "GROUPS", href: "/groups", icon: "👥" },
     { label: "Profile", href: "/profile", icon: "👤" },
   ];
 
