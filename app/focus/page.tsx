@@ -109,6 +109,7 @@ export default function StudyPage() {
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
   };
 
+  // FLUSH DIFF TO DAILY LOGS — UPDATES BOTH TOTAL TIME & STUDY SPLIT (Theory / Practice / Revision)
   async function flushDiffToDailyLogs(currentSeconds: number, dateOverride?: string) {
     if (!userId) return;
     const diffSeconds = currentSeconds - lastSyncedSecondsRef.current;
@@ -119,14 +120,25 @@ export default function StudyPage() {
     const today = dateOverride ?? new Date().toISOString().split("T")[0];
     const { data: dailyRow } = await supabase
       .from("daily_logs")
-      .select("study_time_minutes")
+      .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes")
       .eq("user_id", userId)
       .eq("log_date", today)
       .maybeSingle();
 
     const newMins = (dailyRow?.study_time_minutes || 0) + diffMinutes;
+    const newTheory = (dailyRow?.theory_minutes || 0) + (selectedTask === "theory" ? diffMinutes : 0);
+    const newPractice = (dailyRow?.practice_minutes || 0) + (selectedTask === "questions" ? diffMinutes : 0);
+    const newRevision = (dailyRow?.revision_minutes || 0) + (selectedTask === "revision" ? diffMinutes : 0);
+
     await supabase.from("daily_logs").upsert(
-      { user_id: userId, log_date: today, study_time_minutes: newMins },
+      {
+        user_id: userId,
+        log_date: today,
+        study_time_minutes: newMins,
+        theory_minutes: newTheory,
+        practice_minutes: newPractice,
+        revision_minutes: newRevision,
+      },
       { onConflict: "user_id,log_date" }
     );
     lastSyncedSecondsRef.current += diffMinutes * 60;
@@ -153,7 +165,7 @@ export default function StudyPage() {
       clearInterval(syncIntervalRef.current);
     }
     return () => clearInterval(syncIntervalRef.current);
-  }, [isActive, userId]);
+  }, [isActive, userId, selectedTask]);
 
   const handleStartSession = () => {
     setShowPreModal(false);
@@ -177,6 +189,7 @@ export default function StudyPage() {
     setSaving(true);
 
     try {
+      // Flushes remaining seconds and syncs exact theory/practice/revision split
       await flushDiffToDailyLogs(savedDuration);
 
       const endedAt = new Date();
@@ -192,8 +205,6 @@ export default function StudyPage() {
       // and the user entered a non-zero count.
       if (selectedTask === "questions" && postQCount > 0) {
         const today = new Date().toISOString().split("T")[0];
-        // question_logs tracks by subject; fetch the subject_id for the
-        // selected subject under the user's target_exam and their class.
         const { data: subjectRow } = await supabase
           .from("subjects")
           .select("id")
@@ -245,14 +256,25 @@ export default function StudyPage() {
     try {
       const { data: dailyRow } = await supabase
         .from("daily_logs")
-        .select("study_time_minutes")
+        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes")
         .eq("user_id", userId)
         .eq("log_date", manualDate)
         .maybeSingle();
 
       const newMins = (dailyRow?.study_time_minutes || 0) + manualMinutes;
+      const newTheory = (dailyRow?.theory_minutes || 0) + (manualTask === "theory" ? manualMinutes : 0);
+      const newPractice = (dailyRow?.practice_minutes || 0) + (manualTask === "questions" ? manualMinutes : 0);
+      const newRevision = (dailyRow?.revision_minutes || 0) + (manualTask === "revision" ? manualMinutes : 0);
+
       await supabase.from("daily_logs").upsert(
-        { user_id: userId, log_date: manualDate, study_time_minutes: newMins },
+        {
+          user_id: userId,
+          log_date: manualDate,
+          study_time_minutes: newMins,
+          theory_minutes: newTheory,
+          practice_minutes: newPractice,
+          revision_minutes: newRevision,
+        },
         { onConflict: "user_id,log_date" }
       );
 
