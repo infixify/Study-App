@@ -112,6 +112,11 @@ export default function GroupDetailPage() {
 
   const [selectedMember, setSelectedMember] = useState<MemberFull | null>(null);
 
+  const [pendingRequests, setPendingRequests] = useState<
+    { request_id: string; user_id: string; user_name: string; user_avatar: string | null; requested_at: string }[]
+  >([]);
+  const [loadingPending, setLoadingPending] = useState(false);
+
   const [joinPasscode, setJoinPasscode] = useState("");
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joinNotice, setJoinNotice] = useState<string | null>(null);
@@ -309,8 +314,45 @@ export default function GroupDetailPage() {
     loadMembers();
   }
 
+  const loadPendingRequests = useCallback(async () => {
+    if (!currentUser) return;
+    setLoadingPending(true);
+    const { data } = await supabase.rpc("get_pending_requests", {
+      p_group_id: groupId,
+      p_creator_id: currentUser.id,
+    });
+    setPendingRequests(
+      (data ?? []).map((r: any) => ({
+        request_id: r.request_id,
+        user_id: r.user_id,
+        user_name: r.user_name,
+        user_avatar: r.user_avatar,
+        requested_at: r.requested_at,
+      }))
+    );
+    setLoadingPending(false);
+  }, [groupId, currentUser]);
+
+  async function handleApproveRequest(requestId: string) {
+    if (!currentUser) return;
+    await supabase.rpc("approve_join_request", { p_request_id: requestId, p_creator_id: currentUser.id });
+    setPendingRequests((prev) => prev.filter((r) => r.request_id !== requestId));
+    loadMembers();
+  }
+
+  async function handleRejectRequest(requestId: string) {
+    if (!currentUser) return;
+    await supabase.rpc("reject_join_request", { p_request_id: requestId, p_creator_id: currentUser.id });
+    setPendingRequests((prev) => prev.filter((r) => r.request_id !== requestId));
+  }
+
   const isLeader = currentUser && members.some((m) => m.user_id === currentUser.id && m.is_leader);
   const canManage = isAdmin || isLeader;
+
+  useEffect(() => {
+    if (tab === "members" && canManage && membershipStatus === "member") loadPendingRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, canManage, membershipStatus]);
 
   const overallProgress = members.length
     ? Math.round(
@@ -623,6 +665,50 @@ export default function GroupDetailPage() {
 
         {tab === "members" && (
           <div className="flex flex-col gap-2.5">
+            {canManage && (pendingRequests.length > 0 || loadingPending) && (
+              <div className="bg-amber-50 border border-amber-200 rounded-ticket p-3 mb-1">
+                <p className="text-xs font-bold text-amber-800 mb-2">
+                  Pending Requests {pendingRequests.length > 0 && `(${pendingRequests.length})`}
+                </p>
+                {loadingPending ? (
+                  <p className="text-[11px] text-slate">Loading…</p>
+                ) : (
+                  <div className="space-y-2">
+                    {pendingRequests.map((r) => (
+                      <div
+                        key={r.request_id}
+                        className="flex items-center gap-2.5 bg-white rounded-xl p-2.5 border border-amber-100"
+                      >
+                        <Avatar url={r.user_avatar} name={r.user_name} size={30} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-ink truncate">{r.user_name}</p>
+                          <p className="text-[9px] text-slate">
+                            Requested{" "}
+                            {new Date(r.requested_at).toLocaleDateString("en-IN", {
+                              day: "numeric",
+                              month: "short",
+                            })}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleApproveRequest(r.request_id)}
+                          className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-[10px] font-bold"
+                        >
+                          ✅ Approve
+                        </button>
+                        <button
+                          onClick={() => handleRejectRequest(r.request_id)}
+                          className="px-2.5 py-1.5 rounded-lg bg-rose-600 text-white text-[10px] font-bold"
+                        >
+                          ❌ Reject
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {loadingMembers ? (
               <p className="text-center py-10 text-xs text-slate">Loading…</p>
             ) : (
