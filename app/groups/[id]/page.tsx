@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import StudyRoomPanel from "@/components/groups/StudyRoomPanel";
 
 type Tab = "home" | "chat" | "cam" | "members";
+type MembershipStatus = "loading" | "member" | "pending" | "none";
 
 interface Message {
   id: string;
@@ -57,6 +58,28 @@ function Avatar({ url, name, size = 36 }: { url: string | null; name: string; si
   );
 }
 
+function JoinTypeTag({ hasPassword, requiresApproval }: { hasPassword: boolean; requiresApproval: boolean }) {
+  if (hasPassword) {
+    return (
+      <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
+        🔒 Password
+      </span>
+    );
+  }
+  if (requiresApproval) {
+    return (
+      <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+        🛡️ Approval Required
+      </span>
+    );
+  }
+  return (
+    <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+      ✅ Open Join
+    </span>
+  );
+}
+
 export default function GroupDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -70,7 +93,14 @@ export default function GroupDetailPage() {
     target_exam: string;
     leader_name: string | null;
     created_by: string | null;
+    rules: string | null;
   } | null>(null);
+
+  const [membershipStatus, setMembershipStatus] = useState<MembershipStatus>("loading");
+  const [joinMeta, setJoinMeta] = useState<{ has_password: boolean; requires_approval: boolean }>({
+    has_password: true,
+    requires_approval: false,
+  });
 
   const [members, setMembers] = useState<MemberFull[]>([]);
   const [progress, setProgress] = useState<Record<string, number>>({});
@@ -81,6 +111,11 @@ export default function GroupDetailPage() {
   const [loadingMessages, setLoadingMessages] = useState(true);
 
   const [selectedMember, setSelectedMember] = useState<MemberFull | null>(null);
+
+  const [joinPasscode, setJoinPasscode] = useState("");
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinNotice, setJoinNotice] = useState<string | null>(null);
+  const [joining, setJoining] = useState(false);
 
   useEffect(() => {
     async function init() {
@@ -94,14 +129,50 @@ export default function GroupDetailPage() {
 
       const { data: dbGroups } = await supabase.rpc("get_group_list");
       const thisGroup = (dbGroups ?? []).find((g: any) => g.id === groupId);
+
+      const { data: ruleRow } = await supabase
+        .from("study_groups")
+        .select("rules")
+        .eq("id", groupId)
+        .single();
+
       if (thisGroup) {
         setGroupInfo({
           name: thisGroup.name,
           target_exam: thisGroup.target_exam,
           leader_name: thisGroup.leader_name,
           created_by: null,
+          rules: ruleRow?.rules ?? null,
         });
       }
+
+      const { data: metaRows } = await supabase.rpc("get_group_join_meta");
+      const thisMeta = (metaRows ?? []).find((m: any) => m.group_id === groupId);
+      if (thisMeta) {
+        setJoinMeta({ has_password: thisMeta.has_password, requires_approval: thisMeta.requires_approval });
+      }
+
+      const { data: memberRow } = await supabase
+        .from("group_members")
+        .select("user_id")
+        .eq("group_id", groupId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (memberRow) {
+        setMembershipStatus("member");
+        return;
+      }
+
+      const { data: pendingRow } = await supabase
+        .from("group_join_requests")
+        .select("id")
+        .eq("group_id", groupId)
+        .eq("user_id", user.id)
+        .eq("status", "pending")
+        .maybeSingle();
+
+      setMembershipStatus(pendingRow ? "pending" : "none");
     }
     init();
   }, [groupId]);
@@ -122,10 +193,13 @@ export default function GroupDetailPage() {
   }, [groupId]);
 
   useEffect(() => {
+    if (membershipStatus === "loading") return;
     loadMembers();
-    const interval = setInterval(loadMembers, 20000);
-    return () => clearInterval(interval);
-  }, [loadMembers]);
+    if (membershipStatus === "member") {
+      const interval = setInterval(loadMembers, 20000);
+      return () => clearInterval(interval);
+    }
+  }, [loadMembers, membershipStatus]);
 
   const loadMessages = useCallback(async () => {
     setLoadingMessages(true);
@@ -145,8 +219,8 @@ export default function GroupDetailPage() {
   }, [groupId]);
 
   useEffect(() => {
-    if (tab === "chat") loadMessages();
-  }, [tab, loadMessages]);
+    if (tab === "chat" && membershipStatus === "member") loadMessages();
+  }, [tab, loadMessages, membershipStatus]);
 
   async function handleSendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -182,6 +256,53 @@ export default function GroupDetailPage() {
     router.push("/groups");
   }
 
+  async function handleCancelPending() {
+    if (!currentUser) return;
+    await supabase.rpc("cancel_join_request", { p_group_id: groupId, p_user_id: currentUser.id });
+    router.push("/groups");
+  }
+
+  async function handleJoinFromPreview(e: React.FormEvent) {
+    e.preventDefault();
+    if (!currentUser) return;
+    setJoining(true);
+    setJoinError(null);
+    setJoinNotice(null);
+
+    const { data: result, error } = await supabase.rpc("request_join_group", {
+      p_group_id: groupId,
+      p_user_id: currentUser.id,
+      p_passcode: joinMeta.has_password ? joinPasscode.trim() : null,
+    });
+
+    setJoining(false);
+
+    if (error) {
+      setJoinError("Something went wrong. Try again.");
+      return;
+    }
+    if (result === "wrong_passcode") {
+      setJoinError("Incorrect passcode! Ask group admin.");
+      return;
+    }
+    if (result === "pending") {
+      setMembershipStatus("pending");
+      setJoinNotice("Request sent! Waiting for admin approval.");
+      return;
+    }
+    if (result === "joined") {
+      const senderName =
+        currentUser?.user_metadata?.full_name || currentUser?.email?.split("@")[0] || "Student";
+      await supabase.from("group_messages").insert({
+        group_id: groupId,
+        sender_uid: null,
+        sender_name: "System",
+        content: `${senderName} joined the room`,
+      });
+      setMembershipStatus("member");
+    }
+  }
+
   async function handleRemoveMember(userId: string) {
     await supabase.rpc("remove_group_member", { p_group_id: groupId, p_target_user_id: userId });
     setSelectedMember(null);
@@ -201,8 +322,147 @@ export default function GroupDetailPage() {
         (members.reduce((sum, m) => sum + m.attendance_days, 0) / (members.length * 7)) * 100
       )
     : 0;
+  const totalWeekSeconds = members.reduce((sum, m) => sum + m.week_seconds, 0);
   const maxWeekSeconds = Math.max(1, ...members.map((m) => m.week_seconds));
 
+  if (membershipStatus === "loading") {
+    return (
+      <div className="min-h-screen bg-paper flex items-center justify-center">
+        <p className="text-xs text-slate">Loading…</p>
+      </div>
+    );
+  }
+
+  // ---------- PREVIEW (not a member): pending OR not-yet-requested ----------
+  if (membershipStatus !== "member") {
+    return (
+      <div className="min-h-screen bg-paper pb-10 flex flex-col">
+        <div className="sticky top-0 z-20 bg-paper/95 backdrop-blur border-b border-ink/8">
+          <div className="max-w-md mx-auto px-4 py-3 flex items-center gap-3">
+            <button
+              onClick={() => router.push("/groups")}
+              className="w-8 h-8 rounded-full bg-ink/5 flex items-center justify-center text-ink font-bold"
+            >
+              ←
+            </button>
+            <div className="min-w-0">
+              <h1 className="font-bold text-sm text-ink truncate">{groupInfo?.name || "Group"}</h1>
+              {groupInfo?.target_exam && <p className="text-[10px] text-slate">{groupInfo.target_exam}</p>}
+            </div>
+          </div>
+        </div>
+
+        <main className="max-w-md mx-auto w-full px-4 pt-4 flex-1 flex flex-col gap-4">
+          {membershipStatus === "pending" && (
+            <div className="bg-amber-50 border border-amber-200 rounded-ticket p-4">
+              <p className="text-xs font-bold text-amber-700">
+                ⏳ Your join request is pending, waiting for admin approval
+              </p>
+              <button
+                onClick={handleCancelPending}
+                className="mt-2 text-[10px] font-bold text-rose-600 underline"
+              >
+                Cancel request
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <JoinTypeTag hasPassword={joinMeta.has_password} requiresApproval={joinMeta.requires_approval} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-white rounded-ticket border border-ink/10 p-3 text-center">
+              <p className="text-lg font-bold text-teal">{overallAttendance}%</p>
+              <p className="text-[10px] text-slate">Group attendance (7d)</p>
+            </div>
+            <div className="bg-white rounded-ticket border border-ink/10 p-3 text-center">
+              <p className="text-lg font-bold text-teal">{formatHM(totalWeekSeconds)}</p>
+              <p className="text-[10px] text-slate">Total study time (week)</p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-ticket border border-ink/10 p-4">
+            <p className="text-xs font-bold text-ink mb-2">About this group</p>
+            <p className="text-[10px] text-slate">
+              {members.length} member{members.length === 1 ? "" : "s"}
+              {groupInfo?.leader_name && ` · Led by ${groupInfo.leader_name}`}
+            </p>
+            {groupInfo?.rules && (
+              <p className="text-xs text-ink mt-2 leading-snug whitespace-pre-wrap">{groupInfo.rules}</p>
+            )}
+          </div>
+
+          <div className="bg-white rounded-ticket border border-ink/10 p-4">
+            <p className="text-xs font-bold text-ink mb-3">Members</p>
+            {loadingMembers ? (
+              <p className="text-xs text-slate text-center py-4">Loading…</p>
+            ) : (
+              <div className="space-y-2">
+                {members.map((m) => (
+                  <div key={m.user_id} className="flex items-center gap-2.5">
+                    <div className="relative">
+                      <Avatar url={m.avatar_url} name={m.display_name} size={32} />
+                      {m.is_live && (
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 border-2 border-white animate-pulse" />
+                      )}
+                    </div>
+                    <p className="text-xs font-semibold text-ink flex-1 truncate">{m.display_name}</p>
+                    {m.is_leader && (
+                      <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full">
+                        Leader
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[9.5px] text-slate/70 mt-3 text-center">
+              Chat and Cam Study open up once you join the group.
+            </p>
+          </div>
+
+          {membershipStatus === "none" && (
+            <div className="bg-white rounded-ticket border border-ink/10 p-4">
+              {joinError && (
+                <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2 rounded-lg border border-rose-200 mb-2">
+                  ⚠️ {joinError}
+                </p>
+              )}
+              {joinNotice && (
+                <p className="text-xs text-amber-700 font-bold bg-amber-50 p-2 rounded-lg border border-amber-200 mb-2">
+                  ⏳ {joinNotice}
+                </p>
+              )}
+              <form onSubmit={handleJoinFromPreview} className="space-y-3">
+                {joinMeta.has_password && (
+                  <div>
+                    <label className="text-[10px] font-bold text-slate block mb-0.5">Passcode</label>
+                    <input
+                      type="password"
+                      value={joinPasscode}
+                      onChange={(e) => setJoinPasscode(e.target.value)}
+                      className="w-full p-2.5 text-xs text-center font-bold tracking-widest rounded-xl border border-ink/15"
+                      required
+                    />
+                  </div>
+                )}
+                <button
+                  type="submit"
+                  disabled={joining}
+                  className="w-full py-2.5 rounded-xl bg-teal text-white text-xs font-bold disabled:opacity-50"
+                >
+                  {joining ? "Joining…" : joinMeta.requires_approval ? "Request to Join" : "Join Group"}
+                </button>
+              </form>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  // ---------- FULL MEMBER VIEW ----------
   return (
     <div className="min-h-screen bg-paper pb-20 flex flex-col">
       {/* Header */}
