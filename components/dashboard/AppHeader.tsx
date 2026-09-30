@@ -32,19 +32,18 @@ export default function AppHeader() {
   const [notifPopupOpen, setNotifPopupOpen] = useState(false);
   const [user, setUser] = useState<HeaderUserData | null>(null);
 
-  // Theme State
   const [isDark, setIsDark] = useState(false);
 
-  // Notifications State
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadIds, setUnreadIds] = useState<string[]>([]);
 
-  // Name editing
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
   const [savingName, setSavingName] = useState(false);
 
-  // Initialize theme from DOM/Storage
+  // Bell button ref for positioning the fixed popup
+  const [bellRect, setBellRect] = useState<DOMRect | null>(null);
+
   useEffect(() => {
     const isCurrentlyDark = document.documentElement.classList.contains("dark");
     setIsDark(isCurrentlyDark);
@@ -62,7 +61,6 @@ export default function AppHeader() {
     }
   };
 
-  // Fetch Notifications
   const fetchNotifications = useCallback(async (userId: string, targetExam: string | null) => {
     try {
       const { data: allNotifs } = await supabase
@@ -209,11 +207,13 @@ export default function AppHeader() {
 
         {/* Right: Notifications + User Profile */}
         <div className="flex items-center gap-2">
-          {/* Notification Bell 🔔 */}
+          {/* Notification Bell */}
           <div className="relative">
             <button
               type="button"
-              onClick={() => {
+              onClick={(e) => {
+                // Capture bell position for fixed popup placement
+                setBellRect(e.currentTarget.getBoundingClientRect());
                 setNotifPopupOpen(!notifPopupOpen);
                 setProfilePopupOpen(false);
                 if (!notifPopupOpen && unreadIds.length > 0) {
@@ -235,14 +235,22 @@ export default function AppHeader() {
                   className="fixed inset-0 z-40"
                   onClick={() => setNotifPopupOpen(false)}
                 />
-                <div className="absolute right-0 mt-2 w-80 max-w-[90vw] bg-white dark:bg-[#161F30] rounded-2xl border border-ink/12 dark:border-white/10 shadow-2xl p-4 z-50 animate-in fade-in zoom-in-95">
+                {/* Fixed popup — positioned from the right edge of the screen
+                    so it never clips on any phone width */}
+                <div
+                  className="fixed z-50 w-80 max-w-[calc(100vw-16px)] bg-white dark:bg-[#161F30] rounded-2xl border border-ink/12 dark:border-white/10 shadow-2xl p-4 animate-in fade-in zoom-in-95"
+                  style={{
+                    top: bellRect ? bellRect.bottom + 8 : 56,
+                    right: 8,
+                  }}
+                >
                   <div className="flex items-center justify-between pb-2.5 border-b border-ink/8 dark:border-white/10">
                     <div className="flex items-center gap-1.5">
                       <h4 className="text-xs font-bold text-ink dark:text-white">
                         Notifications
                       </h4>
                       {unreadIds.length > 0 && (
-                        <span className="text-[9.5px] px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-700 font-bold dark:bg-rose-950 dark:text-rose-300">
+                        <span className="text-[9.5px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-bold dark:bg-rose-950 dark:text-rose-300">
                           {unreadIds.length} new
                         </span>
                       )}
@@ -381,7 +389,6 @@ export default function AppHeader() {
                     )}
                   </div>
 
-                  {/* 🌓 THEME TOGGLE IN POPUP */}
                   <div className="py-2.5 border-b border-ink/8 dark:border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-sm">{isDark ? "🌙" : "☀️"}</span>
@@ -496,9 +503,7 @@ export default function AppHeader() {
               </div>
             </div>
 
-            {/* Bottom Drawer Section: Theme Toggle + User Status */}
             <div className="pt-4 border-t border-ink/8 dark:border-white/10 space-y-3">
-              {/* 🌓 THEME TOGGLE BUTTON IN DRAWER */}
               <button
                 type="button"
                 onClick={toggleTheme}
