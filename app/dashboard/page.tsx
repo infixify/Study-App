@@ -341,6 +341,16 @@ function HeroWidget({
 
   const greeting = getGreeting(name, hour);
   const todayHours = (todayFocusMins / 60).toFixed(1);
+
+  // Dynamic font scaling: long quotes/greetings shrink instead of getting
+  // cut off with "..." or breaking mid-word. No clamp/truncate anywhere below.
+  const greetingFontClass = greeting.length > 40 ? "text-[13px]" : "text-base";
+  const quoteFontClass =
+    (currentItem?.quote?.length ?? 0) > 140
+      ? "text-[10px]"
+      : (currentItem?.quote?.length ?? 0) > 80
+      ? "text-[11px]"
+      : "text-xs";
   const isExternalImage =
     currentItem?.icon_or_sticker?.startsWith("http://") ||
     currentItem?.icon_or_sticker?.startsWith("https://") ||
@@ -358,7 +368,9 @@ function HeroWidget({
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">
               PrepWise Dashboard
             </p>
-            <h2 className="text-base font-black text-slate-900 leading-tight truncate">
+            <h2
+              className={`${greetingFontClass} font-black text-slate-900 leading-tight break-normal [hyphens:none]`}
+            >
               {greeting}
             </h2>
           </div>
@@ -454,7 +466,9 @@ function HeroWidget({
 
               {/* Text Info */}
               <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
-                <p className={`text-xs font-bold leading-snug ${currentItem.text} line-clamp-3`}>
+                <p
+                  className={`${quoteFontClass} font-bold leading-snug ${currentItem.text} break-normal [hyphens:none]`}
+                >
                   "{currentItem.quote}"
                 </p>
                 <div className="flex items-center justify-between mt-2 pt-1 border-t border-black/5">
