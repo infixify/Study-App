@@ -22,6 +22,12 @@ const APP_LIST = [
 ];
 
 const SYNC_INTERVAL_SECONDS = 60;
+const FACE_API_MODEL_URL = "https://justadudewhohacks.github.io/face-api.js/models";
+const PRESENCE_CHECK_INTERVAL_SECONDS = 15;
+const MAX_CONSECUTIVE_MISSES = 3;
+const PRESENCE_LOG_INTERVAL_SECONDS = 60;
+const LIVENESS_CHALLENGE_INTERVAL_SECONDS = 1200;
+const LIVENESS_CHALLENGE_WINDOW_SECONDS = 20;
 
 export default function StudyPage() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -48,7 +54,6 @@ export default function StudyPage() {
   const [showPostModal, setShowPostModal] = useState(false);
   const [savedDuration, setSavedDuration] = useState(0);
   const [postStreakResult, setPostStreakResult] = useState<{ counted: boolean; newStreak: number } | null>(null);
-  // Questions solved during the session — only asked when task = "questions"
   const [postQCount, setPostQCount] = useState<number>(0);
   const [saving, setSaving] = useState(false);
 
@@ -61,6 +66,24 @@ export default function StudyPage() {
     new Date().toISOString().split("T")[0]
   );
   const [manualError, setManualError] = useState<string | null>(null);
+
+  // --- Verified Mode (camera presence check) state ---
+  const [verifiedMode, setVerifiedMode] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [presencePaused, setPresencePaused] = useState(false);
+  const [livenessPromptOpen, setLivenessPromptOpen] = useState(false);
+  const [livenessSecondsLeft, setLivenessSecondsLeft] = useState(LIVENESS_CHALLENGE_WINDOW_SECONDS);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const faceapiRef = useRef<any>(null);
+  const presenceIntervalRef = useRef<any>(null);
+  const missedChecksRef = useRef(0);
+  const lastPresenceLogSecondsRef = useRef(0);
+  const livenessIntervalRef = useRef<any>(null);
+  const livenessCountdownRef = useRef<any>(null);
+  const sessionIdRef = useRef<string | null>(null);
 
   const availableSubjects: SubjectType[] =
     targetExam === "NEET"
@@ -109,7 +132,6 @@ export default function StudyPage() {
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
   };
 
-  // FLUSH DIFF TO DAILY LOGS — UPDATES BOTH TOTAL TIME & STUDY SPLIT (Theory / Practice / Revision)
   async function flushDiffToDailyLogs(currentSeconds: number, dateOverride?: string) {
     if (!userId) return;
     const diffSeconds = currentSeconds - lastSyncedSecondsRef.current;
@@ -144,14 +166,15 @@ export default function StudyPage() {
     lastSyncedSecondsRef.current += diffMinutes * 60;
   }
 
+  // Timer only advances while active AND not presence-paused
   useEffect(() => {
-    if (isActive) {
+    if (isActive && !presencePaused) {
       timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
-  }, [isActive]);
+  }, [isActive, presencePaused]);
 
   useEffect(() => {
     if (isActive) {
@@ -167,12 +190,155 @@ export default function StudyPage() {
     return () => clearInterval(syncIntervalRef.current);
   }, [isActive, userId, selectedTask]);
 
-  const handleStartSession = () => {
+  // Pause if the tab/app goes into the background during a Verified Mode session
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.hidden && isActive && verifiedMode) {
+        setPresencePaused(true);
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [isActive, verifiedMode]);
+
+  async function loadFaceModels() {
+    if (faceapiRef.current) return faceapiRef.current;
+    setModelsLoading(true);
+    try {
+      const faceapi = await import("face-api.js");
+      await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_API_MODEL_URL);
+      faceapiRef.current = faceapi;
+      return faceapi;
+    } finally {
+      setModelsLoading(false);
+    }
+  }
+
+  async function startCamera(): Promise<boolean> {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setCameraError(null);
+      return true;
+    } catch (e) {
+      setCameraError("Camera permission denied. Verified Mode needs camera access to run.");
+      return false;
+    }
+  }
+
+  function stopCamera() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+  }
+
+  async function runPresenceCheck() {
+    const faceapi = faceapiRef.current;
+    if (!faceapi || !videoRef.current || videoRef.current.readyState < 2) return;
+
+    let detected = false;
+    try {
+      const result = await faceapi.detectSingleFace(
+        videoRef.current,
+        new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 })
+      );
+      detected = !!result;
+    } catch (e) {
+      detected = false;
+    }
+
+    if (detected) {
+      missedChecksRef.current = 0;
+      setPresencePaused((prev) => (prev ? false : prev));
+    } else {
+      missedChecksRef.current += 1;
+      if (missedChecksRef.current >= MAX_CONSECUTIVE_MISSES) {
+        setPresencePaused(true);
+      }
+    }
+
+    setSeconds((s) => {
+      if (s - lastPresenceLogSecondsRef.current >= PRESENCE_LOG_INTERVAL_SECONDS) {
+        lastPresenceLogSecondsRef.current = s;
+        if (userId && sessionIdRef.current) {
+          supabase.from("focus_presence_checks").insert({
+            user_id: userId,
+            session_id: sessionIdRef.current,
+            face_detected: detected,
+            liveness_confirmed: false,
+          });
+        }
+      }
+      return s;
+    });
+  }
+
+  function triggerLivenessChallenge() {
+    setLivenessPromptOpen(true);
+    setLivenessSecondsLeft(LIVENESS_CHALLENGE_WINDOW_SECONDS);
+    livenessCountdownRef.current = setInterval(() => {
+      setLivenessSecondsLeft((s) => {
+        if (s <= 1) {
+          clearInterval(livenessCountdownRef.current);
+          setLivenessPromptOpen(false);
+          setPresencePaused(true);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+  }
+
+  function handleConfirmLiveness() {
+    clearInterval(livenessCountdownRef.current);
+    setLivenessPromptOpen(false);
+    if (userId && sessionIdRef.current) {
+      supabase.from("focus_presence_checks").insert({
+        user_id: userId,
+        session_id: sessionIdRef.current,
+        face_detected: true,
+        liveness_confirmed: true,
+      });
+    }
+  }
+
+  function cleanupVerifiedMode() {
+    if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
+    if (livenessIntervalRef.current) clearInterval(livenessIntervalRef.current);
+    if (livenessCountdownRef.current) clearInterval(livenessCountdownRef.current);
+    stopCamera();
+    setLivenessPromptOpen(false);
+    setPresencePaused(false);
+    sessionIdRef.current = null;
+  }
+
+  const handleStartSession = async () => {
+    if (verifiedMode) {
+      setCameraError(null);
+      const camOk = await startCamera();
+      if (!camOk) return;
+      await loadFaceModels();
+      missedChecksRef.current = 0;
+      lastPresenceLogSecondsRef.current = 0;
+      sessionIdRef.current =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random()}`;
+      presenceIntervalRef.current = setInterval(runPresenceCheck, PRESENCE_CHECK_INTERVAL_SECONDS * 1000);
+      livenessIntervalRef.current = setInterval(triggerLivenessChallenge, LIVENESS_CHALLENGE_INTERVAL_SECONDS * 1000);
+    }
+
     setShowPreModal(false);
     setSeconds(0);
     lastSyncedSecondsRef.current = 0;
     setStartTime(new Date());
     setIsActive(true);
+    setPresencePaused(false);
     setPostStreakResult(null);
     setStreakWasReset(false);
     setPostQCount(0);
@@ -182,6 +348,7 @@ export default function StudyPage() {
     setIsActive(false);
     setSavedDuration(seconds);
     setShowPostModal(true);
+    if (verifiedMode) cleanupVerifiedMode();
   };
 
   const handleFinishAndSave = async () => {
@@ -189,7 +356,6 @@ export default function StudyPage() {
     setSaving(true);
 
     try {
-      // Flushes remaining seconds and syncs exact theory/practice/revision split
       await flushDiffToDailyLogs(savedDuration);
 
       const endedAt = new Date();
@@ -201,8 +367,6 @@ export default function StudyPage() {
         setPostStreakResult({ counted: false, newStreak: currentStreak });
       }
 
-      // Log questions to question_logs if this was a practice session
-      // and the user entered a non-zero count.
       if (selectedTask === "questions" && postQCount > 0) {
         const today = new Date().toISOString().split("T")[0];
         const { data: subjectRow } = await supabase
@@ -278,7 +442,6 @@ export default function StudyPage() {
         { onConflict: "user_id,log_date" }
       );
 
-      // Log questions for manual "questions" entries (today only)
       const today = new Date().toISOString().split("T")[0];
       if (manualTask === "questions" && manualQs > 0 && manualDate === today) {
         const { data: subjectRow } = await supabase
@@ -314,7 +477,6 @@ export default function StudyPage() {
         }
       }
 
-      // Update streak for today's manual entry if it meets the threshold
       const meetsStreakThreshold = newMins * 60 >= MIN_STREAK_SECONDS;
       if (manualDate === today && meetsStreakThreshold) {
         const syntheticEnd = new Date();
@@ -341,6 +503,9 @@ export default function StudyPage() {
   return (
     <div className="min-h-screen bg-paper pb-28">
       <AppHeader />
+
+      {/* Hidden video element feeds the face-detection model — nothing is ever uploaded or recorded */}
+      <video ref={videoRef} muted playsInline className="hidden" />
 
       <main className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-5">
         <div className="flex items-center justify-between">
@@ -389,8 +554,29 @@ export default function StudyPage() {
           </div>
         )}
 
+        {isActive && presencePaused && (
+          <div className="rounded-ticket border border-coral/30 bg-coral/10 px-4 py-3 flex items-center gap-3">
+            <span className="text-xl">⏸️</span>
+            <div>
+              <p className="text-xs font-bold text-ink">Paused — we can't see you</p>
+              <p className="text-[10px] text-slate">
+                Come back into camera view (or tap back into the app) to resume your timer.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {cameraError && (
+          <div className="rounded-ticket border border-coral/30 bg-coral/10 px-4 py-3">
+            <p className="text-xs font-bold text-ink">⚠️ {cameraError}</p>
+          </div>
+        )}
+
         <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
-          <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2">
+          <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            {isActive && verifiedMode && (
+              <span className={`inline-block w-2 h-2 rounded-full ${presencePaused ? "bg-coral" : "bg-teal"}`} />
+            )}
             {isActive ? `🔥 Studying ${selectedSub} (${selectedTask})` : "Ready to focus?"}
           </div>
           <div className="font-mono text-5xl font-black text-ink my-3 tracking-tight">
@@ -478,8 +664,31 @@ export default function StudyPage() {
                 ))}
               </div>
             </div>
-            <button onClick={handleStartSession} className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90">
-              Start Focus Session
+
+            <button
+              type="button"
+              onClick={() => setVerifiedMode((v) => !v)}
+              className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${
+                verifiedMode ? "bg-teal/10 border-teal/40" : "bg-paper/60 border-ink/10"
+              }`}
+            >
+              <div>
+                <p className="text-xs font-bold text-ink">🎥 Verified Mode</p>
+                <p className="text-[10px] text-slate mt-0.5 max-w-[220px]">
+                  Uses your camera to confirm you're present. Nothing is ever recorded or uploaded — only a yes/no presence signal.
+                </p>
+              </div>
+              <span className={`shrink-0 w-10 h-6 rounded-full flex items-center px-0.5 transition-all ${verifiedMode ? "bg-teal justify-end" : "bg-ink/15 justify-start"}`}>
+                <span className="w-5 h-5 rounded-full bg-white shadow-xs" />
+              </span>
+            </button>
+
+            <button
+              onClick={handleStartSession}
+              disabled={modelsLoading}
+              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90 disabled:opacity-50"
+            >
+              {modelsLoading ? "Loading camera check…" : "Start Focus Session"}
             </button>
           </div>
         </div>
@@ -497,7 +706,6 @@ export default function StudyPage() {
               <p className="text-[11px] text-teal font-bold text-center">🔥 This session counts for your streak!</p>
             )}
 
-            {/* Question count input — only shown for practice sessions */}
             {selectedTask === "questions" && (
               <div>
                 <label className="text-[11px] font-bold text-slate block mb-1 text-center">
@@ -591,6 +799,25 @@ export default function StudyPage() {
             <button disabled={saving} onClick={handleSaveManualEntry}
               className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs">
               {saving ? "Saving..." : "Add to Daily Study Hours"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Liveness challenge — small, non-blocking, bottom-anchored */}
+      {livenessPromptOpen && (
+        <div className="fixed bottom-24 left-0 right-0 z-50 px-4">
+          <div className="max-w-sm mx-auto bg-ink text-white rounded-2xl shadow-2xl p-4 flex items-center gap-3">
+            <span className="text-xl">👋</span>
+            <div className="flex-1">
+              <p className="text-xs font-bold">Still there?</p>
+              <p className="text-[10px] text-white/70">Tap to confirm — {livenessSecondsLeft}s left</p>
+            </div>
+            <button
+              onClick={handleConfirmLiveness}
+              className="px-3 py-2 rounded-xl bg-teal text-white text-xs font-bold shrink-0"
+            >
+              I'm here
             </button>
           </div>
         </div>
