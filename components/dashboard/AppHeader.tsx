@@ -159,13 +159,14 @@ export default function AppHeader() {
   }
 
   const navLinks = [
-    { name: "Dashboard", href: "/dashboard", icon: "⚡" },
+    { name: "Dashboard", href: "/dashboard", icon: "🏠" },
+    { name: "Leaderboard", href: "/leaderboard", icon: "🏆" },
     { name: "Syllabus", href: "/library", icon: "📚" },
     { name: "Daily Tasks", href: "/todo", icon: "✓" },
     { name: "Focus & Study Timer", href: "/focus", icon: "⏱️" },
     { name: "Tests & Schedule", href: "/tests", icon: "📊" },
     { name: "Resources Library", href: "/resources", icon: "📖" },
-    { name: "Community", href: "/groups", icon: "👥" },
+    { name: "STUDY GROUPS", href: "/groups", icon: "👥" },
     { name: "Profile & Target", href: "/profile", icon: "👤" },
   ];
 
