@@ -47,26 +47,32 @@ export default function ProfilePage() {
         setLoading(false);
         return;
       }
+
       const { data } = await supabase
         .from("users")
         .select("name, email, class_level, target_exam, wants_boards, study_mode, batch_name")
         .eq("uid", user.id)
         .maybeSingle();
 
-      if (data) {
-        setProfile({
-          name: data.name ?? user.user_metadata?.full_name ?? "Student",
-          email: data.email ?? user.email ?? "",
-          classLevel: data.class_level,
-          targetExam: data.target_exam,
-          wantsBoards: data.wants_boards ?? false,
-          studyMode: data.study_mode ?? "Online",
-          batchName: data.batch_name ?? "",
-        });
-        setStudyMode(data.study_mode ?? "Online");
-        setBatch(data.batch_name ?? "");
-        setNewName(data.name ?? user.user_metadata?.full_name ?? "");
-      }
+      // Fallback: if users row doesn't exist yet (e.g. Google OAuth, incomplete onboarding),
+      // build a minimal profile from the auth user object so the page doesn't crash.
+      const resolvedName =
+        data?.name ?? user.user_metadata?.full_name ?? user.user_metadata?.name ?? "Student";
+      const resolvedEmail = data?.email ?? user.email ?? "";
+
+      setProfile({
+        name: resolvedName,
+        email: resolvedEmail,
+        classLevel: (data?.class_level ?? "11") as ClassLevel,
+        targetExam: (data?.target_exam ?? "JEE") as TargetExam,
+        wantsBoards: data?.wants_boards ?? false,
+        studyMode: (data?.study_mode ?? "Online") as StudyMode,
+        batchName: data?.batch_name ?? "",
+      });
+      setStudyMode((data?.study_mode ?? "Online") as StudyMode);
+      setBatch(data?.batch_name ?? "");
+      setNewName(resolvedName);
+
       setLoading(false);
     }
     load();
@@ -111,7 +117,7 @@ export default function ProfilePage() {
   if (!profile) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] flex items-center justify-center p-6 text-xs text-slate-400">
-        Profile not found. Please log in again.
+        Could not load profile. Please try again.
       </div>
     );
   }
