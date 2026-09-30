@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { loadAndReconcileStreak, saveFocusSession, MIN_STREAK_SECONDS } from "@/lib/focus";
 import AppHeader from "@/components/dashboard/AppHeader";
 import BottomNav from "@/components/dashboard/BottomNav";
 
@@ -20,11 +21,15 @@ const APP_LIST = [
   { id: "calculator", name: "Calculator", icon: "🧮" },
 ];
 
-const SYNC_INTERVAL_SECONDS = 60; // how often we write the diff to daily_logs during an active session
+const SYNC_INTERVAL_SECONDS = 60;
 
 export default function StudyPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [targetExam, setTargetExam] = useState<string>("JEE");
+
+  // Streak state — populated on load via loadAndReconcileStreak()
+  const [currentStreak, setCurrentStreak] = useState<number>(0);
+  const [streakWasReset, setStreakWasReset] = useState(false);
 
   // Live Timer states
   const [seconds, setSeconds] = useState(0);
@@ -32,9 +37,6 @@ export default function StudyPage() {
   const [startTime, setStartTime] = useState<Date | null>(null);
   const timerRef = useRef<any>(null);
 
-  // Debounced diff-sync tracking — how many seconds of this session we've
-  // already flushed to daily_logs, so we only ever write the NEW diff,
-  // never the full duration again (avoids double-counting on stop).
   const lastSyncedSecondsRef = useRef(0);
   const syncIntervalRef = useRef<any>(null);
 
@@ -44,15 +46,12 @@ export default function StudyPage() {
   const [selectedTask, setSelectedTask] = useState<StudyTaskType>("questions");
   const [strictMode, setStrictMode] = useState(true);
 
-  // Flipped model: student now selects which apps are ALLOWED during a
-  // session (everything else is blocked by default). Enforcement itself
-  // still needs the native Flutter bridge — this is just the picker +
-  // storage, ready for that wiring later.
   const [allowedApps, setAllowedApps] = useState<string[]>(["pdf_reader", "calculator"]);
 
   // Post-session log modal
   const [showPostModal, setShowPostModal] = useState(false);
   const [savedDuration, setSavedDuration] = useState(0);
+  const [postStreakResult, setPostStreakResult] = useState<{ counted: boolean; newStreak: number } | null>(null);
   const [qCount, setQCount] = useState<number>(0);
   const [saving, setSaving] = useState(false);
 
@@ -91,6 +90,17 @@ export default function StudyPage() {
           setSelectedSub("Biology");
         }
       }
+
+      // Load streak — also detects missed days and resets in DB if needed.
+      try {
+        const streakInfo = await loadAndReconcileStreak(user.id);
+        setCurrentStreak(streakInfo.currentStreak);
+        if (streakInfo.streakWasReset) {
+          setStreakWasReset(true);
+        }
+      } catch (e) {
+        // Non-fatal — streak display just stays at 0 if this fails.
+      }
     }
     loadUser();
 
@@ -113,16 +123,13 @@ export default function StudyPage() {
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
   };
 
-  // Writes only the NEW seconds since the last sync to daily_logs, then
-  // advances the checkpoint. Safe to call repeatedly — never re-adds time
-  // that's already been flushed.
   async function flushDiffToDailyLogs(currentSeconds: number, dateOverride?: string) {
     if (!userId) return;
     const diffSeconds = currentSeconds - lastSyncedSecondsRef.current;
     if (diffSeconds <= 0) return;
 
     const diffMinutes = Math.round(diffSeconds / 60);
-    if (diffMinutes <= 0) return; // wait until at least a full minute has accrued
+    if (diffMinutes <= 0) return;
 
     const today = dateOverride ?? new Date().toISOString().split("T")[0];
 
@@ -139,9 +146,6 @@ export default function StudyPage() {
       { onConflict: "user_id,log_date" }
     );
 
-    // Advance the checkpoint by exactly the minutes we just flushed
-    // (in seconds), so any leftover partial-minute seconds carry over
-    // to the next flush instead of being silently dropped.
     lastSyncedSecondsRef.current += diffMinutes * 60;
   }
 
@@ -157,9 +161,7 @@ export default function StudyPage() {
     return () => clearInterval(timerRef.current);
   }, [isActive]);
 
-  // Debounced background sync — flushes the diff every SYNC_INTERVAL_SECONDS
-  // while a session is active, so a crashed tab / closed browser doesn't
-  // lose the whole session's study time, only up to the last interval.
+  // Debounced background sync
   useEffect(() => {
     if (isActive) {
       syncIntervalRef.current = setInterval(() => {
@@ -180,6 +182,8 @@ export default function StudyPage() {
     lastSyncedSecondsRef.current = 0;
     setStartTime(new Date());
     setIsActive(true);
+    setPostStreakResult(null);
+    setStreakWasReset(false);
   };
 
   const handleStopSession = () => {
@@ -189,13 +193,24 @@ export default function StudyPage() {
   };
 
   const handleFinishAndSave = async (noQuestions: boolean) => {
-    if (!userId) return;
+    if (!userId || !startTime) return;
     setSaving(true);
 
     try {
-      // Only flush whatever's left since the last periodic sync —
-      // earlier chunks were already written during the session.
+      // 1. Flush remaining daily_logs diff (earlier chunks already written).
       await flushDiffToDailyLogs(savedDuration);
+
+      // 2. Save focus_sessions row + update streak columns in users table.
+      //    saveFocusSession() handles the MIN_STREAK_SECONDS check internally —
+      //    sessions shorter than 2 min don't update the streak.
+      const endedAt = new Date();
+      const streakResult = await saveFocusSession(userId, startTime, endedAt);
+      if (streakResult.countedForStreak) {
+        setCurrentStreak(streakResult.newStreak);
+        setPostStreakResult({ counted: true, newStreak: streakResult.newStreak });
+      } else {
+        setPostStreakResult({ counted: false, newStreak: currentStreak });
+      }
 
       setSaving(false);
       setShowPostModal(false);
@@ -229,6 +244,23 @@ export default function StudyPage() {
         },
         { onConflict: "user_id,log_date" }
       );
+
+      // Update streak only if:
+      // - the manual entry is for today (past dates shouldn't retroactively
+      //   fix a broken streak — that would be gameable)
+      // - the total minutes for today's entry is at least MIN_STREAK_SECONDS/60
+      const today = new Date().toISOString().split("T")[0];
+      const meetsStreakThreshold = newMins * 60 >= MIN_STREAK_SECONDS;
+      if (manualDate === today && meetsStreakThreshold) {
+        // Reuse saveFocusSession with synthetic timestamps so the same
+        // source-of-truth logic applies. Duration = manualMinutes in seconds.
+        const syntheticEnd = new Date();
+        const syntheticStart = new Date(syntheticEnd.getTime() - manualMinutes * 60 * 1000);
+        const streakResult = await saveFocusSession(userId, syntheticStart, syntheticEnd);
+        if (streakResult.countedForStreak) {
+          setCurrentStreak(streakResult.newStreak);
+        }
+      }
 
       setSaving(false);
       setShowManualModal(false);
@@ -268,6 +300,43 @@ export default function StudyPage() {
           </button>
         </div>
 
+        {/* Streak banner — shows current streak and a reset warning if applicable */}
+        {(currentStreak > 0 || streakWasReset) && (
+          <div className={`rounded-ticket border px-4 py-3 flex items-center gap-3 ${
+            streakWasReset
+              ? "bg-coral/10 border-coral/20"
+              : "bg-marigold/10 border-marigold/20"
+          }`}>
+            <span className="text-xl">{streakWasReset ? "💔" : "🔥"}</span>
+            <div>
+              <p className="text-xs font-bold text-ink">
+                {streakWasReset
+                  ? "Streak reset — you missed a day"
+                  : `${currentStreak}-day streak`}
+              </p>
+              <p className="text-[10px] text-slate">
+                {streakWasReset
+                  ? "Start a session today to begin a new streak."
+                  : "Keep it going — study at least 2 min today!"}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Post-session streak result toast */}
+        {postStreakResult && !showPostModal && (
+          <div className="rounded-ticket border border-teal/20 bg-teal/10 px-4 py-3 flex items-center gap-3">
+            <span className="text-xl">{postStreakResult.counted ? "🔥" : "⏱️"}</span>
+            <div>
+              <p className="text-xs font-bold text-ink">
+                {postStreakResult.counted
+                  ? `Streak updated: ${postStreakResult.newStreak} day${postStreakResult.newStreak !== 1 ? "s" : ""}!`
+                  : "Session saved — too short to count for streak (min 2 min)"}
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
           <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2">
             {isActive
@@ -296,9 +365,7 @@ export default function StudyPage() {
           )}
         </div>
 
-        {/* Allowed-Apps Selector (flipped model: everything blocked by
-            default, student picks what's ALLOWED). Enforcement needs the
-            native Flutter bridge — this is the picker + storage only. */}
+        {/* Allowed-Apps Selector */}
         <div className="bg-white rounded-ticket border border-ink/10 p-5 shadow-xs">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-bold text-ink flex items-center gap-1.5">
@@ -419,6 +486,11 @@ export default function StudyPage() {
             <p className="text-xs text-slate text-center">
               Studied {selectedSub} for {Math.round(savedDuration / 60)} mins.
             </p>
+            {savedDuration >= MIN_STREAK_SECONDS && (
+              <p className="text-[11px] text-teal font-bold text-center">
+                🔥 This session counts for your streak!
+              </p>
+            )}
 
             <button
               disabled={saving}
@@ -444,6 +516,12 @@ export default function StudyPage() {
                 ✕
               </button>
             </div>
+
+            {manualError && (
+              <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2 rounded-lg">
+                ⚠️ {manualError}
+              </p>
+            )}
 
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">
