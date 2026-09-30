@@ -67,8 +67,9 @@ export default function StudyRoomPanel({ groupId, userId, displayName }: StudyRo
 
   async function handleJoinRoom() {
     setError(null);
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
     } catch (e) {
@@ -284,4 +285,4 @@ function RemoteVideo({ peer }: { peer: RemotePeer }) {
       </span>
     </div>
   );
-      }
+}
