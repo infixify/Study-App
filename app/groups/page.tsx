@@ -19,6 +19,7 @@ interface PrivateGroup {
   name: string;
   target_exam: string;
   member_count: number;
+  created_by: string | null;
 }
 
 export default function CommunityPage() {
@@ -54,29 +55,29 @@ export default function CommunityPage() {
       if (!user) return;
       setCurrentUser(user);
 
-      // Real admin check — same mechanism as the rest of the app (Admin
-      // Panel etc). users.role is NOT used for this anymore: it was a
-      // self-updatable column with no lock of its own, so any signed-in
-      // user could have set role='admin' on their own row.
+      // Real admin check — same mechanism as the rest of the app.
       const { data: adminCheck } = await supabase.rpc("is_admin");
       if (adminCheck) {
         setIsAdmin(true);
       }
 
-      // Load joined groups from local storage
-      const savedJoined = localStorage.getItem("prepwise_joined_groups");
-      if (savedJoined) {
-        try {
-          setMyJoinedGroupIds(JSON.parse(savedJoined));
-        } catch (e) {}
-      }
+      // Membership is now the DATABASE (group_members table), not
+      // localStorage — localStorage was per-browser, not per-account, so
+      // switching accounts on the same device let the wrong user appear
+      // "already joined" and skip the passcode check entirely. The DB is
+      // now the single source of truth, keyed by auth.uid().
+      const { data: memberRows } = await supabase
+        .from("group_members")
+        .select("group_id")
+        .eq("user_id", user.id);
+      setMyJoinedGroupIds((memberRows ?? []).map((m) => m.group_id));
 
-      // Fetch groups — passcode is never selected here anymore. It can't
-      // be: SELECT on study_groups.passcode is revoked at the DB level,
-      // so a request for it would just error. Joining verifies server-side.
+      // Fetch groups — passcode is never selected. created_by is needed so
+      // the UI can grant a group's author delete-any-message rights inside
+      // their own room.
       const { data: dbGroups } = await supabase
         .from("study_groups")
-        .select("id, name, target_exam")
+        .select("id, name, target_exam, created_by")
         .order("created_at", { ascending: false });
 
       if (dbGroups && dbGroups.length > 0) {
@@ -94,6 +95,7 @@ export default function CommunityPage() {
             name: "Kota 10-Hour Challenge",
             target_exam: "JEE",
             member_count: 18,
+            created_by: null,
           },
         ]);
       }
@@ -103,6 +105,7 @@ export default function CommunityPage() {
 
   // Load Messages for current view (World or Private Group)
   const currentFeedId = activeGroupId || "world";
+  const activeGroup = groups.find((g) => g.id === activeGroupId) || null;
 
   useEffect(() => {
     async function loadFeedMessages() {
@@ -129,14 +132,7 @@ export default function CommunityPage() {
           setMessages([]);
         }
       } catch (err) {
-        const localMsgs = localStorage.getItem(`msgs_${currentFeedId}`);
-        if (localMsgs) {
-          try {
-            setMessages(JSON.parse(localMsgs));
-          } catch (e) {}
-        } else {
-          setMessages([]);
-        }
+        setMessages([]);
       } finally {
         setLoadingMessages(false);
       }
@@ -170,11 +166,9 @@ export default function CommunityPage() {
     setMessages(nextMsgs);
     setInputMsg("");
 
-    localStorage.setItem(`msgs_${currentFeedId}`, JSON.stringify(nextMsgs));
-
     try {
       // sender_uid must be the real signed-in uid — the insert RLS policy
-      // now requires sender_uid = auth.uid(), so this can't be spoofed.
+      // requires sender_uid = auth.uid(), so this can't be spoofed.
       await supabase.from("group_messages").insert({
         group_id: currentFeedId,
         sender_uid: currentUser?.id ?? null,
@@ -182,16 +176,16 @@ export default function CommunityPage() {
         content: optimisticMsg.content,
       });
     } catch (e) {
-      console.warn("Stored locally");
+      console.warn("Message send failed", e);
     }
   };
 
-  // Delete message — RLS now enforces sender_uid = auth.uid() OR is_admin(),
-  // so this can't be bypassed by calling the table directly either.
+  // Delete message — RLS enforces: sender can delete own, is_admin() can
+  // delete any, and a private group's author (created_by) can delete any
+  // message inside their own room.
   const handleDeleteMessage = async (id: string) => {
     const updated = messages.filter((m) => m.id !== id);
     setMessages(updated);
-    localStorage.setItem(`msgs_${currentFeedId}`, JSON.stringify(updated));
 
     try {
       await supabase.from("group_messages").delete().eq("id", id);
@@ -204,9 +198,6 @@ export default function CommunityPage() {
     if (!newGroupName.trim() || !newGroupPasscode.trim()) return;
 
     try {
-      // Let the DB generate the real uuid (study_groups.id is uuid — a
-      // client-made "group-<timestamp>" string was never valid here) and
-      // use the row it returns, rather than a locally invented id.
       const { data: inserted, error } = await supabase
         .from("study_groups")
         .insert({
@@ -215,7 +206,7 @@ export default function CommunityPage() {
           passcode: newGroupPasscode.trim(),
           created_by: currentUser?.id ?? null,
         })
-        .select("id, name, target_exam")
+        .select("id, name, target_exam, created_by")
         .single();
 
       if (error || !inserted) {
@@ -223,12 +214,11 @@ export default function CommunityPage() {
         return;
       }
 
+      // A DB trigger (add_creator_as_member) already inserted the creator
+      // into group_members — this just updates local UI state to match.
       const newGroup: PrivateGroup = { ...inserted, member_count: 1 };
       setGroups((prev) => [newGroup, ...prev]);
-
-      const nextJoined = [...myJoinedGroupIds, newGroup.id];
-      setMyJoinedGroupIds(nextJoined);
-      localStorage.setItem("prepwise_joined_groups", JSON.stringify(nextJoined));
+      setMyJoinedGroupIds((prev) => [...prev, newGroup.id]);
 
       setShowCreateModal(false);
       setNewGroupName("");
@@ -240,7 +230,8 @@ export default function CommunityPage() {
   };
 
   // Join Private Group with Passcode — verified server-side via a
-  // security-definer function. The passcode itself never reaches the
+  // security-definer function, which also records membership in
+  // group_members on success. The passcode itself never reaches the
   // browser; only a true/false answer does.
   const handleVerifyAndJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -261,9 +252,7 @@ export default function CommunityPage() {
       return;
     }
 
-    const nextJoined = [...myJoinedGroupIds, selectedGroupToJoin.id];
-    setMyJoinedGroupIds(nextJoined);
-    localStorage.setItem("prepwise_joined_groups", JSON.stringify(nextJoined));
+    setMyJoinedGroupIds((prev) => [...prev, selectedGroupToJoin.id]);
 
     setShowJoinModal(false);
     setEnteredPasscode("");
@@ -332,7 +321,6 @@ export default function CommunityPage() {
               <span className="text-[10px] text-slate">All Aspirants</span>
             </div>
 
-            {/* Chat List */}
             <div className="h-80 overflow-y-auto space-y-2.5 pr-1">
               {loadingMessages ? (
                 <p className="text-center py-10 text-xs text-slate">Loading messages...</p>
@@ -376,7 +364,6 @@ export default function CommunityPage() {
               )}
             </div>
 
-            {/* Input Form */}
             <form onSubmit={handleSendMessage} className="flex gap-1.5 pt-1">
               <input
                 type="text"
@@ -403,7 +390,7 @@ export default function CommunityPage() {
                 <div className="flex items-center justify-between pb-2 border-b border-ink/8">
                   <div>
                     <h3 className="font-bold text-xs text-ink">
-                      {groups.find((g) => g.id === activeGroupId)?.name || "Study Room"}
+                      {activeGroup?.name || "Study Room"}
                     </h3>
                     <span className="text-[10px] text-teal font-semibold">🔒 Private Room</span>
                   </div>
@@ -423,34 +410,40 @@ export default function CommunityPage() {
                       <p className="text-[11px]">Say hi to your study partners!</p>
                     </div>
                   ) : (
-                    messages.map((m) => (
-                      <div
-                        key={m.id}
-                        className="bg-paper/70 p-2.5 rounded-xl border border-ink/5 flex items-start justify-between gap-2"
-                      >
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] font-bold text-indigo-800">
-                              {m.sender_name}
-                            </span>
-                            <span className="text-[9.5px] text-slate font-medium">
-                              {m.created_at}
-                            </span>
+                    messages.map((m) => {
+                      const canDelete =
+                        isAdmin ||
+                        m.sender_uid === currentUser?.id ||
+                        (activeGroup?.created_by && activeGroup.created_by === currentUser?.id);
+                      return (
+                        <div
+                          key={m.id}
+                          className="bg-paper/70 p-2.5 rounded-xl border border-ink/5 flex items-start justify-between gap-2"
+                        >
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-bold text-indigo-800">
+                                {m.sender_name}
+                              </span>
+                              <span className="text-[9.5px] text-slate font-medium">
+                                {m.created_at}
+                              </span>
+                            </div>
+                            <p className="text-xs text-ink mt-0.5 leading-snug break-words">
+                              {m.content}
+                            </p>
                           </div>
-                          <p className="text-xs text-ink mt-0.5 leading-snug break-words">
-                            {m.content}
-                          </p>
+                          {canDelete && (
+                            <button
+                              onClick={() => handleDeleteMessage(m.id)}
+                              className="text-[10px] font-bold text-slate hover:text-rose-600 px-1"
+                            >
+                              ✕
+                            </button>
+                          )}
                         </div>
-                        {(isAdmin || m.sender_uid === currentUser?.id) && (
-                          <button
-                            onClick={() => handleDeleteMessage(m.id)}
-                            className="text-[10px] font-bold text-slate hover:text-rose-600 px-1"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
 
