@@ -27,11 +27,9 @@ export default function StudyPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [targetExam, setTargetExam] = useState<string>("JEE");
 
-  // Streak state — populated on load via loadAndReconcileStreak()
   const [currentStreak, setCurrentStreak] = useState<number>(0);
   const [streakWasReset, setStreakWasReset] = useState(false);
 
-  // Live Timer states
   const [seconds, setSeconds] = useState(0);
   const [isActive, setIsActive] = useState(false);
   const [startTime, setStartTime] = useState<Date | null>(null);
@@ -40,7 +38,6 @@ export default function StudyPage() {
   const lastSyncedSecondsRef = useRef(0);
   const syncIntervalRef = useRef<any>(null);
 
-  // Pre-session configuration modal
   const [showPreModal, setShowPreModal] = useState(false);
   const [selectedSub, setSelectedSub] = useState<SubjectType>("Physics");
   const [selectedTask, setSelectedTask] = useState<StudyTaskType>("questions");
@@ -48,14 +45,13 @@ export default function StudyPage() {
 
   const [allowedApps, setAllowedApps] = useState<string[]>(["pdf_reader", "calculator"]);
 
-  // Post-session log modal
   const [showPostModal, setShowPostModal] = useState(false);
   const [savedDuration, setSavedDuration] = useState(0);
   const [postStreakResult, setPostStreakResult] = useState<{ counted: boolean; newStreak: number } | null>(null);
-  const [qCount, setQCount] = useState<number>(0);
+  // Questions solved during the session — only asked when task = "questions"
+  const [postQCount, setPostQCount] = useState<number>(0);
   const [saving, setSaving] = useState(false);
 
-  // Manual Log Entry Modal
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualSub, setManualSub] = useState<SubjectType>("Physics");
   const [manualTask, setManualTask] = useState<StudyTaskType>("questions");
@@ -91,34 +87,24 @@ export default function StudyPage() {
         }
       }
 
-      // Load streak — also detects missed days and resets in DB if needed.
       try {
         const streakInfo = await loadAndReconcileStreak(user.id);
         setCurrentStreak(streakInfo.currentStreak);
-        if (streakInfo.streakWasReset) {
-          setStreakWasReset(true);
-        }
-      } catch (e) {
-        // Non-fatal — streak display just stays at 0 if this fails.
-      }
+        if (streakInfo.streakWasReset) setStreakWasReset(true);
+      } catch (e) {}
     }
     loadUser();
 
     const savedAllowed = localStorage.getItem("prepwise_allowed_apps");
     if (savedAllowed) {
-      try {
-        setAllowedApps(JSON.parse(savedAllowed));
-      } catch (e) {}
+      try { setAllowedApps(JSON.parse(savedAllowed)); } catch (e) {}
     }
   }, []);
 
   const toggleAppAllowed = (appId: string) => {
-    let updated: string[];
-    if (allowedApps.includes(appId)) {
-      updated = allowedApps.filter((id) => id !== appId);
-    } else {
-      updated = [...allowedApps, appId];
-    }
+    const updated = allowedApps.includes(appId)
+      ? allowedApps.filter((id) => id !== appId)
+      : [...allowedApps, appId];
     setAllowedApps(updated);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
   };
@@ -127,12 +113,10 @@ export default function StudyPage() {
     if (!userId) return;
     const diffSeconds = currentSeconds - lastSyncedSecondsRef.current;
     if (diffSeconds <= 0) return;
-
     const diffMinutes = Math.round(diffSeconds / 60);
     if (diffMinutes <= 0) return;
 
     const today = dateOverride ?? new Date().toISOString().split("T")[0];
-
     const { data: dailyRow } = await supabase
       .from("daily_logs")
       .select("study_time_minutes")
@@ -145,23 +129,18 @@ export default function StudyPage() {
       { user_id: userId, log_date: today, study_time_minutes: newMins },
       { onConflict: "user_id,log_date" }
     );
-
     lastSyncedSecondsRef.current += diffMinutes * 60;
   }
 
-  // Timer Tick
   useEffect(() => {
     if (isActive) {
-      timerRef.current = setInterval(() => {
-        setSeconds((s) => s + 1);
-      }, 1000);
-    } else if (!isActive && timerRef.current) {
+      timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+    } else if (timerRef.current) {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
   }, [isActive]);
 
-  // Debounced background sync
   useEffect(() => {
     if (isActive) {
       syncIntervalRef.current = setInterval(() => {
@@ -184,6 +163,7 @@ export default function StudyPage() {
     setIsActive(true);
     setPostStreakResult(null);
     setStreakWasReset(false);
+    setPostQCount(0);
   };
 
   const handleStopSession = () => {
@@ -192,17 +172,13 @@ export default function StudyPage() {
     setShowPostModal(true);
   };
 
-  const handleFinishAndSave = async (noQuestions: boolean) => {
+  const handleFinishAndSave = async () => {
     if (!userId || !startTime) return;
     setSaving(true);
 
     try {
-      // 1. Flush remaining daily_logs diff (earlier chunks already written).
       await flushDiffToDailyLogs(savedDuration);
 
-      // 2. Save focus_sessions row + update streak columns in users table.
-      //    saveFocusSession() handles the MIN_STREAK_SECONDS check internally —
-      //    sessions shorter than 2 min don't update the streak.
       const endedAt = new Date();
       const streakResult = await saveFocusSession(userId, startTime, endedAt);
       if (streakResult.countedForStreak) {
@@ -210,6 +186,45 @@ export default function StudyPage() {
         setPostStreakResult({ counted: true, newStreak: streakResult.newStreak });
       } else {
         setPostStreakResult({ counted: false, newStreak: currentStreak });
+      }
+
+      // Log questions to question_logs if this was a practice session
+      // and the user entered a non-zero count.
+      if (selectedTask === "questions" && postQCount > 0) {
+        const today = new Date().toISOString().split("T")[0];
+        // question_logs tracks by subject; fetch the subject_id for the
+        // selected subject under the user's target_exam and their class.
+        const { data: subjectRow } = await supabase
+          .from("subjects")
+          .select("id")
+          .eq("name", selectedSub)
+          .eq("target_exam", targetExam)
+          .limit(1)
+          .maybeSingle();
+
+        if (subjectRow?.id) {
+          const { data: existing } = await supabase
+            .from("question_logs")
+            .select("id, question_count")
+            .eq("user_id", userId)
+            .eq("subject_id", subjectRow.id)
+            .eq("log_date", today)
+            .maybeSingle();
+
+          if (existing) {
+            await supabase
+              .from("question_logs")
+              .update({ question_count: existing.question_count + postQCount })
+              .eq("id", existing.id);
+          } else {
+            await supabase.from("question_logs").insert({
+              user_id: userId,
+              subject_id: subjectRow.id,
+              question_count: postQCount,
+              log_date: today,
+            });
+          }
+        }
       }
 
       setSaving(false);
@@ -237,29 +252,53 @@ export default function StudyPage() {
 
       const newMins = (dailyRow?.study_time_minutes || 0) + manualMinutes;
       await supabase.from("daily_logs").upsert(
-        {
-          user_id: userId,
-          log_date: manualDate,
-          study_time_minutes: newMins,
-        },
+        { user_id: userId, log_date: manualDate, study_time_minutes: newMins },
         { onConflict: "user_id,log_date" }
       );
 
-      // Update streak only if:
-      // - the manual entry is for today (past dates shouldn't retroactively
-      //   fix a broken streak — that would be gameable)
-      // - the total minutes for today's entry is at least MIN_STREAK_SECONDS/60
+      // Log questions for manual "questions" entries (today only)
       const today = new Date().toISOString().split("T")[0];
+      if (manualTask === "questions" && manualQs > 0 && manualDate === today) {
+        const { data: subjectRow } = await supabase
+          .from("subjects")
+          .select("id")
+          .eq("name", manualSub)
+          .eq("target_exam", targetExam)
+          .limit(1)
+          .maybeSingle();
+
+        if (subjectRow?.id) {
+          const { data: existing } = await supabase
+            .from("question_logs")
+            .select("id, question_count")
+            .eq("user_id", userId)
+            .eq("subject_id", subjectRow.id)
+            .eq("log_date", today)
+            .maybeSingle();
+
+          if (existing) {
+            await supabase
+              .from("question_logs")
+              .update({ question_count: existing.question_count + manualQs })
+              .eq("id", existing.id);
+          } else {
+            await supabase.from("question_logs").insert({
+              user_id: userId,
+              subject_id: subjectRow.id,
+              question_count: manualQs,
+              log_date: today,
+            });
+          }
+        }
+      }
+
+      // Update streak for today's manual entry if it meets the threshold
       const meetsStreakThreshold = newMins * 60 >= MIN_STREAK_SECONDS;
       if (manualDate === today && meetsStreakThreshold) {
-        // Reuse saveFocusSession with synthetic timestamps so the same
-        // source-of-truth logic applies. Duration = manualMinutes in seconds.
         const syntheticEnd = new Date();
         const syntheticStart = new Date(syntheticEnd.getTime() - manualMinutes * 60 * 1000);
         const streakResult = await saveFocusSession(userId, syntheticStart, syntheticEnd);
-        if (streakResult.countedForStreak) {
-          setCurrentStreak(streakResult.newStreak);
-        }
+        if (streakResult.countedForStreak) setCurrentStreak(streakResult.newStreak);
       }
 
       setSaving(false);
@@ -274,9 +313,7 @@ export default function StudyPage() {
     const hrs = Math.floor(totalSeconds / 3600);
     const mins = Math.floor((totalSeconds % 3600) / 60);
     const secs = totalSeconds % 60;
-    return `${hrs > 0 ? hrs + ":" : ""}${mins
-      .toString()
-      .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    return `${hrs > 0 ? hrs + ":" : ""}${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
   return (
@@ -288,8 +325,7 @@ export default function StudyPage() {
           <div>
             <h1 className="font-display text-2xl text-ink">Focus Mode</h1>
             <p className="text-xs text-slate mt-0.5">
-              Target: <span className="font-bold text-teal">{targetExam}</span>{" "}
-              • Zero Distractions
+              Target: <span className="font-bold text-teal">{targetExam}</span> • Zero Distractions
             </p>
           </div>
           <button
@@ -300,19 +336,14 @@ export default function StudyPage() {
           </button>
         </div>
 
-        {/* Streak banner — shows current streak and a reset warning if applicable */}
         {(currentStreak > 0 || streakWasReset) && (
           <div className={`rounded-ticket border px-4 py-3 flex items-center gap-3 ${
-            streakWasReset
-              ? "bg-coral/10 border-coral/20"
-              : "bg-marigold/10 border-marigold/20"
+            streakWasReset ? "bg-coral/10 border-coral/20" : "bg-marigold/10 border-marigold/20"
           }`}>
             <span className="text-xl">{streakWasReset ? "💔" : "🔥"}</span>
             <div>
               <p className="text-xs font-bold text-ink">
-                {streakWasReset
-                  ? "Streak reset — you missed a day"
-                  : `${currentStreak}-day streak`}
+                {streakWasReset ? "Streak reset — you missed a day" : `${currentStreak}-day streak`}
               </p>
               <p className="text-[10px] text-slate">
                 {streakWasReset
@@ -323,7 +354,6 @@ export default function StudyPage() {
           </div>
         )}
 
-        {/* Post-session streak result toast */}
         {postStreakResult && !showPostModal && (
           <div className="rounded-ticket border border-teal/20 bg-teal/10 px-4 py-3 flex items-center gap-3">
             <span className="text-xl">{postStreakResult.counted ? "🔥" : "⏱️"}</span>
@@ -339,15 +369,11 @@ export default function StudyPage() {
 
         <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
           <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2">
-            {isActive
-              ? `🔥 Studying ${selectedSub} (${selectedTask})`
-              : "Ready to focus?"}
+            {isActive ? `🔥 Studying ${selectedSub} (${selectedTask})` : "Ready to focus?"}
           </div>
-
           <div className="font-mono text-5xl font-black text-ink my-3 tracking-tight">
             {formatTimer(seconds)}
           </div>
-
           {!isActive ? (
             <button
               onClick={() => setShowPreModal(true)}
@@ -365,21 +391,17 @@ export default function StudyPage() {
           )}
         </div>
 
-        {/* Allowed-Apps Selector */}
         <div className="bg-white rounded-ticket border border-ink/10 p-5 shadow-xs">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-bold text-ink flex items-center gap-1.5">
               <span>🛡️</span>
               <span>Allowed Apps During Session</span>
             </h3>
-            <span className="text-[10px] font-bold text-slate">
-              {allowedApps.length} Allowed
-            </span>
+            <span className="text-[10px] font-bold text-slate">{allowedApps.length} Allowed</span>
           </div>
           <p className="text-[11px] text-slate mb-3">
             Everything is blocked by default. Tap an app to allow it during focus sessions.
           </p>
-
           <div className="grid grid-cols-2 gap-2">
             {APP_LIST.map((app) => {
               const isAllowed = allowedApps.includes(app.id);
@@ -410,66 +432,31 @@ export default function StudyPage() {
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
               <h3 className="text-sm font-bold text-ink">Choose Subject</h3>
-              <button
-                onClick={() => setShowPreModal(false)}
-                className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60"
-              >
-                ✕
-              </button>
+              <button onClick={() => setShowPreModal(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60">✕</button>
             </div>
-
             <div>
-              <label className="text-[11px] font-bold text-slate block mb-1">
-                Subject
-              </label>
+              <label className="text-[11px] font-bold text-slate block mb-1">Subject</label>
               <div className="grid grid-cols-3 gap-1.5">
                 {availableSubjects.map((sub) => (
-                  <button
-                    key={sub}
-                    type="button"
-                    onClick={() => setSelectedSub(sub)}
-                    className={`py-2 rounded-xl text-xs font-bold border transition-all ${
-                      selectedSub === sub
-                        ? "bg-teal text-white border-teal shadow-xs"
-                        : "bg-paper/60 border-ink/10 text-ink"
-                    }`}
-                  >
+                  <button key={sub} type="button" onClick={() => setSelectedSub(sub)}
+                    className={`py-2 rounded-xl text-xs font-bold border transition-all ${selectedSub === sub ? "bg-teal text-white border-teal shadow-xs" : "bg-paper/60 border-ink/10 text-ink"}`}>
                     {sub}
                   </button>
                 ))}
               </div>
             </div>
-
             <div>
-              <label className="text-[11px] font-bold text-slate block mb-1">
-                Category
-              </label>
+              <label className="text-[11px] font-bold text-slate block mb-1">Category</label>
               <div className="grid grid-cols-3 gap-1.5">
-                {[
-                  { id: "theory", label: "🎥 Theory" },
-                  { id: "questions", label: "✍️ Practice" },
-                  { id: "revision", label: "🔄 Revision" },
-                ].map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setSelectedTask(item.id as StudyTaskType)}
-                    className={`py-2 rounded-xl text-[11px] font-bold border transition-all ${
-                      selectedTask === item.id
-                        ? "bg-marigold/20 text-ink border-marigold shadow-xs"
-                        : "bg-paper/60 border-ink/10 text-slate"
-                    }`}
-                  >
+                {[{ id: "theory", label: "🎥 Theory" }, { id: "questions", label: "✍️ Practice" }, { id: "revision", label: "🔄 Revision" }].map((item) => (
+                  <button key={item.id} type="button" onClick={() => setSelectedTask(item.id as StudyTaskType)}
+                    className={`py-2 rounded-xl text-[11px] font-bold border transition-all ${selectedTask === item.id ? "bg-marigold/20 text-ink border-marigold shadow-xs" : "bg-paper/60 border-ink/10 text-slate"}`}>
                     {item.label}
                   </button>
                 ))}
               </div>
             </div>
-
-            <button
-              onClick={handleStartSession}
-              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90"
-            >
+            <button onClick={handleStartSession} className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90">
               Start Focus Session
             </button>
           </div>
@@ -480,24 +467,40 @@ export default function StudyPage() {
       {showPostModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
-            <h3 className="text-base font-black text-ink text-center">
-              Session Finished!
-            </h3>
+            <h3 className="text-base font-black text-ink text-center">Session Finished! 🎉</h3>
             <p className="text-xs text-slate text-center">
-              Studied {selectedSub} for {Math.round(savedDuration / 60)} mins.
+              Studied {selectedSub} ({selectedTask}) for {Math.round(savedDuration / 60)} mins.
             </p>
             {savedDuration >= MIN_STREAK_SECONDS && (
-              <p className="text-[11px] text-teal font-bold text-center">
-                🔥 This session counts for your streak!
-              </p>
+              <p className="text-[11px] text-teal font-bold text-center">🔥 This session counts for your streak!</p>
+            )}
+
+            {/* Question count input — only shown for practice sessions */}
+            {selectedTask === "questions" && (
+              <div>
+                <label className="text-[11px] font-bold text-slate block mb-1 text-center">
+                  ✍️ How many questions did you solve?
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={postQCount}
+                  onChange={(e) => setPostQCount(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="w-full p-2.5 text-center text-sm font-bold rounded-xl border border-ink/15 focus:border-teal outline-none"
+                  placeholder="0"
+                />
+                <p className="text-[10px] text-slate text-center mt-1">
+                  Will be added to your {selectedSub} question counter
+                </p>
+              </div>
             )}
 
             <button
               disabled={saving}
-              onClick={() => handleFinishAndSave(true)}
+              onClick={handleFinishAndSave}
               className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs"
             >
-              {saving ? "Saving..." : "✓ Save Study Time"}
+              {saving ? "Saving..." : "✓ Save & Log Session"}
             </button>
           </div>
         </div>
@@ -509,86 +512,62 @@ export default function StudyPage() {
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
               <h3 className="text-sm font-bold text-ink">Log Offline Study</h3>
-              <button
-                onClick={() => setShowManualModal(false)}
-                className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60"
-              >
-                ✕
-              </button>
+              <button onClick={() => setShowManualModal(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60">✕</button>
             </div>
-
             {manualError && (
-              <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2 rounded-lg">
-                ⚠️ {manualError}
-              </p>
+              <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2 rounded-lg">⚠️ {manualError}</p>
             )}
-
             <div>
-              <label className="text-[11px] font-bold text-slate block mb-1">
-                Subject
-              </label>
+              <label className="text-[11px] font-bold text-slate block mb-1">Subject</label>
               <div className="grid grid-cols-3 gap-1.5">
                 {availableSubjects.map((sub) => (
-                  <button
-                    key={sub}
-                    type="button"
-                    onClick={() => setManualSub(sub)}
-                    className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                      manualSub === sub
-                        ? "bg-teal text-white border-teal shadow-xs"
-                        : "bg-paper/60 border-ink/10 text-ink"
-                    }`}
-                  >
+                  <button key={sub} type="button" onClick={() => setManualSub(sub)}
+                    className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${manualSub === sub ? "bg-teal text-white border-teal shadow-xs" : "bg-paper/60 border-ink/10 text-ink"}`}>
                     {sub}
                   </button>
                 ))}
               </div>
             </div>
-
+            <div>
+              <label className="text-[11px] font-bold text-slate block mb-1">Category</label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[{ id: "theory", label: "🎥 Theory" }, { id: "questions", label: "✍️ Practice" }, { id: "revision", label: "🔄 Revision" }].map((item) => (
+                  <button key={item.id} type="button" onClick={() => setManualTask(item.id as StudyTaskType)}
+                    className={`py-1.5 rounded-lg text-[11px] font-bold border transition-all ${manualTask === item.id ? "bg-marigold/20 text-ink border-marigold shadow-xs" : "bg-paper/60 border-ink/10 text-slate"}`}>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-[11px] font-bold text-slate block mb-1">
-                  Minutes
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  value={manualMinutes}
+                <label className="text-[11px] font-bold text-slate block mb-1">Minutes</label>
+                <input type="number" min={1} value={manualMinutes}
                   onChange={(e) => setManualMinutes(parseInt(e.target.value) || 0)}
-                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15"
-                />
+                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15" />
               </div>
               <div>
                 <label className="text-[11px] font-bold text-slate block mb-1">
-                  Questions
+                  {manualTask === "questions" ? "Questions Solved" : "Questions (optional)"}
                 </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={manualQs}
+                <input type="number" min={0} value={manualQs}
                   onChange={(e) => setManualQs(parseInt(e.target.value) || 0)}
-                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15"
-                />
+                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15" />
               </div>
             </div>
-
             <div>
-              <label className="text-[11px] font-bold text-slate block mb-1">
-                Date
-              </label>
-              <input
-                type="date"
-                value={manualDate}
+              <label className="text-[11px] font-bold text-slate block mb-1">Date</label>
+              <input type="date" value={manualDate}
                 onChange={(e) => setManualDate(e.target.value)}
-                className="w-full p-2 text-xs rounded-lg border border-ink/15"
-              />
+                className="w-full p-2 text-xs rounded-lg border border-ink/15" />
             </div>
-
-            <button
-              disabled={saving}
-              onClick={handleSaveManualEntry}
-              className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs"
-            >
+            {manualDate !== new Date().toISOString().split("T")[0] && (
+              <p className="text-[10px] text-slate bg-ink/5 rounded-lg px-3 py-2">
+                ℹ️ Past-date entries update study hours but not your streak (streak is today-only).
+              </p>
+            )}
+            <button disabled={saving} onClick={handleSaveManualEntry}
+              className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs">
               {saving ? "Saving..." : "Add to Daily Study Hours"}
             </button>
           </div>
