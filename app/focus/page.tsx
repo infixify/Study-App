@@ -16,7 +16,11 @@ const APP_LIST = [
   { id: "snapchat", name: "Snapchat", icon: "👻" },
   { id: "telegram", name: "Telegram", icon: "✈️" },
   { id: "games", name: "Games & Social Media", icon: "🎮" },
+  { id: "pdf_reader", name: "PDF Reader", icon: "📄" },
+  { id: "calculator", name: "Calculator", icon: "🧮" },
 ];
+
+const SYNC_INTERVAL_SECONDS = 60; // how often we write the diff to daily_logs during an active session
 
 export default function StudyPage() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -28,17 +32,23 @@ export default function StudyPage() {
   const [startTime, setStartTime] = useState<Date | null>(null);
   const timerRef = useRef<any>(null);
 
+  // Debounced diff-sync tracking — how many seconds of this session we've
+  // already flushed to daily_logs, so we only ever write the NEW diff,
+  // never the full duration again (avoids double-counting on stop).
+  const lastSyncedSecondsRef = useRef(0);
+  const syncIntervalRef = useRef<any>(null);
+
   // Pre-session configuration modal
   const [showPreModal, setShowPreModal] = useState(false);
   const [selectedSub, setSelectedSub] = useState<SubjectType>("Physics");
   const [selectedTask, setSelectedTask] = useState<StudyTaskType>("questions");
   const [strictMode, setStrictMode] = useState(true);
-  const [blockedApps, setBlockedApps] = useState<string[]>([
-    "instagram",
-    "youtube",
-    "whatsapp",
-    "games",
-  ]);
+
+  // Flipped model: student now selects which apps are ALLOWED during a
+  // session (everything else is blocked by default). Enforcement itself
+  // still needs the native Flutter bridge — this is just the picker +
+  // storage, ready for that wiring later.
+  const [allowedApps, setAllowedApps] = useState<string[]>(["pdf_reader", "calculator"]);
 
   // Post-session log modal
   const [showPostModal, setShowPostModal] = useState(false);
@@ -57,9 +67,6 @@ export default function StudyPage() {
   );
   const [manualError, setManualError] = useState<string | null>(null);
 
-  // Active Available Subjects Filtered By Exam Target:
-  // JEE = Physics, Chemistry, Mathematics (NO BIOLOGY)
-  // NEET = Physics, Chemistry, Biology (NO MATHEMATICS)
   const availableSubjects: SubjectType[] =
     targetExam === "NEET"
       ? ["Physics", "Chemistry", "Biology"]
@@ -87,25 +94,56 @@ export default function StudyPage() {
     }
     loadUser();
 
-    // Load persistent blocked apps
-    const savedBlocks = localStorage.getItem("prepwise_blocked_apps");
-    if (savedBlocks) {
+    const savedAllowed = localStorage.getItem("prepwise_allowed_apps");
+    if (savedAllowed) {
       try {
-        setBlockedApps(JSON.parse(savedBlocks));
+        setAllowedApps(JSON.parse(savedAllowed));
       } catch (e) {}
     }
   }, []);
 
-  const toggleAppBlock = (appId: string) => {
+  const toggleAppAllowed = (appId: string) => {
     let updated: string[];
-    if (blockedApps.includes(appId)) {
-      updated = blockedApps.filter((id) => id !== appId);
+    if (allowedApps.includes(appId)) {
+      updated = allowedApps.filter((id) => id !== appId);
     } else {
-      updated = [...blockedApps, appId];
+      updated = [...allowedApps, appId];
     }
-    setBlockedApps(updated);
-    localStorage.setItem("prepwise_blocked_apps", JSON.stringify(updated));
+    setAllowedApps(updated);
+    localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
   };
+
+  // Writes only the NEW seconds since the last sync to daily_logs, then
+  // advances the checkpoint. Safe to call repeatedly — never re-adds time
+  // that's already been flushed.
+  async function flushDiffToDailyLogs(currentSeconds: number, dateOverride?: string) {
+    if (!userId) return;
+    const diffSeconds = currentSeconds - lastSyncedSecondsRef.current;
+    if (diffSeconds <= 0) return;
+
+    const diffMinutes = Math.round(diffSeconds / 60);
+    if (diffMinutes <= 0) return; // wait until at least a full minute has accrued
+
+    const today = dateOverride ?? new Date().toISOString().split("T")[0];
+
+    const { data: dailyRow } = await supabase
+      .from("daily_logs")
+      .select("study_time_minutes")
+      .eq("user_id", userId)
+      .eq("log_date", today)
+      .maybeSingle();
+
+    const newMins = (dailyRow?.study_time_minutes || 0) + diffMinutes;
+    await supabase.from("daily_logs").upsert(
+      { user_id: userId, log_date: today, study_time_minutes: newMins },
+      { onConflict: "user_id,log_date" }
+    );
+
+    // Advance the checkpoint by exactly the minutes we just flushed
+    // (in seconds), so any leftover partial-minute seconds carry over
+    // to the next flush instead of being silently dropped.
+    lastSyncedSecondsRef.current += diffMinutes * 60;
+  }
 
   // Timer Tick
   useEffect(() => {
@@ -119,9 +157,27 @@ export default function StudyPage() {
     return () => clearInterval(timerRef.current);
   }, [isActive]);
 
+  // Debounced background sync — flushes the diff every SYNC_INTERVAL_SECONDS
+  // while a session is active, so a crashed tab / closed browser doesn't
+  // lose the whole session's study time, only up to the last interval.
+  useEffect(() => {
+    if (isActive) {
+      syncIntervalRef.current = setInterval(() => {
+        setSeconds((currentSeconds) => {
+          flushDiffToDailyLogs(currentSeconds);
+          return currentSeconds;
+        });
+      }, SYNC_INTERVAL_SECONDS * 1000);
+    } else if (syncIntervalRef.current) {
+      clearInterval(syncIntervalRef.current);
+    }
+    return () => clearInterval(syncIntervalRef.current);
+  }, [isActive, userId]);
+
   const handleStartSession = () => {
     setShowPreModal(false);
     setSeconds(0);
+    lastSyncedSecondsRef.current = 0;
     setStartTime(new Date());
     setIsActive(true);
   };
@@ -135,31 +191,16 @@ export default function StudyPage() {
   const handleFinishAndSave = async (noQuestions: boolean) => {
     if (!userId) return;
     setSaving(true);
-    const durationMinutes = Math.max(1, Math.round(savedDuration / 60));
-    const today = new Date().toISOString().split("T")[0];
 
     try {
-      // 1. Update daily_logs study_time_minutes
-      const { data: dailyRow } = await supabase
-        .from("daily_logs")
-        .select("study_time_minutes")
-        .eq("user_id", userId)
-        .eq("log_date", today)
-        .maybeSingle();
-
-      const newMins = (dailyRow?.study_time_minutes || 0) + durationMinutes;
-      await supabase.from("daily_logs").upsert(
-        {
-          user_id: userId,
-          log_date: today,
-          study_time_minutes: newMins,
-        },
-        { onConflict: "user_id,log_date" }
-      );
+      // Only flush whatever's left since the last periodic sync —
+      // earlier chunks were already written during the session.
+      await flushDiffToDailyLogs(savedDuration);
 
       setSaving(false);
       setShowPostModal(false);
       setSeconds(0);
+      lastSyncedSecondsRef.current = 0;
     } catch (err) {
       console.error(err);
       setSaving(false);
@@ -211,7 +252,6 @@ export default function StudyPage() {
       <AppHeader />
 
       <main className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-5">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="font-display text-2xl text-ink">Focus Mode</h1>
@@ -228,7 +268,6 @@ export default function StudyPage() {
           </button>
         </div>
 
-        {/* Live Timer Card */}
         <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
           <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2">
             {isActive
@@ -240,7 +279,6 @@ export default function StudyPage() {
             {formatTimer(seconds)}
           </div>
 
-          {/* Controls */}
           {!isActive ? (
             <button
               onClick={() => setShowPreModal(true)}
@@ -258,38 +296,40 @@ export default function StudyPage() {
           )}
         </div>
 
-        {/* YPT-Style App Blocker Selector */}
+        {/* Allowed-Apps Selector (flipped model: everything blocked by
+            default, student picks what's ALLOWED). Enforcement needs the
+            native Flutter bridge — this is the picker + storage only. */}
         <div className="bg-white rounded-ticket border border-ink/10 p-5 shadow-xs">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-bold text-ink flex items-center gap-1.5">
               <span>🛡️</span>
-              <span>Distraction Blocker (YPT Mode)</span>
+              <span>Allowed Apps During Session</span>
             </h3>
             <span className="text-[10px] font-bold text-slate">
-              {blockedApps.length} Blocked
+              {allowedApps.length} Allowed
             </span>
           </div>
           <p className="text-[11px] text-slate mb-3">
-            Tap apps to toggle blocking during active focus sessions.
+            Everything is blocked by default. Tap an app to allow it during focus sessions.
           </p>
 
           <div className="grid grid-cols-2 gap-2">
             {APP_LIST.map((app) => {
-              const isBlocked = blockedApps.includes(app.id);
+              const isAllowed = allowedApps.includes(app.id);
               return (
                 <button
                   key={app.id}
                   type="button"
-                  onClick={() => toggleAppBlock(app.id)}
+                  onClick={() => toggleAppAllowed(app.id)}
                   className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all ${
-                    isBlocked
-                      ? "bg-rose-50 border-rose-200 text-rose-800 shadow-2xs"
+                    isAllowed
+                      ? "bg-teal/10 border-teal/30 text-teal shadow-2xs"
                       : "bg-paper/50 border-ink/10 text-slate hover:bg-paper"
                   }`}
                 >
                   <span>{app.icon}</span>
                   <span className="truncate flex-1 text-left">{app.name}</span>
-                  <span className="text-[10px]">{isBlocked ? "⛔" : "✓"}</span>
+                  <span className="text-[10px]">{isAllowed ? "✓" : "⛔"}</span>
                 </button>
               );
             })}
@@ -311,7 +351,6 @@ export default function StudyPage() {
               </button>
             </div>
 
-            {/* Subject Selector (Filtered for JEE/NEET) */}
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">
                 Subject
@@ -334,7 +373,6 @@ export default function StudyPage() {
               </div>
             </div>
 
-            {/* Task Category */}
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">
                 Category
