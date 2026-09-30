@@ -1,7 +1,7 @@
 // app/dashboard/page.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase, classLevelsForContent } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import BottomNav from "@/components/dashboard/BottomNav";
@@ -64,339 +64,733 @@ interface DailyLogItem {
   revision_minutes?: number;
 }
 
-// ─── SVG STICKERS ────────────────────────────────────────────────────────────
-const STICKERS: Record<string, JSX.Element> = {
-  nobita: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="21" r="14" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1.2"/>
-      <ellipse cx="20" cy="9" rx="10" ry="5" fill="#222"/>
-      <rect x="10" y="9" width="20" height="4" fill="#222"/>
-      <circle cx="15" cy="21" r="4.5" fill="none" stroke="#333" strokeWidth="1.5"/>
-      <circle cx="25" cy="21" r="4.5" fill="none" stroke="#333" strokeWidth="1.5"/>
-      <line x1="19.5" y1="21" x2="20.5" y2="21" stroke="#333" strokeWidth="1.5"/>
-      <line x1="10.5" y1="21" x2="9" y2="20" stroke="#333" strokeWidth="1.5"/>
-      <line x1="29.5" y1="21" x2="31" y2="20" stroke="#333" strokeWidth="1.5"/>
-      <line x1="13" y1="21" x2="17" y2="21" stroke="#555" strokeWidth="1.5"/>
-      <line x1="23" y1="21" x2="27" y2="21" stroke="#555" strokeWidth="1.5"/>
-      <path d="M16 27 Q20 25 24 27" stroke="#C0706A" strokeWidth="1.2" fill="none"/>
-      <ellipse cx="12" cy="26" rx="3" ry="1.5" fill="#FFB3B3" opacity="0.6"/>
-      <ellipse cx="28" cy="26" rx="3" ry="1.5" fill="#FFB3B3" opacity="0.6"/>
-      <text x="30" y="12" fontSize="6" fill="#888" fontWeight="bold">z</text>
-      <text x="33" y="8" fontSize="5" fill="#888" fontWeight="bold">z</text>
-    </svg>
-  ),
-  daya: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="21" r="14" fill="#D4956A" stroke="#A0673A" strokeWidth="1.2"/>
-      <ellipse cx="20" cy="9" rx="11" ry="5" fill="#111"/>
-      <rect x="9" y="9" width="22" height="5" fill="#111"/>
-      <rect x="12" y="16" width="6" height="2" rx="1" fill="#111" transform="rotate(-10 15 17)"/>
-      <rect x="22" y="16" width="6" height="2" rx="1" fill="#111" transform="rotate(10 25 17)"/>
-      <ellipse cx="15" cy="20" rx="2.5" ry="2" fill="#111"/>
-      <ellipse cx="25" cy="20" rx="2.5" ry="2" fill="#111"/>
-      <circle cx="15.5" cy="19.5" r="0.8" fill="white"/>
-      <circle cx="25.5" cy="19.5" r="0.8" fill="white"/>
-      <path d="M13 25 Q17 22 20 24 Q23 22 27 25 Q23 28 20 26 Q17 28 13 25Z" fill="#111"/>
-      <rect x="16" y="31" width="8" height="4" rx="1" fill="#FFD700" opacity="0.8"/>
-      <text x="17.5" y="34.5" fontSize="3.5" fill="#333" fontWeight="bold">CID</text>
-    </svg>
-  ),
-  naruto: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="22" r="13" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      {[14,17,20,23,26].map((x,i) => (
-        <polygon key={i} points={`${x},12 ${x+2},4 ${x+4},12`} fill="#F5C518"/>
-      ))}
-      <ellipse cx="20" cy="12" rx="11" ry="5" fill="#F5C518"/>
-      <rect x="9" y="13" width="22" height="4" rx="1" fill="#4A7FC1"/>
-      <rect x="16" y="13" width="8" height="4" fill="#8BA8D4"/>
-      <ellipse cx="15" cy="22" rx="2.5" ry="2.5" fill="#4A90D9"/>
-      <ellipse cx="25" cy="22" rx="2.5" ry="2.5" fill="#4A90D9"/>
-      <circle cx="15" cy="22" r="1.2" fill="#111"/>
-      <circle cx="25" cy="22" r="1.2" fill="#111"/>
-      <line x1="9" y1="22" x2="13" y2="23" stroke="#C8956A" strokeWidth="1"/>
-      <line x1="9" y1="25" x2="13" y2="25" stroke="#C8956A" strokeWidth="1"/>
-      <line x1="27" y1="23" x2="31" y2="22" stroke="#C8956A" strokeWidth="1"/>
-      <line x1="27" y1="25" x2="31" y2="25" stroke="#C8956A" strokeWidth="1"/>
-      <path d="M15 28 Q20 32 25 28" stroke="#C0706A" strokeWidth="1.5" fill="none"/>
-    </svg>
-  ),
-  saitama: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="21" r="14" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      <ellipse cx="15" cy="19" rx="3" ry="2" fill="white" stroke="#555" strokeWidth="0.8"/>
-      <ellipse cx="25" cy="19" rx="3" ry="2" fill="white" stroke="#555" strokeWidth="0.8"/>
-      <circle cx="15" cy="19.5" r="1.2" fill="#333"/>
-      <circle cx="25" cy="19.5" r="1.2" fill="#333"/>
-      <line x1="16" y1="27" x2="24" y2="27" stroke="#999" strokeWidth="1.5"/>
-      <path d="M10 33 Q20 36 30 33" fill="#FFFF00" stroke="#CCC" strokeWidth="0.8"/>
-      <text x="31" y="14" fontSize="5.5" fill="#888" fontWeight="bold">ok.</text>
-    </svg>
-  ),
-  rocklee: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="22" r="13" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      <ellipse cx="20" cy="13" rx="13" ry="7" fill="#111"/>
-      <rect x="7" y="13" width="26" height="5" fill="#111"/>
-      <rect x="11" y="18" width="7" height="2.5" rx="1.2" fill="#111"/>
-      <rect x="22" y="18" width="7" height="2.5" rx="1.2" fill="#111"/>
-      <circle cx="15" cy="23" r="3" fill="#4A4A00"/>
-      <circle cx="25" cy="23" r="3" fill="#4A4A00"/>
-      <circle cx="14.5" cy="22.5" r="1" fill="white"/>
-      <circle cx="24.5" cy="22.5" r="1" fill="white"/>
-      <path d="M14 29 Q20 34 26 29" stroke="#C0706A" strokeWidth="1.8" fill="none"/>
-      <ellipse cx="32" cy="18" rx="1.5" ry="2.5" fill="#88CCFF" opacity="0.8"/>
-    </svg>
-  ),
-  shinchan: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="22" r="14" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1.2"/>
-      <ellipse cx="20" cy="10" rx="12" ry="6" fill="#111"/>
-      <rect x="8" y="10" width="24" height="5" fill="#111"/>
-      <circle cx="15" cy="21" r="2" fill="#111"/>
-      <circle cx="25" cy="21" r="2" fill="#111"/>
-      <circle cx="14.5" cy="20.5" r="0.6" fill="white"/>
-      <circle cx="24.5" cy="20.5" r="0.6" fill="white"/>
-      <path d="M12 27 Q20 33 28 27" fill="#E8A0A0" stroke="#C0706A" strokeWidth="1"/>
-      <path d="M14 27 Q20 31 26 27" fill="#FF8888"/>
-      <circle cx="11" cy="26" r="3" fill="#FFB3B3" opacity="0.5"/>
-      <circle cx="29" cy="26" r="3" fill="#FFB3B3" opacity="0.5"/>
-      <path d="M12 18 Q15 16 18 18" stroke="#111" strokeWidth="1.5" fill="none"/>
-      <path d="M22 18 Q25 16 28 18" stroke="#111" strokeWidth="1.5" fill="none"/>
-    </svg>
-  ),
-  doraemon: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="21" r="14" fill="#00AADD"/>
-      <ellipse cx="20" cy="24" rx="10" ry="9" fill="white"/>
-      <circle cx="15" cy="16" r="4" fill="white"/>
-      <circle cx="25" cy="16" r="4" fill="white"/>
-      <circle cx="15.5" cy="16.5" r="2.5" fill="#111"/>
-      <circle cx="25.5" cy="16.5" r="2.5" fill="#111"/>
-      <circle cx="15" cy="15.5" r="0.8" fill="white"/>
-      <circle cx="25.5" cy="15.5" r="0.8" fill="white"/>
-      <circle cx="20" cy="22" r="2.5" fill="#FF3333"/>
-      <line x1="5" y1="22" x2="15" y2="24" stroke="#555" strokeWidth="0.8"/>
-      <line x1="5" y1="26" x2="15" y2="26" stroke="#555" strokeWidth="0.8"/>
-      <line x1="25" y1="24" x2="35" y2="22" stroke="#555" strokeWidth="0.8"/>
-      <line x1="25" y1="26" x2="35" y2="26" stroke="#555" strokeWidth="0.8"/>
-      <path d="M12 28 Q20 34 28 28" fill="#FF3333" stroke="#CC0000" strokeWidth="0.8"/>
-      <circle cx="20" cy="35" r="2.5" fill="#FFD700" stroke="#CCA000" strokeWidth="0.8"/>
-    </svg>
-  ),
-  luffy: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="23" r="13" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      <ellipse cx="20" cy="12" rx="16" ry="4" fill="#D4A840" stroke="#A07820" strokeWidth="1"/>
-      <path d="M10 12 Q20 18 30 12" fill="#C89030" stroke="#A07820" strokeWidth="0.8"/>
-      <path d="M8 13 Q20 19 32 13" stroke="#CC2222" strokeWidth="2" fill="none"/>
-      <circle cx="15" cy="23" r="3" fill="#1A1A1A"/>
-      <circle cx="25" cy="23" r="3" fill="#1A1A1A"/>
-      <circle cx="14.2" cy="22.2" r="1" fill="white"/>
-      <circle cx="24.2" cy="22.2" r="1" fill="white"/>
-      <line x1="13" y1="27" x2="17" y2="29" stroke="#CC4444" strokeWidth="1.5"/>
-      <path d="M11 29 Q20 36 29 29" fill="#FF8888" stroke="#CC4444" strokeWidth="1"/>
-      <path d="M13 29 Q20 34 27 29" fill="#FF6666"/>
-    </svg>
-  ),
-  vegeta: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="22" r="13" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      <polygon points="20,6 14,14 26,14" fill="#111"/>
-      <polygon points="12,10 8,16 16,16" fill="#111"/>
-      <polygon points="28,10 24,16 32,16" fill="#111"/>
-      <rect x="8" y="14" width="24" height="5" fill="#111"/>
-      <line x1="11" y1="18" x2="18" y2="20" stroke="#111" strokeWidth="2.5"/>
-      <line x1="29" y1="18" x2="22" y2="20" stroke="#111" strokeWidth="2.5"/>
-      <ellipse cx="15" cy="23" rx="2.5" ry="2" fill="#111"/>
-      <ellipse cx="25" cy="23" rx="2.5" ry="2" fill="#111"/>
-      <circle cx="14.5" cy="22.5" r="0.7" fill="white"/>
-      <circle cx="24.5" cy="22.5" r="0.7" fill="white"/>
-      <path d="M15 29 Q20 27 25 29" stroke="#A06050" strokeWidth="1.5" fill="none"/>
-      <text x="28" y="10" fontSize="4.5" fill="#FF4400" fontWeight="bold">9000!</text>
-    </svg>
-  ),
-  light: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="22" r="13" fill="#F5DEB3" stroke="#DEB887" strokeWidth="1"/>
-      <ellipse cx="20" cy="11" rx="11" ry="5" fill="#8B4513"/>
-      <rect x="9" y="11" width="22" height="5" fill="#8B4513"/>
-      <path d="M9 13 Q13 10 18 12" fill="#8B4513"/>
-      <ellipse cx="15" cy="22" rx="2.8" ry="2.2" fill="#8B4513"/>
-      <ellipse cx="25" cy="22" rx="2.8" ry="2.2" fill="#8B4513"/>
-      <circle cx="14.5" cy="21.8" r="0.8" fill="white"/>
-      <circle cx="24.5" cy="21.8" r="0.8" fill="white"/>
-      <path d="M16 28 Q20 31 24 28" stroke="#C08060" strokeWidth="1.2" fill="none"/>
-      <rect x="26" y="28" width="8" height="10" rx="1" fill="#111"/>
-      <text x="27" y="35" fontSize="3.5" fill="white">NOTE</text>
-    </svg>
-  ),
-  itachi: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <ellipse cx="20" cy="22" rx="12" ry="14" fill="#FDDBA0" stroke="#E8A84C" strokeWidth="1"/>
-      <ellipse cx="20" cy="10" rx="12" ry="6" fill="#111"/>
-      <rect x="8" y="10" width="4" height="20" fill="#111"/>
-      <rect x="28" y="10" width="4" height="20" fill="#111"/>
-      <rect x="8" y="14" width="24" height="3" fill="#444"/>
-      <circle cx="15" cy="23" r="3" fill="#CC1111"/>
-      <circle cx="25" cy="23" r="3" fill="#CC1111"/>
-      <circle cx="15" cy="23" r="1.5" fill="#111"/>
-      <circle cx="25" cy="23" r="1.5" fill="#111"/>
-      <line x1="16" y1="30" x2="24" y2="30" stroke="#C0706A" strokeWidth="1"/>
-      <line x1="10" y1="26" x2="13" y2="28" stroke="#8B0000" strokeWidth="1"/>
-      <line x1="27" y1="28" x2="30" y2="26" stroke="#8B0000" strokeWidth="1"/>
-    </svg>
-  ),
-  gru: (
-    <svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-      <ellipse cx="20" cy="20" rx="11" ry="13" fill="#B8B8C8" stroke="#8888AA" strokeWidth="1"/>
-      <ellipse cx="16" cy="12" rx="3" ry="2" fill="white" opacity="0.3"/>
-      <circle cx="16" cy="19" r="2" fill="#222"/>
-      <circle cx="24" cy="19" r="2" fill="#222"/>
-      <circle cx="15.5" cy="18.5" r="0.6" fill="white"/>
-      <circle cx="23.5" cy="18.5" r="0.6" fill="white"/>
-      <ellipse cx="20" cy="25" rx="3" ry="6" fill="#A8A8B8" stroke="#8888AA" strokeWidth="0.8"/>
-      <rect x="9" y="31" width="22" height="3" rx="1" fill="#888"/>
-      <rect x="9" y="34" width="22" height="2" rx="1" fill="#555"/>
-      <line x1="9" y1="25" x2="3" y2="20" stroke="#B8B8C8" strokeWidth="3"/>
-      <line x1="31" y1="25" x2="37" y2="20" stroke="#B8B8C8" strokeWidth="3"/>
-    </svg>
-  ),
-};
+interface ContentCardItem {
+  id: string;
+  quote: string;
+  character: string;
+  show: string;
+  icon_or_sticker: string;
+  color: string;
+  bg: string;
+  border: string;
+  text: string;
+  badge: string;
+}
 
-// ─── ANIME/MEME QUOTES DATA ───────────────────────────────────────────────────
-const ANIME_QUOTES = [
+// ─── 70+ HIGH-QUALITY MOTIVATIONAL QUOTES (INDIAN LEGENDS & GLOBAL ICONS) ───
+const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   {
-    quote: "Iske paas Doraemon hai, lekin aapko to khud hi padhna padega 😂 Isko dekho aur timer on karo! Dusro pe mat hasna — khud padho!",
-    character: "Nobita Nobi",
-    show: "Doraemon (Meme Edition)",
-    sticker: "nobita",
-    color: "from-blue-400 to-cyan-300",
-    bg: "bg-blue-50",
-    border: "border-blue-200",
-    text: "text-blue-900",
-    badge: "bg-blue-400",
-  },
-  {
-    quote: "PAKAD PAKAD PAKAD... Isne aaj tak padhai nahi ki! Daya, isko pakad lo! 😂 CID ne tujhe dhundh liya — ab padh le bhai!",
-    character: "ACP Pradyuman",
-    show: "CID (Meme Edition)",
-    sticker: "daya",
-    color: "from-gray-600 to-gray-400",
-    bg: "bg-gray-50",
-    border: "border-gray-300",
-    text: "text-gray-900",
-    badge: "bg-gray-600",
-  },
-  {
-    quote: "Bhai main bhi nahi jaanta tha ki meraa kya hoga. Lekin ek cheez thi — main kabhi nahi ruka. Chal timer on kar!",
-    character: "Naruto Uzumaki",
-    show: "Naruto",
-    sticker: "naruto",
-    color: "from-orange-500 to-yellow-400",
-    bg: "bg-orange-50",
-    border: "border-orange-200",
-    text: "text-orange-900",
-    badge: "bg-orange-500",
-  },
-  {
-    quote: "Training? Homework? Test? Sab ek jaise lagta hai... OK. (Par tune bhi abhi tak start nahi kiya 🤨)",
-    character: "Saitama",
-    show: "One Punch Man",
-    sticker: "saitama",
-    color: "from-yellow-400 to-amber-300",
-    bg: "bg-yellow-50",
-    border: "border-yellow-200",
-    text: "text-yellow-900",
-    badge: "bg-yellow-500",
-  },
-  {
-    quote: "Youth is the time to go all out! Ek baar bhi try kiye bina mat kehna ki nahi ho sakta. Ab leg press karne ki jagah books uthao!",
-    character: "Rock Lee",
-    show: "Naruto",
-    sticker: "rocklee",
-    color: "from-green-500 to-emerald-400",
-    bg: "bg-emerald-50",
-    border: "border-emerald-200",
-    text: "text-emerald-900",
-    badge: "bg-emerald-500",
-  },
-  {
-    quote: "Ae sun, exam aane wala hai aur tu abhi bhi phone pe hai?! Shinchan bhi isse zyada serious rehta hai! 😤 Chal bhaag library!",
-    character: "Shinchan Nohara",
-    show: "Crayon Shin-chan (Meme)",
-    sticker: "shinchan",
-    color: "from-red-400 to-pink-300",
-    bg: "bg-red-50",
-    border: "border-red-200",
-    text: "text-red-900",
-    badge: "bg-red-400",
-  },
-  {
-    quote: "Mere paas ek magical pocket hai jisme se koi bhi cheez nikalti hai — lekin tere rank improve karne ka jugaad sirf padhai hai! 😅",
-    character: "Doraemon",
-    show: "Doraemon",
-    sticker: "doraemon",
-    color: "from-sky-500 to-blue-400",
+    id: "m-1",
+    quote: "Dream is not that which you see while sleeping, it is something that does not let you sleep.",
+    character: "Dr. A.P.J. Abdul Kalam",
+    show: "Wings of Fire",
+    icon_or_sticker: "🚀",
+    color: "from-sky-500 to-indigo-600",
     bg: "bg-sky-50",
     border: "border-sky-200",
-    text: "text-sky-900",
+    text: "text-sky-950",
     badge: "bg-sky-500",
   },
   {
-    quote: "Tujhe koi roke toh mat ruk. Sapne dekhna band mat kar. Aur haan — seat belt lagale kyunki ye padhai wali ride fast hai! 🏴‍☠️",
-    character: "Monkey D. Luffy",
-    show: "One Piece",
-    sticker: "luffy",
-    color: "from-red-500 to-orange-400",
-    bg: "bg-red-50",
-    border: "border-red-200",
-    text: "text-red-900",
-    badge: "bg-red-500",
+    id: "m-2",
+    quote: "Arise, awake, and stop not until the goal is reached. Strength is life, weakness is death.",
+    character: "Swami Vivekananda",
+    show: "Rousing Call to Youth",
+    icon_or_sticker: "⚡",
+    color: "from-amber-500 to-orange-600",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-950",
+    badge: "bg-amber-500",
   },
   {
-    quote: "NANI?! Tu OVER 9000 questions solve karna chahta hai?! Toh baith jaa aur shuru kar — yaha khade rehne se kuch nahi hoga, baka!",
-    character: "Vegeta",
-    show: "Dragon Ball Z",
-    sticker: "vegeta",
-    color: "from-indigo-600 to-blue-500",
-    bg: "bg-indigo-50",
-    border: "border-indigo-200",
-    text: "text-indigo-900",
-    badge: "bg-indigo-600",
-  },
-  {
-    quote: "Humane logo ke dimaag ko main ek hi raat mein padh leta hun. Tera next chapter? Teri problem. Ab padh. 😏",
-    character: "Light Yagami",
-    show: "Death Note",
-    sticker: "light",
-    color: "from-slate-700 to-slate-500",
+    id: "m-3",
+    quote: "I do not believe in taking right decisions. I take decisions and then make them right.",
+    character: "Ratan Tata",
+    show: "Industrial Legend",
+    icon_or_sticker: "🏛️",
+    color: "from-slate-700 to-slate-900",
     bg: "bg-slate-50",
     border: "border-slate-300",
-    text: "text-slate-900",
+    text: "text-slate-950",
     badge: "bg-slate-700",
   },
   {
-    quote: "People's lives don't end when they die — they end when they lose faith. Aur tera focus session? Tab khatam hota hai jab TU band karta hai.",
-    character: "Itachi Uchiha",
-    show: "Naruto",
-    sticker: "itachi",
-    color: "from-purple-700 to-red-500",
-    bg: "bg-purple-50",
-    border: "border-purple-200",
-    text: "text-purple-900",
-    badge: "bg-purple-700",
+    id: "m-4",
+    quote: "They may kill me, but they cannot kill my ideas. They can crush my body, but they cannot crush my spirit.",
+    character: "Bhagat Singh",
+    show: "Freedom Visionary",
+    icon_or_sticker: "🔥",
+    color: "from-red-600 to-rose-700",
+    bg: "bg-rose-50",
+    border: "border-rose-200",
+    text: "text-rose-950",
+    badge: "bg-red-600",
   },
   {
-    quote: "Step 1: Padhai karo. Step 2: ??? Step 3: AIR 1 aao. Step 2 is still classified. 😂 Mera plan solid hai!",
-    character: "Gru",
-    show: "Despicable Me (Meme)",
-    sticker: "gru",
-    color: "from-amber-600 to-yellow-500",
+    id: "m-5",
+    quote: "An equation for me has no meaning unless it expresses a thought of God.",
+    character: "Srinivasa Ramanujan",
+    show: "Pure Mathematics",
+    icon_or_sticker: "♾️",
+    color: "from-teal-500 to-emerald-600",
+    bg: "bg-teal-50",
+    border: "border-teal-200",
+    text: "text-teal-950",
+    badge: "bg-teal-500",
+  },
+  {
+    id: "m-6",
+    quote: "Ask the right questions, and nature will open the doors to her secrets.",
+    character: "Sir C.V. Raman",
+    show: "Nobel Laureate (Physics)",
+    icon_or_sticker: "💎",
+    color: "from-blue-600 to-cyan-500",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    text: "text-blue-950",
+    badge: "bg-blue-600",
+  },
+  {
+    id: "m-7",
+    quote: "Give me blood, and I shall give you freedom! Stand up for your destiny with courage.",
+    character: "Netaji Subhash Chandra Bose",
+    show: "Azad Hind",
+    icon_or_sticker: "🎖️",
+    color: "from-amber-600 to-yellow-600",
     bg: "bg-amber-50",
     border: "border-amber-200",
-    text: "text-amber-900",
+    text: "text-amber-950",
     badge: "bg-amber-600",
+  },
+  {
+    id: "m-8",
+    quote: "Educate, Agitate, Organise. Have faith in yourselves and never surrender to circumstance.",
+    character: "Dr. B.R. Ambedkar",
+    show: "Architect of Modern India",
+    icon_or_sticker: "⚖️",
+    color: "from-blue-700 to-indigo-800",
+    bg: "bg-indigo-50",
+    border: "border-indigo-200",
+    text: "text-indigo-950",
+    badge: "bg-indigo-700",
+  },
+  {
+    id: "m-9",
+    quote: "You cannot cross the sea merely by standing and staring at the water.",
+    character: "Rabindranath Tagore",
+    show: "Gitanjali",
+    icon_or_sticker: "🌊",
+    color: "from-emerald-600 to-teal-700",
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-950",
+    badge: "bg-emerald-600",
+  },
+  {
+    id: "m-10",
+    quote: "No Indian should feel inferior to anyone in the world. Work with pride, think with scientific temper.",
+    character: "Dr. Homi J. Bhabha",
+    show: "Father of Indian Nuclear Science",
+    icon_or_sticker: "⚛️",
+    color: "from-cyan-600 to-blue-700",
+    bg: "bg-cyan-50",
+    border: "border-cyan-200",
+    text: "text-cyan-950",
+    badge: "bg-cyan-600",
+  },
+  {
+    id: "m-11",
+    quote: "I have no special talents. I am only passionately curious. Persist through the hard problem.",
+    character: "Albert Einstein",
+    show: "Theoretical Physics",
+    icon_or_sticker: "💡",
+    color: "from-purple-600 to-indigo-600",
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-950",
+    badge: "bg-purple-600",
+  },
+  {
+    id: "m-12",
+    quote: "Nobody ever figures out what life is, and it doesn't matter. Explore the world. Nearly everything is really interesting if you go into it deeply enough.",
+    character: "Richard Feynman",
+    show: "Nobel Laureate (QED)",
+    icon_or_sticker: "🔬",
+    color: "from-orange-500 to-amber-500",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    text: "text-orange-950",
+    badge: "bg-orange-500",
+  },
+  {
+    id: "m-13",
+    quote: "Nothing in life is to be feared, it is only to be understood. Now is the time to understand more, so that we may fear less.",
+    character: "Marie Curie",
+    show: "Double Nobel Laureate",
+    icon_or_sticker: "🧪",
+    color: "from-teal-600 to-cyan-600",
+    bg: "bg-teal-50",
+    border: "border-teal-200",
+    text: "text-teal-950",
+    badge: "bg-teal-600",
+  },
+  {
+    id: "m-14",
+    quote: "The present is theirs; the future, for which I really worked, is mine.",
+    character: "Nikola Tesla",
+    show: "Master of Electricity",
+    icon_or_sticker: "⚡",
+    color: "from-blue-500 to-violet-600",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    text: "text-blue-950",
+    badge: "bg-blue-500",
+  },
+  {
+    id: "m-15",
+    quote: "You have power over your mind — not outside events. Realize this, and you will find immense strength.",
+    character: "Marcus Aurelius",
+    show: "Meditations",
+    icon_or_sticker: "🛡️",
+    color: "from-stone-600 to-stone-800",
+    bg: "bg-stone-50",
+    border: "border-stone-300",
+    text: "text-stone-950",
+    badge: "bg-stone-600",
+  },
+  {
+    id: "m-16",
+    quote: "We are what we repeatedly do. Excellence, then, is not an act, but a habit.",
+    character: "Aristotle",
+    show: "Classical Philosophy",
+    icon_or_sticker: "📜",
+    color: "from-amber-700 to-orange-700",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-950",
+    badge: "bg-amber-700",
+  },
+  {
+    id: "m-17",
+    quote: "Your time is limited, so don't waste it living someone else's life. Have the courage to follow your heart and intuition.",
+    character: "Steve Jobs",
+    show: "Stanford Address",
+    icon_or_sticker: "🍏",
+    color: "from-slate-800 to-zinc-900",
+    bg: "bg-slate-50",
+    border: "border-slate-300",
+    text: "text-slate-950",
+    badge: "bg-slate-800",
+  },
+  {
+    id: "m-18",
+    quote: "However difficult life may seem, there is always something you can do and succeed at. It matters that you just don't give up.",
+    character: "Stephen Hawking",
+    show: "Cosmology & Physics",
+    icon_or_sticker: "🌌",
+    color: "from-indigo-600 to-violet-700",
+    bg: "bg-indigo-50",
+    border: "border-indigo-200",
+    text: "text-indigo-950",
+    badge: "bg-indigo-600",
+  },
+  {
+    id: "m-19",
+    quote: "Sometimes it is the people no one can imagine anything of who do the things no one can imagine.",
+    character: "Alan Turing",
+    show: "Father of Computing",
+    icon_or_sticker: "💻",
+    color: "from-cyan-600 to-teal-700",
+    bg: "bg-cyan-50",
+    border: "border-cyan-200",
+    text: "text-cyan-950",
+    badge: "bg-cyan-600",
+  },
+  {
+    id: "m-20",
+    quote: "Learning never exhausts the mind. Continuous study turns confusion into complete clarity.",
+    character: "Leonardo da Vinci",
+    show: "Polymath",
+    icon_or_sticker: "🎨",
+    color: "from-amber-600 to-yellow-600",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-950",
+    badge: "bg-amber-600",
+  },
+  {
+    id: "m-21",
+    quote: "Failure will never overtake me if my determination to succeed is strong enough.",
+    character: "Dr. A.P.J. Abdul Kalam",
+    show: "Inspiring Thoughts",
+    icon_or_sticker: "🎯",
+    color: "from-teal-600 to-blue-600",
+    bg: "bg-teal-50",
+    border: "border-teal-200",
+    text: "text-teal-950",
+    badge: "bg-teal-600",
+  },
+  {
+    id: "m-22",
+    quote: "Take up one idea. Make that one idea your life; dream of it; think of it; live on that idea. That is the way to success.",
+    character: "Swami Vivekananda",
+    show: "Karma Yoga",
+    icon_or_sticker: "🧘",
+    color: "from-orange-600 to-red-600",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    text: "text-orange-950",
+    badge: "bg-orange-600",
+  },
+  {
+    id: "m-23",
+    quote: "If you want to shine like a sun, first burn like a sun. Study with pure focus today.",
+    character: "Dr. A.P.J. Abdul Kalam",
+    show: "Vision 2020",
+    icon_or_sticker: "☀️",
+    color: "from-amber-500 to-yellow-500",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-950",
+    badge: "bg-amber-500",
+  },
+  {
+    id: "m-24",
+    quote: "If people do not believe that mathematics is simple, it is only because they do not realize how complicated life is.",
+    character: "John von Neumann",
+    show: "Mathematical Logic",
+    icon_or_sticker: "📐",
+    color: "from-blue-600 to-indigo-700",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    text: "text-blue-950",
+    badge: "bg-blue-600",
+  },
+  {
+    id: "m-25",
+    quote: "Genius is one percent inspiration and ninety-nine percent perspiration. Solve the next question.",
+    character: "Thomas Edison",
+    show: "Inventor",
+    icon_or_sticker: "💡",
+    color: "from-yellow-600 to-amber-600",
+    bg: "bg-yellow-50",
+    border: "border-yellow-200",
+    text: "text-yellow-950",
+    badge: "bg-yellow-600",
+  },
+  {
+    id: "m-26",
+    quote: "In the middle of difficulty lies opportunity. Every tough numerical builds your examination rank.",
+    character: "Albert Einstein",
+    show: "Insight Notes",
+    icon_or_sticker: "✨",
+    color: "from-purple-600 to-pink-600",
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-950",
+    badge: "bg-purple-600",
+  },
+  {
+    id: "m-27",
+    quote: "The impediment to action advances action. What stands in the way becomes the way.",
+    character: "Marcus Aurelius",
+    show: "Stoic Principles",
+    icon_or_sticker: "🏛️",
+    color: "from-slate-700 to-stone-700",
+    bg: "bg-slate-50",
+    border: "border-slate-300",
+    text: "text-slate-950",
+    badge: "bg-slate-700",
+  },
+  {
+    id: "m-28",
+    quote: "Small aims are a crime; have great aim. Work relentlessly toward your rank.",
+    character: "Dr. A.P.J. Abdul Kalam",
+    show: "Ignited Minds",
+    icon_or_sticker: "🏹",
+    color: "from-rose-600 to-red-600",
+    bg: "bg-rose-50",
+    border: "border-rose-200",
+    text: "text-rose-950",
+    badge: "bg-rose-600",
+  },
+  {
+    id: "m-29",
+    quote: "It always seems impossible until it's done. Sit down and finish the chapter.",
+    character: "Nelson Mandela",
+    show: "Long Walk to Freedom",
+    icon_or_sticker: "🏔️",
+    color: "from-emerald-600 to-teal-700",
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-950",
+    badge: "bg-emerald-600",
+  },
+  {
+    id: "m-30",
+    quote: "Live as if you were to die tomorrow. Learn as if you were to live forever.",
+    character: "Mahatma Gandhi",
+    show: "Ethical Philosophy",
+    icon_or_sticker: "🕊️",
+    color: "from-teal-600 to-emerald-600",
+    bg: "bg-teal-50",
+    border: "border-teal-200",
+    text: "text-teal-950",
+    badge: "bg-teal-600",
+  },
+  {
+    id: "m-31",
+    quote: "An investment in knowledge pays the best interest. Dedicate your afternoon to problem solving.",
+    character: "Benjamin Franklin",
+    show: "Founding Father",
+    icon_or_sticker: "📚",
+    color: "from-indigo-600 to-blue-600",
+    bg: "bg-indigo-50",
+    border: "border-indigo-200",
+    text: "text-indigo-950",
+    badge: "bg-indigo-600",
+  },
+  {
+    id: "m-32",
+    quote: "What you get by achieving your goals is not as important as what you become by achieving your goals.",
+    character: "Henry David Thoreau",
+    show: "Walden",
+    icon_or_sticker: "🌲",
+    color: "from-green-600 to-emerald-700",
+    bg: "bg-green-50",
+    border: "border-green-200",
+    text: "text-green-950",
+    badge: "bg-green-600",
+  },
+  {
+    id: "m-33",
+    quote: "Hard work beats talent when talent fails to work hard. Keep your timer running.",
+    character: "Tim Notke",
+    show: "Athletic Axiom",
+    icon_or_sticker: "⚙️",
+    color: "from-orange-600 to-amber-600",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    text: "text-orange-950",
+    badge: "bg-orange-600",
+  },
+  {
+    id: "m-34",
+    quote: "Discipline is the bridge between goals and accomplishment. Eliminate distractions for the next hour.",
+    character: "Jim Rohn",
+    show: "Strategy of Success",
+    icon_or_sticker: "🌉",
+    color: "from-blue-700 to-indigo-800",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    text: "text-blue-950",
+    badge: "bg-blue-700",
+  },
+  {
+    id: "m-35",
+    quote: "Success is the sum of small efforts, repeated day in and day out.",
+    character: "Robert Collier",
+    show: "Principles of Persistence",
+    icon_or_sticker: "📈",
+    color: "from-teal-600 to-cyan-700",
+    bg: "bg-teal-50",
+    border: "border-teal-200",
+    text: "text-teal-950",
+    badge: "bg-teal-600",
+  },
+  {
+    id: "m-36",
+    quote: "The secret of getting ahead is getting started. Don't wait for ideal mood.",
+    character: "Mark Twain",
+    show: "Author & Satirist",
+    icon_or_sticker: "✍️",
+    color: "from-amber-600 to-orange-700",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-950",
+    badge: "bg-amber-600",
+  },
+  {
+    id: "m-37",
+    quote: "Energy and persistence conquer all things. Break down the tough syllabus chapter.",
+    character: "Benjamin Franklin",
+    show: "Poor Richard's Almanack",
+    icon_or_sticker: "⚡",
+    color: "from-yellow-600 to-amber-700",
+    bg: "bg-yellow-50",
+    border: "border-yellow-200",
+    text: "text-yellow-950",
+    badge: "bg-yellow-600",
+  },
+  {
+    id: "m-38",
+    quote: "Never give up on a dream just because of the time it will take to accomplish it. The time will pass anyway.",
+    character: "Earl Nightingale",
+    show: "Direct Motivation",
+    icon_or_sticker: "⏳",
+    color: "from-indigo-600 to-purple-600",
+    bg: "bg-indigo-50",
+    border: "border-indigo-200",
+    text: "text-indigo-950",
+    badge: "bg-indigo-600",
+  },
+  {
+    id: "m-39",
+    quote: "If you don't build your dream, someone will hire you to help build theirs. Master your subjects.",
+    character: "Dhirubhai Ambani",
+    show: "Enterprise Pioneer",
+    icon_or_sticker: "🏗️",
+    color: "from-blue-700 to-slate-800",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    text: "text-blue-950",
+    badge: "bg-blue-700",
+  },
+  {
+    id: "m-40",
+    quote: "Believe you can and you're halfway there. Trust your daily question practice.",
+    character: "Theodore Roosevelt",
+    show: "Leadership Speeches",
+    icon_or_sticker: "🎯",
+    color: "from-red-600 to-rose-700",
+    bg: "bg-red-50",
+    border: "border-red-200",
+    text: "text-red-950",
+    badge: "bg-red-600",
+  },
+  {
+    id: "m-41",
+    quote: "The only place where success comes before work is in the dictionary.",
+    character: "Vidal Sassoon",
+    show: "Aphorisms",
+    icon_or_sticker: "📖",
+    color: "from-slate-700 to-zinc-800",
+    bg: "bg-slate-50",
+    border: "border-slate-300",
+    text: "text-slate-950",
+    badge: "bg-slate-700",
+  },
+  {
+    id: "m-42",
+    quote: "You don't have to be great to start, but you have to start to be great.",
+    character: "Zig Ziglar",
+    show: "Peak Performance",
+    icon_or_sticker: "🚀",
+    color: "from-teal-600 to-emerald-600",
+    bg: "bg-teal-50",
+    border: "border-teal-200",
+    text: "text-teal-950",
+    badge: "bg-teal-600",
+  },
+  {
+    id: "m-43",
+    quote: "Don't watch the clock; do what it does. Keep going.",
+    character: "Sam Levenson",
+    show: "Time Principles",
+    icon_or_sticker: "⏱️",
+    color: "from-cyan-600 to-blue-600",
+    bg: "bg-cyan-50",
+    border: "border-cyan-200",
+    text: "text-cyan-950",
+    badge: "bg-cyan-600",
+  },
+  {
+    id: "m-44",
+    quote: "Courage is resistance to fear, mastery of fear — not absence of fear. Face your toughest mock test.",
+    character: "Mark Twain",
+    show: "Wisdom Notes",
+    icon_or_sticker: "🦁",
+    color: "from-amber-600 to-orange-700",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-950",
+    badge: "bg-amber-600",
+  },
+  {
+    id: "m-45",
+    quote: "Press forward. Do not stop, do not linger in your journey, but strive for the mark set before you.",
+    character: "George Whitefield",
+    show: "Endurance",
+    icon_or_sticker: "🏃",
+    color: "from-rose-600 to-red-600",
+    bg: "bg-rose-50",
+    border: "border-rose-200",
+    text: "text-rose-950",
+    badge: "bg-rose-600",
+  },
+  {
+    id: "m-46",
+    quote: "Action is the foundational key to all success. Stop overthinking and start solving.",
+    character: "Pablo Picasso",
+    show: "Creative Drive",
+    icon_or_sticker: "🔑",
+    color: "from-purple-600 to-indigo-600",
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-950",
+    badge: "bg-purple-600",
+  },
+  {
+    id: "m-47",
+    quote: "Continuous effort — not strength or intelligence — is the key to unlocking our potential.",
+    character: "Winston Churchill",
+    show: "Historical Speeches",
+    icon_or_sticker: "🔓",
+    color: "from-slate-700 to-stone-800",
+    bg: "bg-slate-50",
+    border: "border-slate-300",
+    text: "text-slate-950",
+    badge: "bg-slate-700",
+  },
+  {
+    id: "m-48",
+    quote: "The future depends on what you do today. Make today's 8 hours count.",
+    character: "Mahatma Gandhi",
+    show: "Constructive Action",
+    icon_or_sticker: "🌱",
+    color: "from-emerald-600 to-green-700",
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-950",
+    badge: "bg-emerald-600",
+  },
+  {
+    id: "m-49",
+    quote: "You are the master of your destiny. You can influence, direct and control your own environment.",
+    character: "Napoleon Hill",
+    show: "Think and Grow Rich",
+    icon_or_sticker: "👑",
+    color: "from-amber-600 to-yellow-600",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-950",
+    badge: "bg-amber-600",
+  },
+  {
+    id: "m-50",
+    quote: "A person who never made a mistake never tried anything new. Log your errors and learn.",
+    character: "Albert Einstein",
+    show: "Scientific Musings",
+    icon_or_sticker: "📕",
+    color: "from-violet-600 to-indigo-700",
+    bg: "bg-violet-50",
+    border: "border-violet-200",
+    text: "text-violet-950",
+    badge: "bg-violet-600",
+  },
+];
+
+// ─── MEMES / ROASTS (INCLUDES INITIAL VIRAL ROASTS + USER PLACEHOLDERS) ────────
+const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
+  {
+    id: "meme-1",
+    quote: "PAKAD PAKAD PAKAD... Isne aaj tak numericals solve nahi kiye! Daya, iska phone tod do! 😂",
+    character: "ACP Pradyuman",
+    show: "CID (Meme Edition)",
+    icon_or_sticker: "👮",
+    color: "from-gray-600 to-gray-800",
+    bg: "bg-gray-50",
+    border: "border-gray-300",
+    text: "text-gray-950",
+    badge: "bg-gray-600",
+  },
+  {
+    id: "meme-2",
+    quote: "Iske paas Doraemon hai, lekin rank laane ke liye khud padhna padega! Dusro ki stories dekhna band karo!",
+    character: "Nobita Nobi",
+    show: "Doraemon (Meme Edition)",
+    icon_or_sticker: "👓",
+    color: "from-blue-500 to-cyan-500",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    text: "text-blue-950",
+    badge: "bg-blue-500",
+  },
+  {
+    id: "meme-3",
+    quote: "Training? Homework? Test? Sab theek hai... par tune aaj kitne questions kiye? OK. 🤨",
+    character: "Saitama",
+    show: "One Punch Man",
+    icon_or_sticker: "🥊",
+    color: "from-yellow-500 to-amber-500",
+    bg: "bg-yellow-50",
+    border: "border-yellow-200",
+    text: "text-yellow-950",
+    badge: "bg-yellow-500",
+  },
+  {
+    id: "meme-4",
+    quote: "Bhai agar itna time padhai me lagata jitna reels scroll karne me lagaya hai, toh abhi AIR 1 pakki thi!",
+    character: "Sarcastic Senior",
+    show: "Kota Realities",
+    icon_or_sticker: "📱",
+    color: "from-rose-500 to-pink-500",
+    bg: "bg-rose-50",
+    border: "border-rose-200",
+    text: "text-rose-950",
+    badge: "bg-rose-500",
+  },
+  {
+    id: "meme-5",
+    quote: "Step 1: Padhai karenge. Step 2: ??? Step 3: Top Rank. Bhai Step 2 me padhna hota hai! 😂",
+    character: "Gru",
+    show: "Despicable Me (Meme)",
+    icon_or_sticker: "📋",
+    color: "from-amber-600 to-orange-600",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-950",
+    badge: "bg-amber-600",
+  },
+  {
+    id: "meme-6",
+    quote: "Tu abhi tak phone dekh raha hai?! Shinchan bhi test ke time serious rehta hai! Chal library bhaag!",
+    character: "Shinchan Nohara",
+    show: "Crayon Shin-chan",
+    icon_or_sticker: "🍫",
+    color: "from-red-500 to-rose-500",
+    bg: "bg-red-50",
+    border: "border-red-200",
+    text: "text-red-950",
+    badge: "bg-red-500",
+  },
+  // PLACEHOLDERS FOR USER CUSTOM MEMES & GIFS
+  {
+    id: "meme-placeholder-1",
+    quote: "[Insert Meme / Roast Text Here 1 - e.g. Kal subah 4 baje uthke padhenge... aur fir 10 baje aankh khuli]",
+    character: "[Insert Character / Name]",
+    show: "[Insert Show / Movie]",
+    icon_or_sticker: "[Insert GIF or Image URL Here]",
+    color: "from-purple-500 to-indigo-500",
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-950",
+    badge: "bg-purple-500",
+  },
+  {
+    id: "meme-placeholder-2",
+    quote: "[Insert Meme / Roast Text Here 2 - e.g. Formula yaad kiya tha mechanics ka, exam me thermo pooch liya]",
+    character: "[Insert Character / Name]",
+    show: "[Insert Show / Movie]",
+    icon_or_sticker: "[Insert GIF or Image URL Here]",
+    color: "from-emerald-500 to-teal-500",
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-950",
+    badge: "bg-emerald-500",
+  },
+  {
+    id: "meme-placeholder-3",
+    quote: "[Insert Meme / Roast Text Here 3 - e.g. Backlog clearing strategy: Aur nayi backlogs banana]",
+    character: "[Insert Character / Name]",
+    show: "[Insert Show / Movie]",
+    icon_or_sticker: "[Insert GIF or Image URL Here]",
+    color: "from-amber-500 to-yellow-500",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-950",
+    badge: "bg-amber-500",
   },
 ];
 
@@ -410,7 +804,7 @@ function getGreeting(name: string, hour: number): string {
   return `Night owl alert, ${name}! 🦉 Sleep matters too!`;
 }
 
-// ─── HERO WIDGET COMPONENT ───────────────────────────────────────────────────
+// ─── DUAL-MODE HERO WIDGET WITH SLIDER & ANTI-REPETITION ENGINE ───────────────
 function HeroWidget({
   name,
   streak,
@@ -421,26 +815,125 @@ function HeroWidget({
   todayFocusMins: number;
 }) {
   const [hour, setHour] = useState(new Date().getHours());
-  const [quoteIdx, setQuoteIdx] = useState(() => {
-    return new Date().getDate() % ANIME_QUOTES.length;
+  const [mode, setMode] = useState<"motivation" | "meme">("motivation");
+  const [dbItems, setDbItems] = useState<Record<string, ContentCardItem[]>>({
+    motivation: [],
+    meme: [],
   });
+  const [currentItem, setCurrentItem] = useState<ContentCardItem | null>(null);
+  const [imgError, setImgError] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => setHour(new Date().getHours()), 60_000);
     return () => clearInterval(interval);
   }, []);
 
-  const cycleQuote = () => setQuoteIdx((i) => (i + 1) % ANIME_QUOTES.length);
+  // Fetch dynamic content from Supabase table `daily_content`
+  useEffect(() => {
+    async function fetchDynamicContent() {
+      try {
+        const { data, error } = await supabase
+          .from("daily_content")
+          .select("*")
+          .eq("is_active", true);
 
-  const q = ANIME_QUOTES[quoteIdx];
+        if (!error && data && data.length > 0) {
+          const mList: ContentCardItem[] = [];
+          const rList: ContentCardItem[] = [];
+
+          data.forEach((row: any) => {
+            const item: ContentCardItem = {
+              id: row.id,
+              quote: row.quote,
+              character: row.character,
+              show: row.show || "PrepWise",
+              icon_or_sticker: row.icon_or_sticker || "⚡",
+              color: row.gradient_color || "from-blue-500 to-indigo-500",
+              bg: row.bg_color || "bg-blue-50",
+              border: row.border_color || "border-blue-200",
+              text: row.text_color || "text-blue-900",
+              badge: row.badge_color || "bg-blue-500",
+            };
+            if (row.content_type === "meme") rList.push(item);
+            else mList.push(item);
+          });
+
+          setDbItems({
+            motivation: mList.length > 0 ? mList : FALLBACK_MOTIVATION_QUOTES,
+            meme: rList.length > 0 ? rList : FALLBACK_MEME_QUOTES,
+          });
+        } else {
+          setDbItems({
+            motivation: FALLBACK_MOTIVATION_QUOTES,
+            meme: FALLBACK_MEME_QUOTES,
+          });
+        }
+      } catch {
+        setDbItems({
+          motivation: FALLBACK_MOTIVATION_QUOTES,
+          meme: FALLBACK_MEME_QUOTES,
+        });
+      }
+    }
+
+    fetchDynamicContent();
+  }, []);
+
+  // SMART ANTI-REPETITION SELECTION ALGORITHM
+  const pickNextItem = useCallback((currentMode: "motivation" | "meme") => {
+    const deck =
+      dbItems[currentMode].length > 0
+        ? dbItems[currentMode]
+        : currentMode === "motivation"
+        ? FALLBACK_MOTIVATION_QUOTES
+        : FALLBACK_MEME_QUOTES;
+
+    const storageKey = `prepwise_seen_${currentMode}_ids`;
+    let seenIds: string[] = [];
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (stored) seenIds = JSON.parse(stored);
+    } catch {}
+
+    // Find unseen items
+    let unseen = deck.filter((item) => !seenIds.includes(item.id));
+
+    // If all items seen, reset seen tracker automatically
+    if (unseen.length === 0) {
+      seenIds = [];
+      localStorage.removeItem(storageKey);
+      unseen = deck;
+    }
+
+    // Pick random item from unseen set
+    const selected = unseen[Math.floor(Math.random() * unseen.length)] || deck[0];
+    seenIds.push(selected.id);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(seenIds));
+    } catch {}
+
+    setImgError(false);
+    setCurrentItem(selected);
+  }, [dbItems]);
+
+  // Re-pick when mode changes or items load
+  useEffect(() => {
+    pickNextItem(mode);
+  }, [mode, pickNextItem]);
+
   const greeting = getGreeting(name, hour);
   const todayHours = (todayFocusMins / 60).toFixed(1);
+  const isExternalImage =
+    currentItem?.icon_or_sticker?.startsWith("http://") ||
+    currentItem?.icon_or_sticker?.startsWith("https://");
 
   return (
     <div className="rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-slate-200/80 bg-white">
-      <div className={`h-1.5 w-full bg-gradient-to-r ${q.color}`} />
+      {/* Top bar — gradient accent */}
+      <div className={`h-1.5 w-full bg-gradient-to-r ${currentItem?.color || "from-indigo-500 to-teal-500"}`} />
 
       <div className="p-4 pb-3">
+        {/* Top Greeting & Streak Row */}
         <div className="flex items-start justify-between gap-2 mb-3">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">
@@ -470,6 +963,7 @@ function HeroWidget({
           </div>
         </div>
 
+        {/* Stats Row */}
         <div className="flex items-center gap-2 mb-3">
           <div className="flex-1 bg-teal-50 border border-teal-100 rounded-xl px-3 py-2 flex items-center gap-2">
             <span className="text-base">⏱️</span>
@@ -487,36 +981,88 @@ function HeroWidget({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={cycleQuote}
-          className={`w-full text-left rounded-xl border ${q.border} ${q.bg} p-3 active:scale-[0.98] transition-all`}
-        >
-          <div className="flex items-start gap-2.5">
-            <div
-              className={`w-11 h-11 rounded-2xl flex-shrink-0 flex items-center justify-center ${q.badge} shadow-sm overflow-hidden p-0.5`}
+        {/* ─── DUAL-MODE TOGGLE SLIDER ─── */}
+        <div className="flex items-center justify-between gap-2 mb-2 px-0.5">
+          <div className="flex p-0.5 bg-slate-100 rounded-xl border border-slate-200 text-[10px] font-black w-full max-w-[210px]">
+            <button
+              type="button"
+              onClick={() => setMode("motivation")}
+              className={`flex-1 py-1 rounded-lg transition-all text-center ${
+                mode === "motivation"
+                  ? "bg-white text-slate-900 shadow-xs font-black"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
             >
-              {STICKERS[q.sticker] ?? <span className="text-xl">⭐</span>}
-            </div>
+              🔥 Motivation
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("meme")}
+              className={`flex-1 py-1 rounded-lg transition-all text-center ${
+                mode === "meme"
+                  ? "bg-white text-slate-900 shadow-xs font-black"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              😂 Memes
+            </button>
+          </div>
 
-            <div className="flex-1 min-w-0">
-              <p className={`text-[11px] font-bold leading-snug ${q.text} line-clamp-3`}>
-                "{q.quote}"
-              </p>
-              <div className="flex items-center justify-between mt-1.5">
-                <p className="text-[10px] font-black text-slate-500">
-                  — {q.character}
-                  <span className="font-medium text-slate-400"> · {q.show}</span>
+          <button
+            type="button"
+            onClick={() => pickNextItem(mode)}
+            className="text-[10px] font-black text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2.5 py-1 rounded-xl transition-all active:scale-95 flex items-center gap-1"
+          >
+            <span>↻</span> Next
+          </button>
+        </div>
+
+        {/* ─── CARD CONTENT (SWAPS BETWEEN MOTIVATION & MEMES) ─── */}
+        {currentItem && (
+          <button
+            type="button"
+            onClick={() => pickNextItem(mode)}
+            className={`w-full text-left rounded-xl border ${currentItem.border} ${currentItem.bg} p-3 active:scale-[0.98] transition-all`}
+          >
+            <div className="flex items-start gap-2.5">
+              {/* Avatar / Sticker / GIF / External Image Container */}
+              <div
+                className={`w-12 h-12 rounded-2xl flex-shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden`}
+              >
+                {isExternalImage && !imgError ? (
+                  <img
+                    src={currentItem.icon_or_sticker}
+                    alt={currentItem.character}
+                    className="w-full h-full object-cover rounded-xl"
+                    onError={() => setImgError(true)}
+                  />
+                ) : (
+                  <span className="text-xl">
+                    {imgError ? "⭐" : currentItem.icon_or_sticker || "💡"}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <p className={`text-[11px] font-bold leading-snug ${currentItem.text} line-clamp-3`}>
+                  "{currentItem.quote}"
                 </p>
-                <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
-                  Tap ↻
-                </span>
+                <div className="flex items-center justify-between mt-1.5">
+                  <p className="text-[10px] font-black text-slate-500 truncate">
+                    — {currentItem.character}
+                    <span className="font-medium text-slate-400"> · {currentItem.show}</span>
+                  </p>
+                  <span className="text-[9px] font-bold text-slate-400 bg-white/80 border border-slate-200 px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1">
+                    Tap ↻
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-        </button>
+          </button>
+        )}
 
-        {streak > 0 && (
+        {/* Streak Message */}
+        {streak > 0 ? (
           <p className="text-[10px] font-bold text-orange-600 text-center mt-2.5">
             {streak >= 7
               ? `🔥 ${streak}-day streak — you're unstoppable! Keep it going!`
@@ -524,8 +1070,7 @@ function HeroWidget({
               ? `🔥 ${streak}-day streak! Building momentum!`
               : `🔥 ${streak}-day streak started! Don't break the chain!`}
           </p>
-        )}
-        {streak === 0 && (
+        ) : (
           <p className="text-[10px] font-bold text-slate-400 text-center mt-2.5">
             Start a focus session today to build your streak! 💪
           </p>
@@ -548,7 +1093,6 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
   });
   const [selectedDay, setSelectedDay] = useState<any | null>(null);
 
-  // Filter logs according to selected range
   const chartData = useMemo(() => {
     const today = new Date();
     let numDays = 7;
@@ -564,7 +1108,7 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
       const s = new Date(customStart);
       const e = new Date(customEnd);
       const diff = Math.max(1, Math.ceil((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-      numDays = Math.min(diff, 60); // Cap at 60 for mobile performance
+      numDays = Math.min(diff, 60);
       startDate = s;
     }
 
@@ -605,12 +1149,10 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
     return result;
   }, [logs, rangeMode, customStart, customEnd]);
 
-  // Overall metrics in selected range
   const totalMinsInRange = chartData.reduce((acc, d) => acc + d.totalMins, 0);
   const avgMinsInRange = chartData.length > 0 ? totalMinsInRange / chartData.length : 0;
-  const maxHours = Math.max(8, ...chartData.map((d) => d.totalHours)); // Ceiling of at least 8h
+  const maxHours = Math.max(8, ...chartData.map((d) => d.totalHours));
 
-  // Set default active day if none selected
   const activeDetail = selectedDay || chartData[chartData.length - 1];
 
   return (
@@ -626,7 +1168,6 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
           </p>
         </div>
 
-        {/* 3 Range Toggle Buttons */}
         <div className="flex p-0.5 bg-slate-100 rounded-xl border border-slate-200 text-[10px] font-black self-start sm:self-auto">
           {(["weekly", "monthly", "custom"] as const).map((m) => (
             <button
@@ -645,7 +1186,6 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
         </div>
       </div>
 
-      {/* Custom Date Pickers (Shown only when Custom is active) */}
       {rangeMode === "custom" && (
         <div className="flex items-center gap-2 p-2 bg-slate-50 rounded-xl border border-slate-200 text-[10px] font-bold">
           <div className="flex-1">
@@ -669,7 +1209,6 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
         </div>
       )}
 
-      {/* Summary KPI Pills */}
       <div className="grid grid-cols-2 gap-2 text-center text-xs">
         <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2">
           <span className="text-[9px] font-bold text-slate-500 uppercase block">Total Focused</span>
@@ -685,15 +1224,12 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
         </div>
       </div>
 
-      {/* ─── 3-COLORED STACKED BARS CHART ─── */}
       <div className="pt-2">
         <div className="h-36 flex items-end gap-1.5 sm:gap-2 px-1 border-b border-slate-200 pb-1.5 overflow-x-auto no-scrollbar">
           {chartData.map((d, idx) => {
             const isSelected = activeDetail?.dateKey === d.dateKey;
-            // Total height percentage relative to max scale
             const totalPct = Math.min(100, Math.round((d.totalHours / maxHours) * 100));
 
-            // Breakdown proportions inside the bar
             const totalHoursClean = d.totalHours > 0 ? d.totalHours : 1;
             const theoryFrac = d.theoryHours / totalHoursClean;
             const practiceFrac = d.practiceHours / totalHoursClean;
@@ -705,7 +1241,6 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
                 onClick={() => setSelectedDay(d)}
                 className={`flex-1 min-w-[20px] max-w-[48px] h-full flex flex-col justify-end items-center cursor-pointer group transition-all`}
               >
-                {/* 3-colored stacked bar */}
                 {d.totalMins > 0 ? (
                   <div
                     style={{ height: `${Math.max(totalPct, 8)}%` }}
@@ -713,19 +1248,16 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
                       isSelected ? "ring-2 ring-slate-900 scale-105" : "hover:opacity-90"
                     }`}
                   >
-                    {/* Theory segment (Bottom/Stack) */}
                     <div
                       style={{ height: `${Math.round(theoryFrac * 100)}%` }}
                       className="w-full bg-amber-500"
                       title={`Theory: ${d.theoryHours.toFixed(1)}h`}
                     />
-                    {/* Practice segment (Middle) */}
                     <div
                       style={{ height: `${Math.round(practiceFrac * 100)}%` }}
                       className="w-full bg-teal-600"
                       title={`Practice: ${d.practiceHours.toFixed(1)}h`}
                     />
-                    {/* Revision segment (Top) */}
                     <div
                       style={{ height: `${Math.round(revisionFrac * 100)}%` }}
                       className="w-full bg-indigo-600"
@@ -733,11 +1265,9 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
                     />
                   </div>
                 ) : (
-                  /* Zero study time subtle dot indicator */
                   <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mb-1" />
                 )}
 
-                {/* Day label below */}
                 <span
                   className={`text-[9px] mt-1 font-bold truncate ${
                     isSelected ? "text-slate-900 font-black" : "text-slate-400"
@@ -751,7 +1281,6 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
         </div>
       </div>
 
-      {/* Selected Day Inspect Card */}
       {activeDetail && (
         <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
           <div>
@@ -780,7 +1309,6 @@ function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
         </div>
       )}
 
-      {/* Legend */}
       <div className="flex items-center justify-center gap-4 text-[10px] font-bold text-slate-500 pt-1">
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-sm bg-amber-500" /> Theory
@@ -876,7 +1404,6 @@ export default function DashboardPage() {
         setProfile(uProf);
         setSelectedShiftId(uProf.selected_shift_id || null);
 
-        // CACHE-FIRST MENTOR REPORT: Zero API calls on restart!
         const cached = localStorage.getItem(`mentor_report_${session.user.id}`);
         if (cached) {
           try {
@@ -946,7 +1473,6 @@ export default function DashboardPage() {
         }
       }
 
-      // Fallback if Admin hasn't seeded rows yet
       if (studentSchedules.length === 0) {
         if (targetExam === "JEE") {
           studentSchedules.push({
@@ -1245,7 +1771,7 @@ export default function DashboardPage() {
 
       <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
 
-        {/* 0. HERO WIDGET — Greeting + Anime Quote + Streak */}
+        {/* 0. DUAL-MODE HERO WIDGET — Motivation / Memes Toggle Slider */}
         <HeroWidget
           name={firstName}
           streak={streak}
@@ -1461,7 +1987,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 6. NEW: MULTI-DAY STUDY SPLIT TIMELINE (Weekly / Monthly / Custom) */}
+        {/* 6. MULTI-DAY STUDY SPLIT TIMELINE (Weekly / Monthly / Custom) */}
         <StudySplitTimelineWidget logs={allPastLogs} />
 
         {/* 7. 12-WEEK CONSISTENCY MATRIX */}
