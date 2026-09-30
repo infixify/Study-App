@@ -108,9 +108,10 @@ export default function GroupsListPage() {
 
       const { data: dbGroups } = await supabase.rpc("get_group_list");
       const { data: metaRows } = await supabase.rpc("get_group_join_meta");
-      const metaById = new Map(
-        (metaRows ?? []).map((m: any) => [m.group_id, { has_password: m.has_password, requires_approval: m.requires_approval }])
-      );
+      const metaById = new Map<string, { has_password: boolean; requires_approval: boolean }>();
+      (metaRows ?? []).forEach((m: any) => {
+        metaById.set(m.group_id, { has_password: m.has_password, requires_approval: m.requires_approval });
+      });
 
       setGroups(
         (dbGroups ?? []).map((g: any) => {
