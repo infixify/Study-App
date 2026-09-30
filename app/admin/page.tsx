@@ -49,6 +49,17 @@ type AdminNotification = {
   created_at: string;
 };
 
+type DailyContentItem = {
+  id: string;
+  content_type: "motivation" | "meme";
+  quote: string;
+  character: string;
+  show: string;
+  icon_or_sticker: string;
+  is_active: boolean;
+  created_at: string;
+};
+
 const DEFAULT_SEEDS = [
   { exam_key: "jee_mains_2026_s1", label: "JEE Main 2026 (Session 1)", target_exam: "JEE", year: 2026, exam_date: "2026-01-24", is_confirmed: true },
   { exam_key: "jee_mains_2026_s2", label: "JEE Main 2026 (Session 2)", target_exam: "JEE", year: 2026, exam_date: "2026-04-06", is_confirmed: false },
@@ -97,6 +108,16 @@ export default function AdminPage() {
   const [sendingNotif, setSendingNotif] = useState(false);
   const [notifSuccess, setNotifSuccess] = useState<string | null>(null);
   const [recentNotifs, setRecentNotifs] = useState<AdminNotification[]>([]);
+
+  // --- Daily Content (Quotes & Memes) State ---
+  const [dailyContents, setDailyContents] = useState<DailyContentItem[]>([]);
+  const [contentType, setContentType] = useState<"motivation" | "meme">("motivation");
+  const [contentQuote, setContentQuote] = useState("");
+  const [contentCharacter, setContentCharacter] = useState("");
+  const [contentShow, setContentShow] = useState("");
+  const [contentMediaUrl, setContentMediaUrl] = useState("");
+  const [savingContent, setSavingContent] = useState(false);
+  const [contentSuccess, setContentSuccess] = useState<string | null>(null);
 
   const checkAdminStatus = useCallback(async () => {
     setChecking(true);
@@ -204,6 +225,17 @@ export default function AdminPage() {
       .order("created_at", { ascending: false })
       .limit(10);
     if (notifs) setRecentNotifs(notifs);
+
+    // 5. Daily Content (Quotes & Memes)
+    try {
+      const { data: dc } = await supabase
+        .from("daily_content")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (dc) setDailyContents(dc);
+    } catch (e) {
+      console.warn("daily_content fetch error", e);
+    }
   };
 
   useEffect(() => {
@@ -319,6 +351,67 @@ export default function AdminPage() {
       await supabase.from("notifications").delete().eq("id", id);
       setRecentNotifs((prev) => prev.filter((n) => n.id !== id));
     } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Add Quote or Meme (Colors auto-picked!)
+  const handleAddDailyContent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contentQuote.trim() || !contentCharacter.trim()) return;
+    setSavingContent(true);
+    setContentSuccess(null);
+
+    const PRESETS = [
+      { gradient_color: "from-sky-500 to-indigo-600", bg_color: "bg-sky-50", border_color: "border-sky-200", text_color: "text-sky-950", badge_color: "bg-sky-500" },
+      { gradient_color: "from-amber-500 to-orange-600", bg_color: "bg-amber-50", border_color: "border-amber-200", text_color: "text-amber-950", badge_color: "bg-amber-500" },
+      { gradient_color: "from-purple-500 to-indigo-600", bg_color: "bg-purple-50", border_color: "border-purple-200", text_color: "text-purple-950", badge_color: "bg-purple-500" },
+      { gradient_color: "from-teal-500 to-emerald-600", bg_color: "bg-teal-50", border_color: "border-teal-200", text_color: "text-teal-950", badge_color: "bg-teal-500" },
+      { gradient_color: "from-rose-500 to-pink-600", bg_color: "bg-rose-50", border_color: "border-rose-200", text_color: "text-rose-950", badge_color: "bg-rose-500" },
+    ];
+    const picked = PRESETS[Math.floor(Math.random() * PRESETS.length)];
+
+    try {
+      const { data, error } = await supabase
+        .from("daily_content")
+        .insert({
+          content_type: contentType,
+          quote: contentQuote.trim(),
+          character: contentCharacter.trim(),
+          show: contentShow.trim() || (contentType === "motivation" ? "Inspiration" : "PrepWise Roast"),
+          icon_or_sticker: contentMediaUrl.trim() || (contentType === "motivation" ? "🔥" : "😂"),
+          gradient_color: picked.gradient_color,
+          bg_color: picked.bg_color,
+          border_color: picked.border_color,
+          text_color: picked.text_color,
+          badge_color: picked.badge_color,
+          is_active: true,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setDailyContents((prev) => [data, ...prev]);
+        setContentQuote("");
+        setContentCharacter("");
+        setContentShow("");
+        setContentMediaUrl("");
+        setContentSuccess(`${contentType === "motivation" ? "Quote" : "Meme"} added successfully!`);
+      }
+    } catch (err: any) {
+      alert("Failed to save content: " + err.message);
+    } finally {
+      setSavingContent(false);
+    }
+  };
+
+  const handleDeleteContent = async (id: string) => {
+    try {
+      await supabase.from("daily_content").delete().eq("id", id);
+      setDailyContents((prev) => prev.filter((c) => c.id !== id));
+    } catch (err: any) {
       console.error(err);
     }
   };
@@ -521,7 +614,171 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* 2. BROADCAST NOTIFICATIONS */}
+        {/* 2. DAILY CONTENT: QUOTES & MEMES CONTROLLER */}
+        <section className="rounded-ticket border border-ink/10 bg-white p-6 shadow-xs">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="font-display text-lg font-bold text-ink">
+                ✨ Daily Quotes & Memes Controller
+              </h2>
+              <p className="text-xs text-slate">
+                Add, remove, and manage motivational quotes and humorous study roasts for the Dashboard HeroWidget.
+              </p>
+            </div>
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+              {dailyContents.length} Items Live
+            </span>
+          </div>
+
+          {contentSuccess && (
+            <div className="p-3 mb-4 rounded-xl bg-teal/10 border border-teal/20 text-xs font-bold text-teal">
+              ✓ {contentSuccess}
+            </div>
+          )}
+
+          <form onSubmit={handleAddDailyContent} className="space-y-3 p-4 rounded-2xl bg-paper/50 border border-ink/8">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setContentType("motivation")}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all ${
+                  contentType === "motivation"
+                    ? "bg-amber-500 text-white border-amber-500 shadow-xs"
+                    : "bg-white text-slate-700 border-ink/15"
+                }`}
+              >
+                🔥 Motivational Quote
+              </button>
+              <button
+                type="button"
+                onClick={() => setContentType("meme")}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all ${
+                  contentType === "meme"
+                    ? "bg-purple-600 text-white border-purple-600 shadow-xs"
+                    : "bg-white text-slate-700 border-ink/15"
+                }`}
+              >
+                😂 Meme / Sarcastic Roast
+              </button>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold text-slate block mb-0.5">
+                {contentType === "motivation" ? "Inspiring Quote" : "Meme / Roast Text"}
+              </label>
+              <textarea
+                rows={2}
+                placeholder={
+                  contentType === "motivation"
+                    ? "e.g. Dream is not that which you see while sleeping, it is something that does not let you sleep."
+                    : "e.g. Bhai agar itna time padhai me lagata jitna reels me lagaya hai, toh AIR 1 pakki thi!"
+                }
+                value={contentQuote}
+                onChange={(e) => setContentQuote(e.target.value)}
+                className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 bg-white outline-none focus:border-teal"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate block mb-0.5">
+                  Speaker / Character Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Dr. A.P.J. Abdul Kalam / CID Daya / Saitama"
+                  value={contentCharacter}
+                  onChange={(e) => setContentCharacter(e.target.value)}
+                  className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 bg-white outline-none focus:border-teal"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate block mb-0.5">
+                  Show / Context / Book
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Wings of Fire / Kota Realities"
+                  value={contentShow}
+                  onChange={(e) => setContentShow(e.target.value)}
+                  className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 bg-white outline-none focus:border-teal"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold text-slate block mb-0.5">
+                Media: Direct Image / GIF URL (or Emoji)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. https://media.giphy.com/.../giphy.gif OR /memes/daya.gif OR 🚀"
+                value={contentMediaUrl}
+                onChange={(e) => setContentMediaUrl(e.target.value)}
+                className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 bg-white outline-none focus:border-teal"
+              />
+              <p className="text-[10px] text-slate mt-0.5">
+                Note: Gradient & card background colors are auto-picked to keep cards vibrant.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingContent}
+              className="w-full py-2.5 bg-ink text-white rounded-xl text-xs font-bold hover:bg-ink-100 disabled:opacity-40 transition-all shadow-xs"
+            >
+              {savingContent ? "Saving to Database…" : `+ Add to ${contentType === "motivation" ? "Motivation Deck" : "Meme Deck"}`}
+            </button>
+          </form>
+
+          {dailyContents.length > 0 && (
+            <div className="mt-5 space-y-2">
+              <h4 className="text-xs font-bold text-slate uppercase tracking-wider">
+                Active Deck Items ({dailyContents.length})
+              </h4>
+              <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                {dailyContents.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-3 rounded-xl bg-paper/60 border border-ink/8 flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-lg shrink-0">
+                        {item.icon_or_sticker.startsWith("http") ? "🖼️" : item.icon_or_sticker}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                            item.content_type === "motivation" ? "bg-amber-100 text-amber-800" : "bg-purple-100 text-purple-800"
+                          }`}>
+                            {item.content_type}
+                          </span>
+                          <span className="font-bold text-ink truncate">— {item.character}</span>
+                        </div>
+                        <p className="text-[11px] text-slate line-clamp-1 mt-0.5">
+                          "{item.quote}"
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteContent(item.id)}
+                      className="text-xs text-rose-600 font-bold hover:underline shrink-0"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* 3. BROADCAST NOTIFICATIONS */}
         <section className="rounded-ticket border border-ink/10 bg-white p-6 shadow-xs">
           <div className="flex items-center justify-between mb-3">
             <div>
@@ -675,7 +932,7 @@ export default function AdminPage() {
           )}
         </section>
 
-        {/* 3. EXAM DATES & SHIFTS (WITH AUTO SEED & SHIFTS CONTROLLER) */}
+        {/* 4. EXAM DATES & SHIFTS (WITH AUTO SEED & SHIFTS CONTROLLER) */}
         <section className="rounded-ticket border border-ink/10 bg-white p-6 shadow-xs">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -705,7 +962,6 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* Exam Dates Table */}
           <div className="space-y-3">
             {schedule.length === 0 ? (
               <div className="p-6 rounded-2xl bg-paper/60 border border-dashed border-ink/15 text-center">
@@ -784,7 +1040,6 @@ export default function AdminPage() {
                       </div>
                     </div>
 
-                    {/* Shifts for this Exam */}
                     {shifts.length > 0 && (
                       <div className="pt-2 border-t border-ink/6 flex flex-wrap gap-2">
                         <span className="text-[10px] font-bold text-slate self-center">Shifts:</span>
@@ -804,7 +1059,6 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* Add Shift Form */}
           {schedule.length > 0 && (
             <div className="mt-5 p-4 rounded-2xl bg-paper/40 border border-ink/8">
               <h4 className="text-xs font-bold text-ink mb-2">➕ Add Shift to Exam</h4>
@@ -849,7 +1103,7 @@ export default function AdminPage() {
           )}
         </section>
 
-        {/* 4. RESOURCE UPLOADER */}
+        {/* 5. RESOURCE VAULT */}
         <section className="rounded-ticket border border-ink/10 bg-white p-6 shadow-xs">
           <h2 className="font-display text-lg font-bold mb-3">Resource Vault</h2>
           <ResourceUploader />
