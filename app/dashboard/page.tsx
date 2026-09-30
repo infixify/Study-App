@@ -69,7 +69,7 @@ interface ContentCardItem {
   quote: string;
   character: string;
   show: string;
-  icon_or_sticker: string;
+  icon_or_sticker: string; // Supports Supabase Storage URLs, Web GIFs/Images, or Emojis
   color: string;
   bg: string;
   border: string;
@@ -78,13 +78,14 @@ interface ContentCardItem {
 }
 
 // ─── 70+ HIGH-QUALITY MOTIVATIONAL QUOTES (INDIAN LEGENDS & GLOBAL ICONS) ───
+// Icons support Supabase storage URLs, stable web links, or fallback emojis
 const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   {
     id: "m-1",
     quote: "Dream is not that which you see while sleeping, it is something that does not let you sleep.",
     character: "Dr. A.P.J. Abdul Kalam",
     show: "Wings of Fire",
-    icon_or_sticker: "🚀",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b0/A._P._J._Abdul_Kalam_in_2015.jpg/220px-A._P._J._Abdul_Kalam_in_2015.jpg",
     color: "from-sky-500 to-indigo-600",
     bg: "bg-sky-50",
     border: "border-sky-200",
@@ -96,7 +97,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "Arise, awake, and stop not until the goal is reached. Strength is life, weakness is death.",
     character: "Swami Vivekananda",
     show: "Rousing Call to Youth",
-    icon_or_sticker: "⚡",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Swami_Vivekananda_1893-09-signed.jpg/220px-Swami_Vivekananda_1893-09-signed.jpg",
     color: "from-amber-500 to-orange-600",
     bg: "bg-amber-50",
     border: "border-amber-200",
@@ -108,7 +109,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "I do not believe in taking right decisions. I take decisions and then make them right.",
     character: "Ratan Tata",
     show: "Industrial Legend",
-    icon_or_sticker: "🏛️",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/Ratan_Tata_photo.jpg/220px-Ratan_Tata_photo.jpg",
     color: "from-slate-700 to-slate-900",
     bg: "bg-slate-50",
     border: "border-slate-300",
@@ -120,7 +121,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "They may kill me, but they cannot kill my ideas. They can crush my body, but they cannot crush my spirit.",
     character: "Bhagat Singh",
     show: "Freedom Visionary",
-    icon_or_sticker: "🔥",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/54/Bhagat_Singh_1929.jpg/220px-Bhagat_Singh_1929.jpg",
     color: "from-red-600 to-rose-700",
     bg: "bg-rose-50",
     border: "border-rose-200",
@@ -132,7 +133,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "An equation for me has no meaning unless it expresses a thought of God.",
     character: "Srinivasa Ramanujan",
     show: "Pure Mathematics",
-    icon_or_sticker: "♾️",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/70/Srinivasa_Ramanujan_-_OPC_-_1.jpg/220px-Srinivasa_Ramanujan_-_OPC_-_1.jpg",
     color: "from-teal-500 to-emerald-600",
     bg: "bg-teal-50",
     border: "border-teal-200",
@@ -144,7 +145,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "Ask the right questions, and nature will open the doors to her secrets.",
     character: "Sir C.V. Raman",
     show: "Nobel Laureate (Physics)",
-    icon_or_sticker: "💎",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e6/Sir_CV_Raman.JPG/220px-Sir_CV_Raman.JPG",
     color: "from-blue-600 to-cyan-500",
     bg: "bg-blue-50",
     border: "border-blue-200",
@@ -156,7 +157,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "Give me blood, and I shall give you freedom! Stand up for your destiny with courage.",
     character: "Netaji Subhash Chandra Bose",
     show: "Azad Hind",
-    icon_or_sticker: "🎖️",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Subhas_Chandra_Bose_NRB.jpg/220px-Subhas_Chandra_Bose_NRB.jpg",
     color: "from-amber-600 to-yellow-600",
     bg: "bg-amber-50",
     border: "border-amber-200",
@@ -168,7 +169,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "Educate, Agitate, Organise. Have faith in yourselves and never surrender to circumstance.",
     character: "Dr. B.R. Ambedkar",
     show: "Architect of Modern India",
-    icon_or_sticker: "⚖️",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Dr._Bhimrao_Ambedkar.jpg/220px-Dr._Bhimrao_Ambedkar.jpg",
     color: "from-blue-700 to-indigo-800",
     bg: "bg-indigo-50",
     border: "border-indigo-200",
@@ -180,7 +181,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "You cannot cross the sea merely by standing and staring at the water.",
     character: "Rabindranath Tagore",
     show: "Gitanjali",
-    icon_or_sticker: "🌊",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Rabindranath_Tagore_unknown_photographer%2C_c._1915.jpg/220px-Rabindranath_Tagore_unknown_photographer%2C_c._1915.jpg",
     color: "from-emerald-600 to-teal-700",
     bg: "bg-emerald-50",
     border: "border-emerald-200",
@@ -192,7 +193,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "No Indian should feel inferior to anyone in the world. Work with pride, think with scientific temper.",
     character: "Dr. Homi J. Bhabha",
     show: "Father of Indian Nuclear Science",
-    icon_or_sticker: "⚛️",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Homi_Jehangir_Bhabha_1960s.jpg/220px-Homi_Jehangir_Bhabha_1960s.jpg",
     color: "from-cyan-600 to-blue-700",
     bg: "bg-cyan-50",
     border: "border-cyan-200",
@@ -204,7 +205,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "I have no special talents. I am only passionately curious. Persist through the hard problem.",
     character: "Albert Einstein",
     show: "Theoretical Physics",
-    icon_or_sticker: "💡",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/Einstein_1921_by_F_Schmutzer_-_restoration.jpg/220px-Einstein_1921_by_F_Schmutzer_-_restoration.jpg",
     color: "from-purple-600 to-indigo-600",
     bg: "bg-purple-50",
     border: "border-purple-200",
@@ -213,10 +214,10 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   },
   {
     id: "m-12",
-    quote: "Nobody ever figures out what life is, and it doesn't matter. Explore the world. Nearly everything is really interesting if you go into it deeply enough.",
+    quote: "Nobody ever figures out what life is, and it doesn't matter. Explore the world deeply.",
     character: "Richard Feynman",
     show: "Nobel Laureate (QED)",
-    icon_or_sticker: "🔬",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/en/thumb/4/42/Richard_Feynman_Nobel.jpg/220px-Richard_Feynman_Nobel.jpg",
     color: "from-orange-500 to-amber-500",
     bg: "bg-orange-50",
     border: "border-orange-200",
@@ -225,10 +226,10 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   },
   {
     id: "m-13",
-    quote: "Nothing in life is to be feared, it is only to be understood. Now is the time to understand more, so that we may fear less.",
+    quote: "Nothing in life is to be feared, it is only to be understood. Now is the time to understand more.",
     character: "Marie Curie",
     show: "Double Nobel Laureate",
-    icon_or_sticker: "🧪",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Marie_Curie_c._1920s.jpg/220px-Marie_Curie_c._1920s.jpg",
     color: "from-teal-600 to-cyan-600",
     bg: "bg-teal-50",
     border: "border-teal-200",
@@ -240,7 +241,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "The present is theirs; the future, for which I really worked, is mine.",
     character: "Nikola Tesla",
     show: "Master of Electricity",
-    icon_or_sticker: "⚡",
+    icon_or_sticker: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/79/Tesla_circa_1890.jpeg/220px-Tesla_circa_1890.jpeg",
     color: "from-blue-500 to-violet-600",
     bg: "bg-blue-50",
     border: "border-blue-200",
@@ -252,7 +253,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote: "You have power over your mind — not outside events. Realize this, and you will find immense strength.",
     character: "Marcus Aurelius",
     show: "Meditations",
-    icon_or_sticker: "🛡️",
+    icon_or_sticker: "🏛️",
     color: "from-stone-600 to-stone-800",
     bg: "bg-stone-50",
     border: "border-stone-300",
@@ -273,7 +274,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   },
   {
     id: "m-17",
-    quote: "Your time is limited, so don't waste it living someone else's life. Have the courage to follow your heart and intuition.",
+    quote: "Your time is limited, so don't waste it living someone else's life. Follow your heart and intuition.",
     character: "Steve Jobs",
     show: "Stanford Address",
     icon_or_sticker: "🍏",
@@ -285,7 +286,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   },
   {
     id: "m-18",
-    quote: "However difficult life may seem, there is always something you can do and succeed at. It matters that you just don't give up.",
+    quote: "However difficult life may seem, there is always something you can do and succeed at.",
     character: "Stephen Hawking",
     show: "Cosmology & Physics",
     icon_or_sticker: "🌌",
@@ -321,30 +322,6 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   },
   {
     id: "m-21",
-    quote: "Failure will never overtake me if my determination to succeed is strong enough.",
-    character: "Dr. A.P.J. Abdul Kalam",
-    show: "Inspiring Thoughts",
-    icon_or_sticker: "🎯",
-    color: "from-teal-600 to-blue-600",
-    bg: "bg-teal-50",
-    border: "border-teal-200",
-    text: "text-teal-950",
-    badge: "bg-teal-600",
-  },
-  {
-    id: "m-22",
-    quote: "Take up one idea. Make that one idea your life; dream of it; think of it; live on that idea. That is the way to success.",
-    character: "Swami Vivekananda",
-    show: "Karma Yoga",
-    icon_or_sticker: "🧘",
-    color: "from-orange-600 to-red-600",
-    bg: "bg-orange-50",
-    border: "border-orange-200",
-    text: "text-orange-950",
-    badge: "bg-orange-600",
-  },
-  {
-    id: "m-23",
     quote: "If you want to shine like a sun, first burn like a sun. Study with pure focus today.",
     character: "Dr. A.P.J. Abdul Kalam",
     show: "Vision 2020",
@@ -356,32 +333,20 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     badge: "bg-amber-500",
   },
   {
-    id: "m-24",
-    quote: "If people do not believe that mathematics is simple, it is only because they do not realize how complicated life is.",
-    character: "John von Neumann",
-    show: "Mathematical Logic",
-    icon_or_sticker: "📐",
-    color: "from-blue-600 to-indigo-700",
-    bg: "bg-blue-50",
-    border: "border-blue-200",
-    text: "text-blue-950",
-    badge: "bg-blue-600",
+    id: "m-22",
+    quote: "Take up one idea. Make that one idea your life; think of it; live on that idea.",
+    character: "Swami Vivekananda",
+    show: "Karma Yoga",
+    icon_or_sticker: "🧘",
+    color: "from-orange-600 to-red-600",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    text: "text-orange-950",
+    badge: "bg-orange-600",
   },
   {
-    id: "m-25",
-    quote: "Genius is one percent inspiration and ninety-nine percent perspiration. Solve the next question.",
-    character: "Thomas Edison",
-    show: "Inventor",
-    icon_or_sticker: "💡",
-    color: "from-yellow-600 to-amber-600",
-    bg: "bg-yellow-50",
-    border: "border-yellow-200",
-    text: "text-yellow-950",
-    badge: "bg-yellow-600",
-  },
-  {
-    id: "m-26",
-    quote: "In the middle of difficulty lies opportunity. Every tough numerical builds your examination rank.",
+    id: "m-23",
+    quote: "In the middle of difficulty lies opportunity. Every tough numerical builds your rank.",
     character: "Albert Einstein",
     show: "Insight Notes",
     icon_or_sticker: "✨",
@@ -392,20 +357,8 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     badge: "bg-purple-600",
   },
   {
-    id: "m-27",
-    quote: "The impediment to action advances action. What stands in the way becomes the way.",
-    character: "Marcus Aurelius",
-    show: "Stoic Principles",
-    icon_or_sticker: "🏛️",
-    color: "from-slate-700 to-stone-700",
-    bg: "bg-slate-50",
-    border: "border-slate-300",
-    text: "text-slate-950",
-    badge: "bg-slate-700",
-  },
-  {
-    id: "m-28",
-    quote: "Small aims are a crime; have great aim. Work relentlessly toward your rank.",
+    id: "m-24",
+    quote: "Small aims are a crime; have great aim. Work relentlessly toward your goal.",
     character: "Dr. A.P.J. Abdul Kalam",
     show: "Ignited Minds",
     icon_or_sticker: "🏹",
@@ -416,7 +369,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     badge: "bg-rose-600",
   },
   {
-    id: "m-29",
+    id: "m-25",
     quote: "It always seems impossible until it's done. Sit down and finish the chapter.",
     character: "Nelson Mandela",
     show: "Long Walk to Freedom",
@@ -427,261 +380,10 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     text: "text-emerald-950",
     badge: "bg-emerald-600",
   },
-  {
-    id: "m-30",
-    quote: "Live as if you were to die tomorrow. Learn as if you were to live forever.",
-    character: "Mahatma Gandhi",
-    show: "Ethical Philosophy",
-    icon_or_sticker: "🕊️",
-    color: "from-teal-600 to-emerald-600",
-    bg: "bg-teal-50",
-    border: "border-teal-200",
-    text: "text-teal-950",
-    badge: "bg-teal-600",
-  },
-  {
-    id: "m-31",
-    quote: "An investment in knowledge pays the best interest. Dedicate your afternoon to problem solving.",
-    character: "Benjamin Franklin",
-    show: "Founding Father",
-    icon_or_sticker: "📚",
-    color: "from-indigo-600 to-blue-600",
-    bg: "bg-indigo-50",
-    border: "border-indigo-200",
-    text: "text-indigo-950",
-    badge: "bg-indigo-600",
-  },
-  {
-    id: "m-32",
-    quote: "What you get by achieving your goals is not as important as what you become by achieving your goals.",
-    character: "Henry David Thoreau",
-    show: "Walden",
-    icon_or_sticker: "🌲",
-    color: "from-green-600 to-emerald-700",
-    bg: "bg-green-50",
-    border: "border-green-200",
-    text: "text-green-950",
-    badge: "bg-green-600",
-  },
-  {
-    id: "m-33",
-    quote: "Hard work beats talent when talent fails to work hard. Keep your timer running.",
-    character: "Tim Notke",
-    show: "Athletic Axiom",
-    icon_or_sticker: "⚙️",
-    color: "from-orange-600 to-amber-600",
-    bg: "bg-orange-50",
-    border: "border-orange-200",
-    text: "text-orange-950",
-    badge: "bg-orange-600",
-  },
-  {
-    id: "m-34",
-    quote: "Discipline is the bridge between goals and accomplishment. Eliminate distractions for the next hour.",
-    character: "Jim Rohn",
-    show: "Strategy of Success",
-    icon_or_sticker: "🌉",
-    color: "from-blue-700 to-indigo-800",
-    bg: "bg-blue-50",
-    border: "border-blue-200",
-    text: "text-blue-950",
-    badge: "bg-blue-700",
-  },
-  {
-    id: "m-35",
-    quote: "Success is the sum of small efforts, repeated day in and day out.",
-    character: "Robert Collier",
-    show: "Principles of Persistence",
-    icon_or_sticker: "📈",
-    color: "from-teal-600 to-cyan-700",
-    bg: "bg-teal-50",
-    border: "border-teal-200",
-    text: "text-teal-950",
-    badge: "bg-teal-600",
-  },
-  {
-    id: "m-36",
-    quote: "The secret of getting ahead is getting started. Don't wait for ideal mood.",
-    character: "Mark Twain",
-    show: "Author & Satirist",
-    icon_or_sticker: "✍️",
-    color: "from-amber-600 to-orange-700",
-    bg: "bg-amber-50",
-    border: "border-amber-200",
-    text: "text-amber-950",
-    badge: "bg-amber-600",
-  },
-  {
-    id: "m-37",
-    quote: "Energy and persistence conquer all things. Break down the tough syllabus chapter.",
-    character: "Benjamin Franklin",
-    show: "Poor Richard's Almanack",
-    icon_or_sticker: "⚡",
-    color: "from-yellow-600 to-amber-700",
-    bg: "bg-yellow-50",
-    border: "border-yellow-200",
-    text: "text-yellow-950",
-    badge: "bg-yellow-600",
-  },
-  {
-    id: "m-38",
-    quote: "Never give up on a dream just because of the time it will take to accomplish it. The time will pass anyway.",
-    character: "Earl Nightingale",
-    show: "Direct Motivation",
-    icon_or_sticker: "⏳",
-    color: "from-indigo-600 to-purple-600",
-    bg: "bg-indigo-50",
-    border: "border-indigo-200",
-    text: "text-indigo-950",
-    badge: "bg-indigo-600",
-  },
-  {
-    id: "m-39",
-    quote: "If you don't build your dream, someone will hire you to help build theirs. Master your subjects.",
-    character: "Dhirubhai Ambani",
-    show: "Enterprise Pioneer",
-    icon_or_sticker: "🏗️",
-    color: "from-blue-700 to-slate-800",
-    bg: "bg-blue-50",
-    border: "border-blue-200",
-    text: "text-blue-950",
-    badge: "bg-blue-700",
-  },
-  {
-    id: "m-40",
-    quote: "Believe you can and you're halfway there. Trust your daily question practice.",
-    character: "Theodore Roosevelt",
-    show: "Leadership Speeches",
-    icon_or_sticker: "🎯",
-    color: "from-red-600 to-rose-700",
-    bg: "bg-red-50",
-    border: "border-red-200",
-    text: "text-red-950",
-    badge: "bg-red-600",
-  },
-  {
-    id: "m-41",
-    quote: "The only place where success comes before work is in the dictionary.",
-    character: "Vidal Sassoon",
-    show: "Aphorisms",
-    icon_or_sticker: "📖",
-    color: "from-slate-700 to-zinc-800",
-    bg: "bg-slate-50",
-    border: "border-slate-300",
-    text: "text-slate-950",
-    badge: "bg-slate-700",
-  },
-  {
-    id: "m-42",
-    quote: "You don't have to be great to start, but you have to start to be great.",
-    character: "Zig Ziglar",
-    show: "Peak Performance",
-    icon_or_sticker: "🚀",
-    color: "from-teal-600 to-emerald-600",
-    bg: "bg-teal-50",
-    border: "border-teal-200",
-    text: "text-teal-950",
-    badge: "bg-teal-600",
-  },
-  {
-    id: "m-43",
-    quote: "Don't watch the clock; do what it does. Keep going.",
-    character: "Sam Levenson",
-    show: "Time Principles",
-    icon_or_sticker: "⏱️",
-    color: "from-cyan-600 to-blue-600",
-    bg: "bg-cyan-50",
-    border: "border-cyan-200",
-    text: "text-cyan-950",
-    badge: "bg-cyan-600",
-  },
-  {
-    id: "m-44",
-    quote: "Courage is resistance to fear, mastery of fear — not absence of fear. Face your toughest mock test.",
-    character: "Mark Twain",
-    show: "Wisdom Notes",
-    icon_or_sticker: "🦁",
-    color: "from-amber-600 to-orange-700",
-    bg: "bg-amber-50",
-    border: "border-amber-200",
-    text: "text-amber-950",
-    badge: "bg-amber-600",
-  },
-  {
-    id: "m-45",
-    quote: "Press forward. Do not stop, do not linger in your journey, but strive for the mark set before you.",
-    character: "George Whitefield",
-    show: "Endurance",
-    icon_or_sticker: "🏃",
-    color: "from-rose-600 to-red-600",
-    bg: "bg-rose-50",
-    border: "border-rose-200",
-    text: "text-rose-950",
-    badge: "bg-rose-600",
-  },
-  {
-    id: "m-46",
-    quote: "Action is the foundational key to all success. Stop overthinking and start solving.",
-    character: "Pablo Picasso",
-    show: "Creative Drive",
-    icon_or_sticker: "🔑",
-    color: "from-purple-600 to-indigo-600",
-    bg: "bg-purple-50",
-    border: "border-purple-200",
-    text: "text-purple-950",
-    badge: "bg-purple-600",
-  },
-  {
-    id: "m-47",
-    quote: "Continuous effort — not strength or intelligence — is the key to unlocking our potential.",
-    character: "Winston Churchill",
-    show: "Historical Speeches",
-    icon_or_sticker: "🔓",
-    color: "from-slate-700 to-stone-800",
-    bg: "bg-slate-50",
-    border: "border-slate-300",
-    text: "text-slate-950",
-    badge: "bg-slate-700",
-  },
-  {
-    id: "m-48",
-    quote: "The future depends on what you do today. Make today's 8 hours count.",
-    character: "Mahatma Gandhi",
-    show: "Constructive Action",
-    icon_or_sticker: "🌱",
-    color: "from-emerald-600 to-green-700",
-    bg: "bg-emerald-50",
-    border: "border-emerald-200",
-    text: "text-emerald-950",
-    badge: "bg-emerald-600",
-  },
-  {
-    id: "m-49",
-    quote: "You are the master of your destiny. You can influence, direct and control your own environment.",
-    character: "Napoleon Hill",
-    show: "Think and Grow Rich",
-    icon_or_sticker: "👑",
-    color: "from-amber-600 to-yellow-600",
-    bg: "bg-amber-50",
-    border: "border-amber-200",
-    text: "text-amber-950",
-    badge: "bg-amber-600",
-  },
-  {
-    id: "m-50",
-    quote: "A person who never made a mistake never tried anything new. Log your errors and learn.",
-    character: "Albert Einstein",
-    show: "Scientific Musings",
-    icon_or_sticker: "📕",
-    color: "from-violet-600 to-indigo-700",
-    bg: "bg-violet-50",
-    border: "border-violet-200",
-    text: "text-violet-950",
-    badge: "bg-violet-600",
-  },
 ];
 
-// ─── MEMES / ROASTS (INCLUDES INITIAL VIRAL ROASTS + USER PLACEHOLDERS) ────────
+// ─── MEMES / ROASTS (GIF & STORAGE READY) ────────────────────────────────────
+// GIFs can be direct URLs from your Supabase Storage bucket 'hero-content'
 const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
   {
     id: "meme-1",
@@ -755,13 +457,13 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
     text: "text-red-950",
     badge: "bg-red-500",
   },
-  // PLACEHOLDERS FOR USER CUSTOM MEMES & GIFS
+  // PLACEHOLDERS FOR YOUR CUSTOM MEME GIFS & ROASTS
   {
     id: "meme-placeholder-1",
     quote: "[Insert Meme / Roast Text Here 1 - e.g. Kal subah 4 baje uthke padhenge... aur fir 10 baje aankh khuli]",
     character: "[Insert Character / Name]",
     show: "[Insert Show / Movie]",
-    icon_or_sticker: "[Insert GIF or Image URL Here]",
+    icon_or_sticker: "[Insert GIF or Supabase Storage URL Here]",
     color: "from-purple-500 to-indigo-500",
     bg: "bg-purple-50",
     border: "border-purple-200",
@@ -773,7 +475,7 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
     quote: "[Insert Meme / Roast Text Here 2 - e.g. Formula yaad kiya tha mechanics ka, exam me thermo pooch liya]",
     character: "[Insert Character / Name]",
     show: "[Insert Show / Movie]",
-    icon_or_sticker: "[Insert GIF or Image URL Here]",
+    icon_or_sticker: "[Insert GIF or Supabase Storage URL Here]",
     color: "from-emerald-500 to-teal-500",
     bg: "bg-emerald-50",
     border: "border-emerald-200",
@@ -785,7 +487,7 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
     quote: "[Insert Meme / Roast Text Here 3 - e.g. Backlog clearing strategy: Aur nayi backlogs banana]",
     character: "[Insert Character / Name]",
     show: "[Insert Show / Movie]",
-    icon_or_sticker: "[Insert GIF or Image URL Here]",
+    icon_or_sticker: "[Insert GIF or Supabase Storage URL Here]",
     color: "from-amber-500 to-yellow-500",
     bg: "bg-amber-50",
     border: "border-amber-200",
@@ -804,7 +506,7 @@ function getGreeting(name: string, hour: number): string {
   return `Night owl alert, ${name}! 🦉 Sleep matters too!`;
 }
 
-// ─── DUAL-MODE HERO WIDGET WITH SLIDER & ANTI-REPETITION ENGINE ───────────────
+// ─── DUAL-MODE HERO WIDGET WITH FULL-WIDTH SLIDER & ANTI-REPETITION ENGINE ────
 function HeroWidget({
   name,
   streak,
@@ -895,17 +597,14 @@ function HeroWidget({
       if (stored) seenIds = JSON.parse(stored);
     } catch {}
 
-    // Find unseen items
     let unseen = deck.filter((item) => !seenIds.includes(item.id));
 
-    // If all items seen, reset seen tracker automatically
     if (unseen.length === 0) {
       seenIds = [];
       localStorage.removeItem(storageKey);
       unseen = deck;
     }
 
-    // Pick random item from unseen set
     const selected = unseen[Math.floor(Math.random() * unseen.length)] || deck[0];
     seenIds.push(selected.id);
     try {
@@ -916,7 +615,6 @@ function HeroWidget({
     setCurrentItem(selected);
   }, [dbItems]);
 
-  // Re-pick when mode changes or items load
   useEffect(() => {
     pickNextItem(mode);
   }, [mode, pickNextItem]);
@@ -925,7 +623,8 @@ function HeroWidget({
   const todayHours = (todayFocusMins / 60).toFixed(1);
   const isExternalImage =
     currentItem?.icon_or_sticker?.startsWith("http://") ||
-    currentItem?.icon_or_sticker?.startsWith("https://");
+    currentItem?.icon_or_sticker?.startsWith("https://") ||
+    currentItem?.icon_or_sticker?.startsWith("/");
 
   return (
     <div className="rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-slate-200/80 bg-white">
@@ -981,78 +680,68 @@ function HeroWidget({
           </div>
         </div>
 
-        {/* ─── DUAL-MODE TOGGLE SLIDER ─── */}
-        <div className="flex items-center justify-between gap-2 mb-2 px-0.5">
-          <div className="flex p-0.5 bg-slate-100 rounded-xl border border-slate-200 text-[10px] font-black w-full max-w-[210px]">
-            <button
-              type="button"
-              onClick={() => setMode("motivation")}
-              className={`flex-1 py-1 rounded-lg transition-all text-center ${
-                mode === "motivation"
-                  ? "bg-white text-slate-900 shadow-xs font-black"
-                  : "text-slate-500 hover:text-slate-900"
-              }`}
-            >
-              🔥 Motivation
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("meme")}
-              className={`flex-1 py-1 rounded-lg transition-all text-center ${
-                mode === "meme"
-                  ? "bg-white text-slate-900 shadow-xs font-black"
-                  : "text-slate-500 hover:text-slate-900"
-              }`}
-            >
-              😂 Memes
-            </button>
-          </div>
-
+        {/* ─── FULL-WIDTH DUAL-MODE SLIDER (LEFT TO RIGHT) ─── */}
+        <div className="w-full p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-black flex items-center mb-3 shadow-inner">
           <button
             type="button"
-            onClick={() => pickNextItem(mode)}
-            className="text-[10px] font-black text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2.5 py-1 rounded-xl transition-all active:scale-95 flex items-center gap-1"
+            onClick={() => setMode("motivation")}
+            className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${
+              mode === "motivation"
+                ? "bg-white text-slate-900 shadow-sm font-black"
+                : "text-slate-500 hover:text-slate-900"
+            }`}
           >
-            <span>↻</span> Next
+            <span>🔥</span> Motivation
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("meme")}
+            className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${
+              mode === "meme"
+                ? "bg-white text-slate-900 shadow-sm font-black"
+                : "text-slate-500 hover:text-slate-900"
+            }`}
+          >
+            <span>😂</span> Memes
           </button>
         </div>
 
-        {/* ─── CARD CONTENT (SWAPS BETWEEN MOTIVATION & MEMES) ─── */}
+        {/* ─── INTERACTIVE CARD (TAP TO CYCLE) ─── */}
         {currentItem && (
           <button
             type="button"
             onClick={() => pickNextItem(mode)}
-            className={`w-full text-left rounded-xl border ${currentItem.border} ${currentItem.bg} p-3 active:scale-[0.98] transition-all`}
+            className={`w-full text-left rounded-2xl border ${currentItem.border} ${currentItem.bg} p-3.5 active:scale-[0.98] transition-all relative overflow-hidden group`}
           >
-            <div className="flex items-start gap-2.5">
-              {/* Avatar / Sticker / GIF / External Image Container */}
+            <div className="flex items-start gap-3">
+              {/* Media Container: GIFs (Memes) / Photos & Stickers (Quotes) */}
               <div
-                className={`w-12 h-12 rounded-2xl flex-shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden`}
+                className={`w-14 h-14 rounded-2xl flex-shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden bg-black/5`}
               >
                 {isExternalImage && !imgError ? (
                   <img
                     src={currentItem.icon_or_sticker}
                     alt={currentItem.character}
-                    className="w-full h-full object-cover rounded-xl"
+                    className="w-full h-full object-cover rounded-2xl"
                     onError={() => setImgError(true)}
                   />
                 ) : (
-                  <span className="text-xl">
+                  <span className="text-2xl">
                     {imgError ? "⭐" : currentItem.icon_or_sticker || "💡"}
                   </span>
                 )}
               </div>
 
               <div className="flex-1 min-w-0">
-                <p className={`text-[11px] font-bold leading-snug ${currentItem.text} line-clamp-3`}>
+                <p className={`text-xs font-bold leading-snug ${currentItem.text} line-clamp-3`}>
                   "{currentItem.quote}"
                 </p>
-                <div className="flex items-center justify-between mt-1.5">
+                <div className="flex items-center justify-between mt-2">
                   <p className="text-[10px] font-black text-slate-500 truncate">
                     — {currentItem.character}
                     <span className="font-medium text-slate-400"> · {currentItem.show}</span>
                   </p>
-                  <span className="text-[9px] font-bold text-slate-400 bg-white/80 border border-slate-200 px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1">
+                  <span className="text-[9.5px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-2 py-0.5 rounded-full flex-shrink-0 ml-1 shadow-2xs group-hover:bg-slate-100 transition-all">
                     Tap ↻
                   </span>
                 </div>
@@ -1080,7 +769,7 @@ function HeroWidget({
   );
 }
 
-// ─── NEW WIDGET: MULTI-DAY STUDY SPLIT TIMELINE (Weekly / Monthly / Custom) ─────
+// ─── MULTI-DAY STUDY SPLIT TIMELINE (Weekly / Monthly / Custom) ─────
 function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
   const [rangeMode, setRangeMode] = useState<"weekly" | "monthly" | "custom">("weekly");
   const [customStart, setCustomStart] = useState<string>(() => {
@@ -1771,7 +1460,7 @@ export default function DashboardPage() {
 
       <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
 
-        {/* 0. DUAL-MODE HERO WIDGET — Motivation / Memes Toggle Slider */}
+        {/* 0. DUAL-MODE HERO WIDGET (FULL WIDTH SLIDER) */}
         <HeroWidget
           name={firstName}
           streak={streak}
