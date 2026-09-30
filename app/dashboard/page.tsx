@@ -56,6 +56,266 @@ interface ChapterItem {
   subject_id: string;
 }
 
+// ─── ANIME QUOTES DATA ───────────────────────────────────────────────────────
+const ANIME_QUOTES = [
+  {
+    quote: "I'm not gonna run away, I never go back on my word!",
+    character: "Naruto Uzumaki",
+    show: "Naruto",
+    emoji: "🍥",
+    color: "from-orange-500 to-yellow-400",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    text: "text-orange-900",
+    badge: "bg-orange-500",
+  },
+  {
+    quote: "A lesson without pain is meaningless. That's because no one can gain without sacrificing something.",
+    character: "Edward Elric",
+    show: "Fullmetal Alchemist",
+    emoji: "⚗️",
+    color: "from-amber-500 to-yellow-300",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-900",
+    badge: "bg-amber-500",
+  },
+  {
+    quote: "Hard work is worthless for those that don't believe in themselves.",
+    character: "Naruto Uzumaki",
+    show: "Naruto",
+    emoji: "🍥",
+    color: "from-orange-500 to-yellow-400",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    text: "text-orange-900",
+    badge: "bg-orange-500",
+  },
+  {
+    quote: "If you don't take risks, you can't create a future!",
+    character: "Monkey D. Luffy",
+    show: "One Piece",
+    emoji: "🏴‍☠️",
+    color: "from-red-500 to-orange-400",
+    bg: "bg-red-50",
+    border: "border-red-200",
+    text: "text-red-900",
+    badge: "bg-red-500",
+  },
+  {
+    quote: "The only thing we're allowed to do is believe that we won't regret the choice we made.",
+    character: "Levi Ackerman",
+    show: "Attack on Titan",
+    emoji: "⚔️",
+    color: "from-slate-600 to-slate-400",
+    bg: "bg-slate-50",
+    border: "border-slate-200",
+    text: "text-slate-900",
+    badge: "bg-slate-600",
+  },
+  {
+    quote: "Push through the pain, giving up is what kills people.",
+    character: "Roronoa Zoro",
+    show: "One Piece",
+    emoji: "🗡️",
+    color: "from-green-600 to-teal-400",
+    bg: "bg-green-50",
+    border: "border-green-200",
+    text: "text-green-900",
+    badge: "bg-green-600",
+  },
+  {
+    quote: "Whatever you lose, you'll find it again. But what you throw away you'll never get back.",
+    character: "Himura Kenshin",
+    show: "Rurouni Kenshin",
+    emoji: "⛩️",
+    color: "from-purple-600 to-pink-400",
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-900",
+    badge: "bg-purple-600",
+  },
+  {
+    quote: "If you want to be the best, train until your hands bleed.",
+    character: "Rock Lee",
+    show: "Naruto",
+    emoji: "🥋",
+    color: "from-green-500 to-emerald-400",
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-900",
+    badge: "bg-emerald-500",
+  },
+  {
+    quote: "People's lives don't end when they die. It ends when they lose faith.",
+    character: "Itachi Uchiha",
+    show: "Naruto",
+    emoji: "🌙",
+    color: "from-indigo-600 to-purple-500",
+    bg: "bg-indigo-50",
+    border: "border-indigo-200",
+    text: "text-indigo-900",
+    badge: "bg-indigo-600",
+  },
+  {
+    quote: "I'll leave tomorrow's problems to tomorrow's me.",
+    character: "Saitama",
+    show: "One Punch Man",
+    emoji: "👊",
+    color: "from-yellow-500 to-orange-400",
+    bg: "bg-yellow-50",
+    border: "border-yellow-200",
+    text: "text-yellow-900",
+    badge: "bg-yellow-500",
+  },
+];
+
+function getGreeting(name: string, hour: number): string {
+  if (hour >= 5 && hour < 9) return `Rise & grind, ${name}! 🌅`;
+  if (hour >= 9 && hour < 12) return `Good morning, ${name}! ☀️`;
+  if (hour >= 12 && hour < 14) return `Lunch break, ${name}? 🍱 Back to books!`;
+  if (hour >= 14 && hour < 17) return `Afternoon session, ${name}! 💪`;
+  if (hour >= 17 && hour < 20) return `Evening grind, ${name}! 🌆`;
+  if (hour >= 20 && hour < 23) return `Late night mode, ${name}! 🌙`;
+  return `Night owl alert, ${name}! 🦉 Sleep matters too!`;
+}
+
+// ─── HERO WIDGET COMPONENT ───────────────────────────────────────────────────
+function HeroWidget({
+  name,
+  streak,
+  todayFocusMins,
+}: {
+  name: string;
+  streak: number;
+  todayFocusMins: number;
+}) {
+  const [hour, setHour] = useState(new Date().getHours());
+  const [quoteIdx, setQuoteIdx] = useState(() => {
+    // Rotate daily based on date so it changes each day but stays same in session
+    return new Date().getDate() % ANIME_QUOTES.length;
+  });
+
+  useEffect(() => {
+    // Update hour every minute
+    const interval = setInterval(() => setHour(new Date().getHours()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Tap to cycle quote
+  const cycleQuote = () => setQuoteIdx((i) => (i + 1) % ANIME_QUOTES.length);
+
+  const q = ANIME_QUOTES[quoteIdx];
+  const greeting = getGreeting(name, hour);
+  const todayHours = (todayFocusMins / 60).toFixed(1);
+
+  return (
+    <div className="rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-slate-200/80 bg-white">
+      {/* Top bar — gradient accent */}
+      <div className={`h-1.5 w-full bg-gradient-to-r ${q.color}`} />
+
+      <div className="p-4 pb-3">
+        {/* Greeting row */}
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">
+              PrepWise Dashboard
+            </p>
+            <h2 className="text-base font-black text-slate-900 leading-tight truncate">
+              {greeting}
+            </h2>
+          </div>
+
+          {/* Streak badge */}
+          <div
+            className={`flex-shrink-0 flex flex-col items-center justify-center rounded-2xl px-3 py-2 ${
+              streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"
+            }`}
+          >
+            <span className="text-xl leading-none">{streak > 0 ? "🔥" : "💤"}</span>
+            <span
+              className={`text-sm font-black leading-tight ${
+                streak > 0 ? "text-orange-600" : "text-slate-400"
+              }`}
+            >
+              {streak}
+            </span>
+            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+              {streak === 1 ? "Day" : "Days"}
+            </span>
+          </div>
+        </div>
+
+        {/* Stats row */}
+        <div className="flex items-center gap-2 mb-3">
+          <div className="flex-1 bg-teal-50 border border-teal-100 rounded-xl px-3 py-2 flex items-center gap-2">
+            <span className="text-base">⏱️</span>
+            <div>
+              <p className="text-[10px] font-bold text-teal-600 leading-none">Today</p>
+              <p className="text-sm font-black text-teal-900 leading-tight">{todayHours}h studied</p>
+            </div>
+          </div>
+          <div className="flex-1 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2 flex items-center gap-2">
+            <span className="text-base">🎯</span>
+            <div>
+              <p className="text-[10px] font-bold text-indigo-600 leading-none">Goal</p>
+              <p className="text-sm font-black text-indigo-900 leading-tight">8h / day</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Anime Quote Card — tap to change */}
+        <button
+          type="button"
+          onClick={cycleQuote}
+          className={`w-full text-left rounded-xl border ${q.border} ${q.bg} p-3 active:scale-[0.98] transition-all`}
+        >
+          <div className="flex items-start gap-2.5">
+            {/* Character sticker */}
+            <div
+              className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center text-lg ${q.badge} shadow-sm`}
+            >
+              <span>{q.emoji}</span>
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <p className={`text-[11px] font-bold leading-snug ${q.text} line-clamp-3`}>
+                "{q.quote}"
+              </p>
+              <div className="flex items-center justify-between mt-1.5">
+                <p className="text-[10px] font-black text-slate-500">
+                  — {q.character}
+                  <span className="font-medium text-slate-400"> · {q.show}</span>
+                </p>
+                <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                  Tap to change
+                </span>
+              </div>
+            </div>
+          </div>
+        </button>
+
+        {/* Streak message */}
+        {streak > 0 && (
+          <p className="text-[10px] font-bold text-orange-600 text-center mt-2.5">
+            {streak >= 7
+              ? `🔥 ${streak}-day streak — you're unstoppable! Keep it going!`
+              : streak >= 3
+              ? `🔥 ${streak}-day streak! Building momentum!`
+              : `🔥 ${streak}-day streak started! Don't break the chain!`}
+          </p>
+        )}
+        {streak === 0 && (
+          <p className="text-[10px] font-bold text-slate-400 text-center mt-2.5">
+            Start a focus session today to build your streak! 💪
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN DASHBOARD ───────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -168,7 +428,7 @@ export default function DashboardPage() {
       const isDropper = uProf?.class_level === "Dropper";
       const wantsBoards = !isDropper && Boolean(uProf?.wants_boards);
 
-      // 2. FETCH REAL ADMIN EXAM SCHEDULES (Strict Filter: No boards for Dropper!)
+      // 2. FETCH REAL ADMIN EXAM SCHEDULES
       const { data: schedules } = await supabase
         .from("exam_schedule")
         .select("*")
@@ -370,7 +630,6 @@ export default function DashboardPage() {
     fetchChaptersForSubject(subjId);
   };
 
-  // Dedicated Fetch that writes to Cache
   const fetchMentorReport = async (uid: string, force = false) => {
     setMentorLoading(true);
     try {
@@ -485,11 +744,27 @@ export default function DashboardPage() {
   const practicePct = Math.round((splitRatio.practice / totalSplitMins) * 100);
   const revisionPct = Math.round((splitRatio.revision / totalSplitMins) * 100);
 
+  const studentName =
+    profile?.name ||
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    "Champion";
+  // Use first name only
+  const firstName = studentName.split(" ")[0];
+
   return (
     <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased">
       <AppHeader />
 
       <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
+
+        {/* 0. HERO WIDGET — Greeting + Anime Quote + Streak */}
+        <HeroWidget
+          name={firstName}
+          streak={streak}
+          todayFocusMins={todayFocusMins}
+        />
+
         {/* 1. COMPACT DUAL/SINGLE COUNTDOWN CAROUSEL */}
         <div
           className={`grid gap-2 ${
@@ -710,32 +985,36 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          <div className="grid grid-flow-col grid-rows-7 gap-1.5 overflow-x-auto py-1">
-            {heatGrid.map((level, idx) => {
-              const bg =
-                level === 4
-                  ? "bg-[#065F46] border border-[#047857]"
-                  : level === 3
-                  ? "bg-[#059669] border border-[#10B981]"
-                  : level === 2
-                  ? "bg-[#34D399] border border-[#6EE7B7]"
-                  : level === 1
-                  ? "bg-[#A7F3D0] border border-[#D1FAE5]"
-                  : "bg-slate-200/80 border border-slate-300/60";
-              return <div key={idx} className={`w-3.5 h-3.5 rounded-sm ${bg}`} />;
-            })}
+          <div className="grid gap-[3px]" style={{ gridTemplateColumns: "repeat(12, 1fr)" }}>
+            {Array.from({ length: 12 }).map((_, weekIdx) => (
+              <div key={weekIdx} className="flex flex-col gap-[3px]">
+                {Array.from({ length: 7 }).map((_, dayIdx) => {
+                  const cellIdx = weekIdx * 7 + dayIdx;
+                  const level = heatGrid[cellIdx] ?? 0;
+                  const colors = [
+                    "bg-slate-100",
+                    "bg-teal-200",
+                    "bg-teal-400",
+                    "bg-teal-600",
+                    "bg-teal-800",
+                  ];
+                  return (
+                    <div
+                      key={dayIdx}
+                      className={`w-full aspect-square rounded-[2px] ${colors[level]}`}
+                    />
+                  );
+                })}
+              </div>
+            ))}
           </div>
 
-          <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 mt-2.5 px-0.5">
-            <span>Less Focus</span>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-xs bg-slate-200 border border-slate-300" />
-              <span className="w-3 h-3 rounded-xs bg-[#A7F3D0]" />
-              <span className="w-3 h-3 rounded-xs bg-[#34D399]" />
-              <span className="w-3 h-3 rounded-xs bg-[#059669]" />
-              <span className="w-3 h-3 rounded-xs bg-[#065F46]" />
-            </div>
-            <span className="font-bold text-slate-800">More Focus (6h+)</span>
+          <div className="flex items-center gap-1.5 mt-2.5 justify-end">
+            <span className="text-[10px] font-semibold text-slate-400">Less</span>
+            {["bg-slate-100", "bg-teal-200", "bg-teal-400", "bg-teal-600", "bg-teal-800"].map((c, i) => (
+              <div key={i} className={`w-3 h-3 rounded-sm ${c}`} />
+            ))}
+            <span className="text-[10px] font-semibold text-slate-400">More</span>
           </div>
         </div>
 
