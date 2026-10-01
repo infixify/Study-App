@@ -98,34 +98,79 @@ jobs:
           find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdkVersion/minSdk = 21/g" {} + || true
           find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdk/minSdk = 21/g" {} + || true
 
-      - name: Add google-services Gradle plugin
+            - name: Add google-services Gradle plugin
         run: |
           cd prepwise_app
 
-          # Project-level build.gradle — add google-services classpath
-          PROJECT_GRADLE="android/build.gradle"
-          if [ -f "$PROJECT_GRADLE" ]; then
-            sed -i "/dependencies {/a\\        classpath 'com.google.gms:google-services:4.4.1'" "$PROJECT_GRADLE"
-          fi
-
-          # App-level build.gradle — apply plugin
-          APP_GRADLE="android/app/build.gradle"
-          if [ -f "$APP_GRADLE" ]; then
-            echo "" >> "$APP_GRADLE"
-            echo "apply plugin: 'com.google.gms.google-services'" >> "$APP_GRADLE"
-          fi
-
-          # Also handle .kts variants
-          PROJECT_KTS="android/build.gradle.kts"
-          if [ -f "$PROJECT_KTS" ]; then
-            sed -i "/dependencies {/a\\        classpath(\"com.google.gms:google-services:4.4.1\")" "$PROJECT_KTS"
-          fi
-
+          SETTINGS_KTS="android/settings.gradle.kts"
           APP_KTS="android/app/build.gradle.kts"
-          if [ -f "$APP_KTS" ]; then
-            echo "" >> "$APP_KTS"
-            echo 'apply(plugin = "com.google.gms.google-services")' >> "$APP_KTS"
+          SETTINGS_GROOVY="android/settings.gradle"
+          APP_GROOVY="android/app/build.gradle"
+
+          if [ -f "$SETTINGS_KTS" ]; then
+            python3 - << 'PYEOF'
+          import re
+
+          path = "android/settings.gradle.kts"
+          with open(path, "r") as f:
+              content = f.read()
+
+          plugin_line = '    id("com.google.gms.google-services") version "4.4.1" apply false'
+
+          if "com.google.gms.google-services" not in content:
+              if "plugins {" in content:
+                  content = content.replace("plugins {", "plugins {\n" + plugin_line, 1)
+              else:
+                  content = 'plugins {\n' + plugin_line + '\n}\n' + content
+
+          with open(path, "w") as f:
+              f.write(content)
+          print("settings.gradle.kts updated")
+          PYEOF
+
+            python3 - << 'PYEOF'
+          path = "android/app/build.gradle.kts"
+          with open(path, "r") as f:
+              content = f.read()
+
+          plugin_line = '    id("com.google.gms.google-services")'
+
+          if "com.google.gms.google-services" not in content:
+              if "plugins {" in content:
+                  content = content.replace("plugins {", "plugins {\n" + plugin_line, 1)
+              else:
+                  content = 'plugins {\n' + plugin_line + '\n}\n' + content
+
+          with open(path, "w") as f:
+              f.write(content)
+          print("app/build.gradle.kts updated")
+          PYEOF
+
+          elif [ -f "$SETTINGS_GROOVY" ]; then
+            python3 - << 'PYEOF'
+          path = "android/settings.gradle"
+          with open(path, "r") as f:
+              content = f.read()
+
+          plugin_line = "    id 'com.google.gms.google-services' version '4.4.1' apply false"
+
+          if "com.google.gms.google-services" not in content:
+              if "plugins {" in content:
+                  content = content.replace("plugins {", "plugins {\n" + plugin_line, 1)
+
+          with open(path, "w") as f:
+              f.write(content)
+          print("settings.gradle updated")
+          PYEOF
+
+            echo "" >> "$APP_GROOVY"
+            echo "apply plugin: 'com.google.gms.google-services'" >> "$APP_GROOVY"
           fi
+
+          echo "=== settings.gradle.kts (first 30 lines) ==="
+          head -30 android/settings.gradle.kts 2>/dev/null || head -30 android/settings.gradle 2>/dev/null
+          echo "=== app/build.gradle.kts (first 20 lines) ==="
+          head -20 android/app/build.gradle.kts 2>/dev/null || true
 
       - name: Write notification_service.dart
         run: |
