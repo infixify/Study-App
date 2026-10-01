@@ -171,10 +171,10 @@ jobs:
 
               a = a.replace("minSdk = flutter.minSdkVersion", "minSdk = 21")
               a = a.replace("minSdkVersion = flutter.minSdkVersion", "minSdkVersion = 21")
-              a = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 34', a)
+              a = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', a)
+              a = re.sub(r'compileSdkVersion\s*=\s*flutter\.compileSdkVersion', 'compileSdkVersion = 36', a)
               a = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 34', a)
-              if "AarMetadata" not in a:
-                  a += '\ntasks.configureEach {\n    if (name.contains("AarMetadata", ignoreCase = true)) {\n        enabled = false\n    }\n}\n'
+              a = re.sub(r'targetSdkVersion\s*=\s*flutter\.targetSdkVersion', 'targetSdkVersion = 34', a)
               with open("android/app/build.gradle.kts", "w") as f:
                   f.write(a)
               print("app/build.gradle.kts patched")
@@ -188,32 +188,39 @@ jobs:
               if "coreLibraryDesugaring" not in a:
                   a += "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
               a = a.replace("minSdkVersion flutter.minSdkVersion", "minSdkVersion 21")
-              a = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 34', a)
+              a = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 36', a)
               a = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 34', a)
-              if "aarmetadata" not in a.lower():
-                  a += '\ntasks.configureEach { task ->\n    if (task.name.toLowerCase().contains("aarmetadata")) {\n        task.enabled = false\n    }\n}\n'
               with open("android/app/build.gradle", "w") as f:
                   f.write(a)
               print("app/build.gradle patched")
 
-          # 3. Patch root android/build.gradle.kts or android/build.gradle to force subprojects compileSdk 34 and disable AarMetadata checks
+          # 3. Patch root android/build.gradle.kts or android/build.gradle to force subprojects compileSdk 36
           if os.path.exists("android/build.gradle.kts"):
               with open("android/build.gradle.kts", "r") as f:
                   b = f.read()
               fix_kts = (
-                  "\nallprojects {\n"
-                  "    tasks.configureEach {\n"
-                  "        if (name.contains(\"AarMetadata\", ignoreCase = true)) {\n"
-                  "            enabled = false\n"
+                  "\nsubprojects {\n"
+                  "    afterEvaluate {\n"
+                  "        val androidExt = project.extensions.findByName(\"android\")\n"
+                  "        if (androidExt != null) {\n"
+                  "            try {\n"
+                  "                val m = androidExt.javaClass.getMethod(\"setCompileSdkVersion\", Int::class.javaPrimitiveType)\n"
+                  "                m.invoke(androidExt, 36)\n"
+                  "            } catch (e: Exception) {\n"
+                  "                try {\n"
+                  "                    val m2 = androidExt.javaClass.getMethod(\"compileSdkVersion\", Int::class.javaPrimitiveType)\n"
+                  "                    m2.invoke(androidExt, 36)\n"
+                  "                } catch (e2: Exception) {}\n"
+                  "            }\n"
                   "        }\n"
                   "    }\n"
                   "}\n"
               )
-              if "AarMetadata" not in b:
+              if "subprojects" not in b:
                   b += fix_kts
                   with open("android/build.gradle.kts", "w") as f:
                       f.write(b)
-                  print("android/build.gradle.kts patched with AarMetadata disable")
+                  print("android/build.gradle.kts patched with compileSdk 36 override")
 
           if os.path.exists("android/build.gradle"):
               with open("android/build.gradle", "r") as f:
@@ -224,28 +231,23 @@ jobs:
                   "    afterEvaluate { project ->\n"
                   "        if (project.hasProperty('android')) {\n"
                   "            project.android {\n"
-                  "                compileSdkVersion 34\n"
+                  "                compileSdkVersion 36\n"
                   "            }\n"
-                  "        }\n"
-                  "    }\n"
-                  "    tasks.configureEach { task ->\n"
-                  "        if (task.name.toLowerCase().contains(\"aarmetadata\")) {\n"
-                  "            task.enabled = false\n"
                   "        }\n"
                   "    }\n"
                   "}\n"
               )
-              if "AarMetadata" not in b and "aarmetadata" not in b:
+              if "compileSdkVersion 36" not in b:
                   b += fix_groovy
                   with open("android/build.gradle", "w") as f:
                       f.write(b)
-                  print("android/build.gradle patched with AarMetadata and compileSdk 34 override")
+                  print("android/build.gradle patched with compileSdk 36 override")
 
           # 4. Suppress unsupported compileSdk warnings in gradle.properties
           prop_path = "android/gradle.properties"
           if os.path.exists(prop_path):
               with open(prop_path, "a") as f:
-                  f.write("\nandroid.suppressUnsupportedCompileSdk=34,35,36\n")
+                  f.write("\nandroid.useAndroidX=true\nandroid.enableJetifier=true\nandroid.suppressUnsupportedCompileSdk=34,35,36,37\n")
           PY_GRADLE
           python3 update_gradle.py
 
@@ -409,8 +411,8 @@ jobs:
             Future<void> _updateNotification() async {
               if (!_isSessionActive) return;
               final String timeStr = _formatTime(_elapsedSeconds);
-              final String title = "🎯 PrepWise Focus Session";
-              final String body = "⏱️ $timeStr  •  Studying: $_subject | Mode: $_mode";
+              final String title = "ðŸŽ¯ PrepWise Focus Session";
+              final String body = "â±ï¸ $timeStr  â€¢  Studying: $_subject | Mode: $_mode";
 
               final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
                 channelId,
@@ -427,7 +429,7 @@ jobs:
                 actions: const <AndroidNotificationAction>[
                   AndroidNotificationAction(
                     'STOP_FOCUS_SESSION',
-                    '🛑 Stop Focus Session',
+                    'ðŸ›‘ Stop Focus Session',
                     showsUserInterface: true,
                     cancelNotification: false,
                   ),
@@ -503,7 +505,7 @@ jobs:
                 final file = File("${targetDir.path}/$filename");
                 await file.writeAsBytes(response.bodyBytes);
 
-                AppToast.show("✓ Saved to Downloads/PrepWise! Opening...");
+                AppToast.show("âœ“ Saved to Downloads/PrepWise! Opening...");
                 await OpenFilex.open(file.path);
               } catch (e) {
                 debugPrint("PDF download error: $e");
@@ -657,7 +659,7 @@ jobs:
                       ),
                     ),
                     const SizedBox(height: 8),
-                    const Center(child: Text("Tap dot to collapse • Drag anywhere", style: TextStyle(color: Colors.white38, fontSize: 10))),
+                    const Center(child: Text("Tap dot to collapse â€¢ Drag anywhere", style: TextStyle(color: Colors.white38, fontSize: 10))),
                   ],
                 ),
               );
@@ -1186,6 +1188,11 @@ jobs:
             }
           }
           EOF
+
+      - name: Accept Android Licenses & Ensure SDK 36
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" || true
 
       - name: Build Release APK
         run: |
