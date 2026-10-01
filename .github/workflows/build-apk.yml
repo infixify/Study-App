@@ -31,18 +31,31 @@ jobs:
         run: |
           flutter create --org com.prepwise --project-name prepwise prepwise_app
           cd prepwise_app
-          flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler
+          flutter pub add \
+            webview_flutter \
+            webview_flutter_android \
+            wakelock_plus \
+            url_launcher \
+            permission_handler \
+            firebase_core \
+            firebase_messaging \
+            flutter_local_notifications
           echo "" >> pubspec.yaml
           echo "dependency_overrides:" >> pubspec.yaml
           echo "  permission_handler_android: 12.0.13" >> pubspec.yaml
           flutter pub get
 
+      - name: Inject google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          echo "$GOOGLE_SERVICES_JSON" > prepwise_app/android/app/google-services.json
+
       - name: Configure Android Manifest and SDK
         run: |
           cd prepwise_app
-          cat << 'PY_SCRIPT' > update_manifest.py
-          import xml.etree.ElementTree as ET
 
+          cat << 'PY_SCRIPT' > update_manifest.py
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           with open(manifest_path, "r", encoding="utf-8") as f:
               content = f.read()
@@ -62,16 +75,180 @@ jobs:
               <uses-feature android:name="android.hardware.microphone" android:required="false" />
           """
 
+          fcm_service = """
+              <service
+                  android:name="com.google.firebase.messaging.FirebaseMessagingService"
+                  android:exported="false">
+                  <intent-filter>
+                      <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+                  </intent-filter>
+              </service>
+          """
+
           content = content.replace("<application", permissions + "    <application", 1)
+          content = content.replace("</application>", fcm_service + "    </application>", 1)
 
           with open(manifest_path, "w", encoding="utf-8") as f:
               f.write(content)
           print("Manifest updated successfully!")
           PY_SCRIPT
           python3 update_manifest.py
+
           find android -name "build.gradle*" -exec sed -i "s/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g" {} + || true
           find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdkVersion/minSdk = 21/g" {} + || true
           find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdk/minSdk = 21/g" {} + || true
+
+      - name: Add google-services Gradle plugin
+        run: |
+          cd prepwise_app
+
+          # Project-level build.gradle — add google-services classpath
+          PROJECT_GRADLE="android/build.gradle"
+          if [ -f "$PROJECT_GRADLE" ]; then
+            sed -i "/dependencies {/a\\        classpath 'com.google.gms:google-services:4.4.1'" "$PROJECT_GRADLE"
+          fi
+
+          # App-level build.gradle — apply plugin
+          APP_GRADLE="android/app/build.gradle"
+          if [ -f "$APP_GRADLE" ]; then
+            echo "" >> "$APP_GRADLE"
+            echo "apply plugin: 'com.google.gms.google-services'" >> "$APP_GRADLE"
+          fi
+
+          # Also handle .kts variants
+          PROJECT_KTS="android/build.gradle.kts"
+          if [ -f "$PROJECT_KTS" ]; then
+            sed -i "/dependencies {/a\\        classpath(\"com.google.gms:google-services:4.4.1\")" "$PROJECT_KTS"
+          fi
+
+          APP_KTS="android/app/build.gradle.kts"
+          if [ -f "$APP_KTS" ]; then
+            echo "" >> "$APP_KTS"
+            echo 'apply(plugin = "com.google.gms.google-services")' >> "$APP_KTS"
+          fi
+
+      - name: Write notification_service.dart
+        run: |
+          mkdir -p prepwise_app/lib/services
+          cat << 'EOF' > prepwise_app/lib/services/notification_service.dart
+          import 'dart:convert';
+          import 'package:firebase_core/firebase_core.dart';
+          import 'package:firebase_messaging/firebase_messaging.dart';
+          import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+          import 'package:flutter/foundation.dart';
+
+          @pragma('vm:entry-point')
+          Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+            await Firebase.initializeApp();
+            debugPrint("Handling background FCM message: ${message.messageId}");
+          }
+
+          class NotificationService {
+            static final NotificationService _instance = NotificationService._internal();
+            factory NotificationService() => _instance;
+            NotificationService._internal();
+
+            final FirebaseMessaging _fcm = FirebaseMessaging.instance;
+            final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+
+            String? _fcmToken;
+            String? get fcmToken => _fcmToken;
+
+            Function(String token)? onTokenReceived;
+            Function(String payload)? onNotificationTapped;
+
+            Future<void> initialize({
+              Function(String token)? onTokenReady,
+              Function(String payload)? onNotificationClick,
+            }) async {
+              onTokenReceived = onTokenReady;
+              onNotificationTapped = onNotificationClick;
+
+              NotificationSettings settings = await _fcm.requestPermission(
+                alert: true,
+                badge: true,
+                sound: true,
+                provisional: false,
+              );
+              debugPrint('FCM Authorization Status: ${settings.authorizationStatus}');
+
+              const AndroidInitializationSettings androidSettings =
+                  AndroidInitializationSettings('@mipmap/ic_launcher');
+              const InitializationSettings initSettings =
+                  InitializationSettings(android: androidSettings);
+
+              await _localNotifications.initialize(
+                initSettings,
+                onDidReceiveNotificationResponse: (NotificationResponse response) {
+                  if (response.payload != null && onNotificationTapped != null) {
+                    onNotificationTapped!(response.payload!);
+                  }
+                },
+              );
+
+              const AndroidNotificationChannel channel = AndroidNotificationChannel(
+                'prepwise_broadcast_channel',
+                'PrepWise Notifications',
+                description: 'Important study updates, broadcasts, and reminders.',
+                importance: Importance.max,
+                playSound: true,
+                enableVibration: true,
+              );
+
+              await _localNotifications
+                  .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+                  ?.createNotificationChannel(channel);
+
+              try {
+                _fcmToken = await _fcm.getToken();
+                debugPrint("FCM Device Token: $_fcmToken");
+                if (_fcmToken != null && onTokenReceived != null) {
+                  onTokenReceived!(_fcmToken!);
+                }
+              } catch (e) {
+                debugPrint("Error fetching FCM token: $e");
+              }
+
+              _fcm.onTokenRefresh.listen((newToken) {
+                _fcmToken = newToken;
+                if (onTokenReceived != null) {
+                  onTokenReceived!(newToken);
+                }
+              });
+
+              FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+                RemoteNotification? notification = message.notification;
+                AndroidNotification? android = message.notification?.android;
+                if (notification != null && android != null && !kIsWeb) {
+                  _localNotifications.show(
+                    notification.hashCode,
+                    notification.title,
+                    notification.body,
+                    NotificationDetails(
+                      android: AndroidNotificationDetails(
+                        channel.id,
+                        channel.name,
+                        channelDescription: channel.description,
+                        icon: '@mipmap/ic_launcher',
+                        importance: Importance.max,
+                        priority: Priority.high,
+                        playSound: true,
+                      ),
+                    ),
+                    payload: jsonEncode(message.data),
+                  );
+                }
+              });
+
+              FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+                debugPrint("FCM notification opened from background: ${message.data}");
+                if (onNotificationTapped != null) {
+                  onNotificationTapped!(jsonEncode(message.data));
+                }
+              });
+            }
+          }
+          EOF
 
       - name: Write Kotlin MainActivity
         run: |
@@ -119,45 +296,54 @@ jobs:
 
       - name: Write Main Dart Code
         run: |
-          cd prepwise_app
-          cat << 'EOF' > lib/main.dart
+          cat << 'EOF' > prepwise_app/lib/main.dart
           import 'dart:convert';
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
+          import 'package:firebase_core/firebase_core.dart';
+          import 'package:firebase_messaging/firebase_messaging.dart';
           import 'package:webview_flutter/webview_flutter.dart';
           import 'package:webview_flutter_android/webview_flutter_android.dart';
           import 'package:wakelock_plus/wakelock_plus.dart';
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
+          import 'services/notification_service.dart';
+
+          @pragma('vm:entry-point')
+          Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
+            await Firebase.initializeApp();
+            debugPrint('BG FCM: ${message.messageId}');
+          }
 
           void main() async {
             WidgetsFlutterBinding.ensureInitialized();
-            await SystemChrome.setPreferredOrientations([
-              DeviceOrientation.portraitUp,
-              DeviceOrientation.portraitDown,
-            ]);
-            SystemChrome.setSystemUIOverlayStyle(
-              const SystemUiOverlayStyle(
-                statusBarColor: Colors.transparent,
-                statusBarIconBrightness: Brightness.light,
-                systemNavigationBarColor: Color(0xFF0F172A),
-                systemNavigationBarIconBrightness: Brightness.light,
-              ),
-            );
+            await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+            SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness: Brightness.light,
+              systemNavigationBarColor: Color(0xFF0F172A),
+              systemNavigationBarIconBrightness: Brightness.light,
+            ));
+
+            try {
+              await Firebase.initializeApp();
+              FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
+              debugPrint('Firebase initialized OK');
+            } catch (e) {
+              debugPrint('Firebase init failed (no google-services.json?): $e');
+            }
+
             runApp(const PrepWiseApp());
           }
 
           class PrepWiseApp extends StatelessWidget {
             const PrepWiseApp({super.key});
-
             @override
             Widget build(BuildContext context) {
               return MaterialApp(
                 title: 'PrepWise',
                 debugShowCheckedModeBanner: false,
-                theme: ThemeData(
-                  scaffoldBackgroundColor: const Color(0xFF0F172A),
-                ),
+                theme: ThemeData(scaffoldBackgroundColor: const Color(0xFF0F172A)),
                 home: const MainWebView(),
               );
             }
@@ -165,7 +351,6 @@ jobs:
 
           class MainWebView extends StatefulWidget {
             const MainWebView({super.key});
-
             @override
             State<MainWebView> createState() => _MainWebViewState();
           }
@@ -174,6 +359,8 @@ jobs:
             late final WebViewController _controller;
             bool _isLoading = true;
             int _progress = 0;
+            bool _webViewReady = false;
+            String? _pendingFcmToken;
             static const _appsChannel = MethodChannel('com.prepwise/apps');
 
             @override
@@ -181,17 +368,52 @@ jobs:
               super.initState();
               _requestAllPermissions();
               _setupWebView();
+              _initFCM();
             }
 
             Future<void> _requestAllPermissions() async {
               try {
-                await [
-                  Permission.notification,
-                  Permission.camera,
-                  Permission.microphone,
-                ].request();
+                await [Permission.notification, Permission.camera, Permission.microphone].request();
               } catch (e) {
                 debugPrint('Permission error: $e');
+              }
+            }
+
+            Future<void> _initFCM() async {
+              try {
+                await NotificationService().initialize(
+                  onTokenReady: (token) {
+                    debugPrint('FCM token ready: $token');
+                    if (_webViewReady) {
+                      _injectFcmToken(token);
+                    } else {
+                      _pendingFcmToken = token;
+                    }
+                  },
+                  onNotificationClick: (payload) {
+                    debugPrint('Notification tapped: $payload');
+                  },
+                );
+              } catch (e) {
+                debugPrint('FCM init error: $e');
+              }
+            }
+
+            Future<void> _injectFcmToken(String token) async {
+              try {
+                await _controller.runJavaScript('''
+                  (function() {
+                    var token = '$token';
+                    try { localStorage.setItem('prepwise_native_fcm_token', token); } catch(e) {}
+                    if (typeof window.onNativeFCMToken === 'function') {
+                      window.onNativeFCMToken(token);
+                    } else {
+                      window.__pendingFcmToken = token;
+                    }
+                  })();
+                ''');
+              } catch (e) {
+                debugPrint('FCM token inject error: $e');
               }
             }
 
@@ -201,7 +423,7 @@ jobs:
                 final escaped = jsonStr.replaceAll("'", "\\'");
                 await _controller.runJavaScript(
                   "window.__nativeInstalledApps = JSON.parse('$escaped'); "
-                  "if (window.onInstalledAppsReady) window.onInstalledAppsReady(window.__nativeInstalledApps);"
+                  "if (window.onInstalledAppsReady) window.onInstalledAppsReady(window.__nativeInstalledApps);",
                 );
               } catch (e) {
                 debugPrint('InstalledApps error: $e');
@@ -216,56 +438,54 @@ jobs:
                 params = const PlatformWebViewControllerCreationParams();
               }
 
-              final WebViewController controller =
-                  WebViewController.fromPlatformCreationParams(params);
+              final controller = WebViewController.fromPlatformCreationParams(params);
 
               controller
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
                 ..setBackgroundColor(const Color(0xFF0F172A))
-                ..setNavigationDelegate(
-                  NavigationDelegate(
-                    onProgress: (p) => setState(() => _progress = p),
-                    onPageStarted: (url) => setState(() => _isLoading = true),
-                    onPageFinished: (url) {
-                      setState(() => _isLoading = false);
-                      _controller.runJavaScript('''
-                        if (!window.AppBridge) {
-                          window.AppBridge = {
-                            postMessage: function(msg) {
-                              if (window.FlutterBridge) {
-                                window.FlutterBridge.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg));
-                              }
+                ..setNavigationDelegate(NavigationDelegate(
+                  onProgress: (p) => setState(() => _progress = p),
+                  onPageStarted: (url) => setState(() => _isLoading = true),
+                  onPageFinished: (url) {
+                    setState(() {
+                      _isLoading = false;
+                      _webViewReady = true;
+                    });
+                    _controller.runJavaScript('''
+                      if (!window.AppBridge) {
+                        window.AppBridge = {
+                          postMessage: function(msg) {
+                            if (window.FlutterBridge) {
+                              window.FlutterBridge.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg));
                             }
-                          };
-                        }
-                      ''');
-                      _injectInstalledApps();
-                    },
-                    onNavigationRequest: (request) {
-                      final url = request.url;
-                      // Only block truly external non-web schemes
-                      if (url.startsWith('intent://') ||
-                          url.startsWith('tel:') ||
-                          url.startsWith('mailto:') ||
-                          url.startsWith('whatsapp:') ||
-                          url.startsWith('market:')) {
-                        try {
-                          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-                        } catch (_) {}
-                        return NavigationDecision.prevent;
+                          }
+                        };
                       }
-                      // PDF: open natively
-                      if (url.endsWith('.pdf') || url.contains('/pdf/') || url.contains('type=pdf')) {
-                        launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-                        return NavigationDecision.prevent;
-                      }
-                      // Everything else (including OAuth/Google sign-in) stays in WebView
-                      return NavigationDecision.navigate;
-                    },
-                  ),
-                )
-                ..addJavaScriptChannel(
-                  'FlutterBridge',
+                    ''');
+                    _injectInstalledApps();
+                    if (_pendingFcmToken != null) {
+                      _injectFcmToken(_pendingFcmToken!);
+                      _pendingFcmToken = null;
+                    }
+                  },
+                  onNavigationRequest: (request) {
+                    final url = request.url;
+                    if (url.startsWith('intent://') ||
+                        url.startsWith('tel:') ||
+                        url.startsWith('mailto:') ||
+                        url.startsWith('whatsapp:') ||
+                        url.startsWith('market:')) {
+                      try { launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
+                      return NavigationDecision.prevent;
+                    }
+                    if (url.endsWith('.pdf') || url.contains('/pdf/') || url.contains('type=pdf')) {
+                      launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                      return NavigationDecision.prevent;
+                    }
+                    return NavigationDecision.navigate;
+                  },
+                ))
+                ..addJavaScriptChannel('FlutterBridge',
                   onMessageReceived: (JavaScriptMessage message) async {
                     try {
                       final data = jsonDecode(message.message) as Map<String, dynamic>;
@@ -278,18 +498,12 @@ jobs:
                         HapticFeedback.vibrate();
                       } else if (action == 'vibrate') {
                         final type = data['type'] as String? ?? 'medium';
-                        if (type == 'heavy') {
-                          HapticFeedback.heavyImpact();
-                        } else if (type == 'light') {
-                          HapticFeedback.lightImpact();
-                        } else {
-                          HapticFeedback.mediumImpact();
-                        }
+                        if (type == 'heavy') HapticFeedback.heavyImpact();
+                        else if (type == 'light') HapticFeedback.lightImpact();
+                        else HapticFeedback.mediumImpact();
                       } else if (action == 'downloadPdf') {
                         final pdfUrl = data['url'] as String? ?? '';
-                        if (pdfUrl.isNotEmpty) {
-                          launchUrl(Uri.parse(pdfUrl), mode: LaunchMode.externalApplication);
-                        }
+                        if (pdfUrl.isNotEmpty) launchUrl(Uri.parse(pdfUrl), mode: LaunchMode.externalApplication);
                       } else if (action == 'requestCamera' || action == 'requestPermissions') {
                         await [Permission.camera, Permission.microphone].request();
                       } else if (action == 'getInstalledApps') {
@@ -304,9 +518,7 @@ jobs:
               if (controller.platform is AndroidWebViewController) {
                 final androidController = controller.platform as AndroidWebViewController;
                 androidController.setMediaPlaybackRequiresUserGesture(false);
-                androidController.setOnPlatformPermissionRequest((request) {
-                  request.grant();
-                });
+                androidController.setOnPlatformPermissionRequest((request) => request.grant());
               }
 
               controller.loadRequest(Uri.parse('https://study-app-infixify1.vercel.app'));
@@ -317,27 +529,22 @@ jobs:
             Widget build(BuildContext context) {
               return WillPopScope(
                 onWillPop: () async {
-                  if (await _controller.canGoBack()) {
-                    _controller.goBack();
-                    return false;
-                  }
+                  if (await _controller.canGoBack()) { _controller.goBack(); return false; }
                   return true;
                 },
                 child: Scaffold(
                   backgroundColor: const Color(0xFF0F172A),
                   body: SafeArea(
-                    child: Stack(
-                      children: [
-                        WebViewWidget(controller: _controller),
-                        if (_isLoading)
-                          LinearProgressIndicator(
-                            value: _progress / 100.0,
-                            backgroundColor: const Color(0xFF1E293B),
-                            color: const Color(0xFF0D9488),
-                            minHeight: 3,
-                          ),
-                      ],
-                    ),
+                    child: Stack(children: [
+                      WebViewWidget(controller: _controller),
+                      if (_isLoading)
+                        LinearProgressIndicator(
+                          value: _progress / 100.0,
+                          backgroundColor: const Color(0xFF1E293B),
+                          color: const Color(0xFF0D9488),
+                          minHeight: 3,
+                        ),
+                    ]),
                   ),
                 ),
               );
