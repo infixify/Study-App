@@ -7,13 +7,12 @@ import { loadAndReconcileStreak, saveFocusSession, MIN_STREAK_SECONDS } from "@/
 import AppHeader from "@/components/dashboard/AppHeader";
 import BottomNav from "@/components/dashboard/BottomNav";
 
-// AppBridge TypeScript Declaration for Native Communication
 declare global {
   interface Window {
-    AppBridge?: {
-      postMessage: (message: string) => void;
-    };
+    AppBridge?: { postMessage: (message: string) => void };
     onNativeFCMToken?: (token: string) => void;
+    __nativeInstalledApps?: { name: string; packageName: string }[];
+    onInstalledAppsReady?: (apps: { name: string; packageName: string }[]) => void;
   }
 }
 
@@ -21,12 +20,13 @@ type SubjectType = "Physics" | "Chemistry" | "Mathematics" | "Biology";
 type StudyTaskType = "theory" | "questions" | "revision";
 
 interface AppItem {
-  id: string;
+  id: string;       // packageName if native, custom id if manual
   name: string;
   icon: string;
 }
 
-const DEFAULT_APP_LIST: AppItem[] = [
+// Fallback for web browser (no native bridge)
+const WEB_FALLBACK_APPS: AppItem[] = [
   { id: "pdf_reader", name: "PDF Reader", icon: "📄" },
   { id: "calculator", name: "Calculator", icon: "🧮" },
   { id: "youtube", name: "YouTube", icon: "▶️" },
@@ -36,6 +36,10 @@ const DEFAULT_APP_LIST: AppItem[] = [
   { id: "snapchat", name: "Snapchat", icon: "👻" },
   { id: "games", name: "Games & Social Media", icon: "🎮" },
 ];
+
+function nativeToAppItem(n: { name: string; packageName: string }): AppItem {
+  return { id: n.packageName, name: n.name, icon: "📱" };
+}
 
 const SYNC_INTERVAL_SECONDS = 60;
 const FACE_API_MODEL_URL = "https://justadudewhohacks.github.io/face-api.js/models";
@@ -65,12 +69,14 @@ export default function StudyPage() {
   const [selectedTask, setSelectedTask] = useState<StudyTaskType>("questions");
   const [strictMode, setStrictMode] = useState(true);
 
-  // Allowed apps starts EMPTY (No default apps preloaded)
   const [allowedApps, setAllowedApps] = useState<string[]>([]);
-  const [allApps, setAllApps] = useState<AppItem[]>(DEFAULT_APP_LIST);
+  // allApps starts empty; filled by native bridge or fallback
+  const [allApps, setAllApps] = useState<AppItem[]>([]);
+  const [appsLoaded, setAppsLoaded] = useState(false);
   const [showAppsModal, setShowAppsModal] = useState(false);
   const [customAppName, setCustomAppName] = useState("");
   const [isNativeApp, setIsNativeApp] = useState(false);
+  const [appsSearch, setAppsSearch] = useState("");
 
   const [showPostModal, setShowPostModal] = useState(false);
   const [savedDuration, setSavedDuration] = useState(0);
@@ -88,7 +94,6 @@ export default function StudyPage() {
   );
   const [manualError, setManualError] = useState<string | null>(null);
 
-  // --- Verified Mode (camera presence check) state ---
   const [verifiedMode, setVerifiedMode] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -111,8 +116,25 @@ export default function StudyPage() {
       ? ["Physics", "Chemistry", "Biology"]
       : ["Physics", "Chemistry", "Mathematics"];
 
+  // Load apps from native bridge or fallback
+  function applyNativeApps(raw: { name: string; packageName: string }[]) {
+    const items = raw.map(nativeToAppItem);
+    // Re-apply any custom apps saved locally
+    const savedCustom = localStorage.getItem("prepwise_custom_apps");
+    let customItems: AppItem[] = [];
+    if (savedCustom) {
+      try { customItems = JSON.parse(savedCustom); } catch (e) {}
+    }
+    // Merge: native list + custom (dedupe by id)
+    const merged = [...items];
+    for (const c of customItems) {
+      if (!merged.find((a) => a.id === c.id)) merged.push(c);
+    }
+    setAllApps(merged);
+    setAppsLoaded(true);
+  }
+
   useEffect(() => {
-    // Detect if running inside Flutter Native Shell
     if (typeof window !== "undefined" && window.AppBridge) {
       setIsNativeApp(true);
     }
@@ -144,22 +166,40 @@ export default function StudyPage() {
     }
     loadUser();
 
-    // Load any saved preference if the user had selected before
     const savedAllowed = localStorage.getItem("prepwise_allowed_apps");
     if (savedAllowed) {
-      try {
-        setAllowedApps(JSON.parse(savedAllowed));
-      } catch (e) {}
+      try { setAllowedApps(JSON.parse(savedAllowed)); } catch (e) {}
     }
 
-    const savedCustomApps = localStorage.getItem("prepwise_custom_apps");
-    if (savedCustomApps) {
-      try {
-        const customParsed: AppItem[] = JSON.parse(savedCustomApps);
-        setAllApps([...DEFAULT_APP_LIST, ...customParsed]);
-      } catch (e) {}
+    // Try native apps immediately (may already be injected by Flutter)
+    if (typeof window !== "undefined" && window.__nativeInstalledApps && window.__nativeInstalledApps.length > 0) {
+      applyNativeApps(window.__nativeInstalledApps);
+    } else {
+      // Register callback for when Flutter injects apps after page load
+      if (typeof window !== "undefined") {
+        window.onInstalledAppsReady = (apps) => {
+          applyNativeApps(apps);
+        };
+      }
+      // Fallback: if no native bridge after short delay, use web fallback list
+      const fallbackTimer = setTimeout(() => {
+        if (!appsLoaded) {
+          const savedCustom = localStorage.getItem("prepwise_custom_apps");
+          let customItems: AppItem[] = [];
+          if (savedCustom) {
+            try { customItems = JSON.parse(savedCustom); } catch (e) {}
+          }
+          setAllApps([...WEB_FALLBACK_APPS, ...customItems]);
+          setAppsLoaded(true);
+        }
+      }, 2000);
+      return () => clearTimeout(fallbackTimer);
     }
   }, []);
+
+  const filteredApps = appsSearch.trim()
+    ? allApps.filter((a) => a.name.toLowerCase().includes(appsSearch.toLowerCase()))
+    : allApps;
 
   const toggleAppAllowed = (appId: string) => {
     const updated = allowedApps.includes(appId)
@@ -168,15 +208,9 @@ export default function StudyPage() {
     setAllowedApps(updated);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
 
-    // Update Flutter bridge dynamically if session is active
     if (isActive && typeof window !== "undefined" && window.AppBridge) {
       try {
-        window.AppBridge.postMessage(
-          JSON.stringify({
-            action: "startStrictTimer",
-            allowedApps: updated,
-          })
-        );
+        window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: updated }));
       } catch (err) {}
     }
   };
@@ -189,16 +223,12 @@ export default function StudyPage() {
 
     const updatedApps = [...allApps, newApp];
     setAllApps(updatedApps);
-    
-    // Automatically select the new app
+
     const updatedAllowed = [...allowedApps, newId];
     setAllowedApps(updatedAllowed);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updatedAllowed));
 
-    // Persist custom app list
-    const customOnly = updatedApps.filter(
-      (a) => !DEFAULT_APP_LIST.some((d) => d.id === a.id)
-    );
+    const customOnly = updatedApps.filter((a) => !WEB_FALLBACK_APPS.some((d) => d.id === a.id) && !window.__nativeInstalledApps?.find((n) => n.packageName === a.id));
     localStorage.setItem("prepwise_custom_apps", JSON.stringify(customOnly));
 
     setCustomAppName("");
@@ -209,12 +239,7 @@ export default function StudyPage() {
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify([]));
     if (isActive && typeof window !== "undefined" && window.AppBridge) {
       try {
-        window.AppBridge.postMessage(
-          JSON.stringify({
-            action: "startStrictTimer",
-            allowedApps: [],
-          })
-        );
+        window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: [] }));
       } catch (err) {}
     }
   };
@@ -240,20 +265,12 @@ export default function StudyPage() {
     const newRevision = (dailyRow?.revision_minutes || 0) + (selectedTask === "revision" ? diffMinutes : 0);
 
     await supabase.from("daily_logs").upsert(
-      {
-        user_id: userId,
-        log_date: today,
-        study_time_minutes: newMins,
-        theory_minutes: newTheory,
-        practice_minutes: newPractice,
-        revision_minutes: newRevision,
-      },
+      { user_id: userId, log_date: today, study_time_minutes: newMins, theory_minutes: newTheory, practice_minutes: newPractice, revision_minutes: newRevision },
       { onConflict: "user_id,log_date" }
     );
     lastSyncedSecondsRef.current += diffMinutes * 60;
   }
 
-  // Timer only advances while active AND not presence-paused
   useEffect(() => {
     if (isActive && !presencePaused) {
       timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
@@ -277,7 +294,6 @@ export default function StudyPage() {
     return () => clearInterval(syncIntervalRef.current);
   }, [isActive, userId, selectedTask]);
 
-  // Pause if the tab/app goes into the background during a Verified Mode session
   useEffect(() => {
     function handleVisibilityChange() {
       if (document.hidden && isActive && verifiedMode) {
@@ -303,19 +319,10 @@ export default function StudyPage() {
 
   async function startCamera(): Promise<boolean> {
     try {
-      // Trigger native permission bridge if running inside Flutter app
       if (typeof window !== "undefined" && window.AppBridge) {
-        try {
-          window.AppBridge.postMessage(
-            JSON.stringify({ action: "requestCamera" })
-          );
-        } catch (_) {}
+        try { window.AppBridge.postMessage(JSON.stringify({ action: "requestCamera" })); } catch (_) {}
       }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false,
-      });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -324,10 +331,7 @@ export default function StudyPage() {
       setCameraError(null);
       return true;
     } catch (e: any) {
-      console.warn("Camera access failed:", e);
-      setCameraError(
-        "Camera permission denied. Please allow camera access in app settings for Verified Mode."
-      );
+      setCameraError("Camera permission denied. Please allow camera access in app settings for Verified Mode.");
       return false;
     }
   }
@@ -342,38 +346,25 @@ export default function StudyPage() {
   async function runPresenceCheck() {
     const faceapi = faceapiRef.current;
     if (!faceapi || !videoRef.current || videoRef.current.readyState < 2) return;
-
     let detected = false;
     try {
-      const result = await faceapi.detectSingleFace(
-        videoRef.current,
-        new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 })
-      );
+      const result = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 }));
       detected = !!result;
-    } catch (e) {
-      detected = false;
-    }
+    } catch (e) { detected = false; }
 
     if (detected) {
       missedChecksRef.current = 0;
       setPresencePaused((prev) => (prev ? false : prev));
     } else {
       missedChecksRef.current += 1;
-      if (missedChecksRef.current >= MAX_CONSECUTIVE_MISSES) {
-        setPresencePaused(true);
-      }
+      if (missedChecksRef.current >= MAX_CONSECUTIVE_MISSES) setPresencePaused(true);
     }
 
     setSeconds((s) => {
       if (s - lastPresenceLogSecondsRef.current >= PRESENCE_LOG_INTERVAL_SECONDS) {
         lastPresenceLogSecondsRef.current = s;
         if (userId && sessionIdRef.current) {
-          supabase.from("focus_presence_checks").insert({
-            user_id: userId,
-            session_id: sessionIdRef.current,
-            face_detected: detected,
-            liveness_confirmed: false,
-          });
+          supabase.from("focus_presence_checks").insert({ user_id: userId, session_id: sessionIdRef.current, face_detected: detected, liveness_confirmed: false });
         }
       }
       return s;
@@ -400,12 +391,7 @@ export default function StudyPage() {
     clearInterval(livenessCountdownRef.current);
     setLivenessPromptOpen(false);
     if (userId && sessionIdRef.current) {
-      supabase.from("focus_presence_checks").insert({
-        user_id: userId,
-        session_id: sessionIdRef.current,
-        face_detected: true,
-        liveness_confirmed: true,
-      });
+      supabase.from("focus_presence_checks").insert({ user_id: userId, session_id: sessionIdRef.current, face_detected: true, liveness_confirmed: true });
     }
   }
 
@@ -427,32 +413,16 @@ export default function StudyPage() {
       await loadFaceModels();
       missedChecksRef.current = 0;
       lastPresenceLogSecondsRef.current = 0;
-      sessionIdRef.current =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random()}`;
+      sessionIdRef.current = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
       presenceIntervalRef.current = setInterval(runPresenceCheck, PRESENCE_CHECK_INTERVAL_SECONDS * 1000);
       livenessIntervalRef.current = setInterval(triggerLivenessChallenge, LIVENESS_CHALLENGE_INTERVAL_SECONDS * 1000);
     }
 
-    // Trigger Native Flutter App Blocker & Wakelock
     if (typeof window !== "undefined" && window.AppBridge) {
       try {
-        window.AppBridge.postMessage(
-          JSON.stringify({
-            action: "startStrictTimer",
-            allowedApps: allowedApps,
-          })
-        );
-        window.AppBridge.postMessage(
-          JSON.stringify({
-            action: "vibrate",
-            type: "light",
-          })
-        );
-      } catch (err) {
-        console.error("AppBridge post error:", err);
-      }
+        window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: allowedApps }));
+        window.AppBridge.postMessage(JSON.stringify({ action: "vibrate", type: "light" }));
+      } catch (err) {}
     }
 
     setShowPreModal(false);
@@ -467,25 +437,12 @@ export default function StudyPage() {
   };
 
   const handleStopSession = () => {
-    // Release Native Flutter App Blocker & Trigger Completion Vibration
     if (typeof window !== "undefined" && window.AppBridge) {
       try {
-        window.AppBridge.postMessage(
-          JSON.stringify({
-            action: "stopStrictTimer",
-          })
-        );
-        window.AppBridge.postMessage(
-          JSON.stringify({
-            action: "vibrate",
-            type: "heavy",
-          })
-        );
-      } catch (err) {
-        console.error("AppBridge stop error:", err);
-      }
+        window.AppBridge.postMessage(JSON.stringify({ action: "stopStrictTimer" }));
+        window.AppBridge.postMessage(JSON.stringify({ action: "vibrate", type: "heavy" }));
+      } catch (err) {}
     }
-
     setIsActive(false);
     setSavedDuration(seconds);
     setShowPostModal(true);
@@ -495,10 +452,8 @@ export default function StudyPage() {
   const handleFinishAndSave = async () => {
     if (!userId || !startTime) return;
     setSaving(true);
-
     try {
       await flushDiffToDailyLogs(savedDuration);
-
       const endedAt = new Date();
       const streakResult = await saveFocusSession(userId, startTime, endedAt);
       if (streakResult.countedForStreak) {
@@ -510,35 +465,13 @@ export default function StudyPage() {
 
       if (selectedTask === "questions" && postQCount > 0) {
         const today = new Date().toISOString().split("T")[0];
-        const { data: subjectRow } = await supabase
-          .from("subjects")
-          .select("id")
-          .eq("name", selectedSub)
-          .eq("target_exam", targetExam)
-          .limit(1)
-          .maybeSingle();
-
+        const { data: subjectRow } = await supabase.from("subjects").select("id").eq("name", selectedSub).eq("target_exam", targetExam).limit(1).maybeSingle();
         if (subjectRow?.id) {
-          const { data: existing } = await supabase
-            .from("question_logs")
-            .select("id, question_count")
-            .eq("user_id", userId)
-            .eq("subject_id", subjectRow.id)
-            .eq("log_date", today)
-            .maybeSingle();
-
+          const { data: existing } = await supabase.from("question_logs").select("id, question_count").eq("user_id", userId).eq("subject_id", subjectRow.id).eq("log_date", today).maybeSingle();
           if (existing) {
-            await supabase
-              .from("question_logs")
-              .update({ question_count: existing.question_count + postQCount })
-              .eq("id", existing.id);
+            await supabase.from("question_logs").update({ question_count: existing.question_count + postQCount }).eq("id", existing.id);
           } else {
-            await supabase.from("question_logs").insert({
-              user_id: userId,
-              subject_id: subjectRow.id,
-              question_count: postQCount,
-              log_date: today,
-            });
+            await supabase.from("question_logs").insert({ user_id: userId, subject_id: subjectRow.id, question_count: postQCount, log_date: today });
           }
         }
       }
@@ -548,7 +481,6 @@ export default function StudyPage() {
       setSeconds(0);
       lastSyncedSecondsRef.current = 0;
     } catch (err) {
-      console.error(err);
       setSaving(false);
     }
   };
@@ -557,63 +489,27 @@ export default function StudyPage() {
     if (!userId) return;
     setSaving(true);
     setManualError(null);
-
     try {
-      const { data: dailyRow } = await supabase
-        .from("daily_logs")
-        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes")
-        .eq("user_id", userId)
-        .eq("log_date", manualDate)
-        .maybeSingle();
-
+      const { data: dailyRow } = await supabase.from("daily_logs").select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes").eq("user_id", userId).eq("log_date", manualDate).maybeSingle();
       const newMins = (dailyRow?.study_time_minutes || 0) + manualMinutes;
       const newTheory = (dailyRow?.theory_minutes || 0) + (manualTask === "theory" ? manualMinutes : 0);
       const newPractice = (dailyRow?.practice_minutes || 0) + (manualTask === "questions" ? manualMinutes : 0);
       const newRevision = (dailyRow?.revision_minutes || 0) + (manualTask === "revision" ? manualMinutes : 0);
 
       await supabase.from("daily_logs").upsert(
-        {
-          user_id: userId,
-          log_date: manualDate,
-          study_time_minutes: newMins,
-          theory_minutes: newTheory,
-          practice_minutes: newPractice,
-          revision_minutes: newRevision,
-        },
+        { user_id: userId, log_date: manualDate, study_time_minutes: newMins, theory_minutes: newTheory, practice_minutes: newPractice, revision_minutes: newRevision },
         { onConflict: "user_id,log_date" }
       );
 
       const today = new Date().toISOString().split("T")[0];
       if (manualTask === "questions" && manualQs > 0 && manualDate === today) {
-        const { data: subjectRow } = await supabase
-          .from("subjects")
-          .select("id")
-          .eq("name", manualSub)
-          .eq("target_exam", targetExam)
-          .limit(1)
-          .maybeSingle();
-
+        const { data: subjectRow } = await supabase.from("subjects").select("id").eq("name", manualSub).eq("target_exam", targetExam).limit(1).maybeSingle();
         if (subjectRow?.id) {
-          const { data: existing } = await supabase
-            .from("question_logs")
-            .select("id, question_count")
-            .eq("user_id", userId)
-            .eq("subject_id", subjectRow.id)
-            .eq("log_date", today)
-            .maybeSingle();
-
+          const { data: existing } = await supabase.from("question_logs").select("id, question_count").eq("user_id", userId).eq("subject_id", subjectRow.id).eq("log_date", today).maybeSingle();
           if (existing) {
-            await supabase
-              .from("question_logs")
-              .update({ question_count: existing.question_count + manualQs })
-              .eq("id", existing.id);
+            await supabase.from("question_logs").update({ question_count: existing.question_count + manualQs }).eq("id", existing.id);
           } else {
-            await supabase.from("question_logs").insert({
-              user_id: userId,
-              subject_id: subjectRow.id,
-              question_count: manualQs,
-              log_date: today,
-            });
+            await supabase.from("question_logs").insert({ user_id: userId, subject_id: subjectRow.id, question_count: manualQs, log_date: today });
           }
         }
       }
@@ -644,8 +540,6 @@ export default function StudyPage() {
   return (
     <div className="min-h-screen bg-paper pb-28">
       <AppHeader />
-
-      {/* Hidden video element feeds the face-detection model — nothing is ever uploaded or recorded */}
       <video ref={videoRef} muted playsInline className="hidden" />
 
       <main className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-5">
@@ -672,18 +566,14 @@ export default function StudyPage() {
         </div>
 
         {(currentStreak > 0 || streakWasReset) && (
-          <div className={`rounded-ticket border px-4 py-3 flex items-center gap-3 ${
-            streakWasReset ? "bg-coral/10 border-coral/20" : "bg-marigold/10 border-marigold/20"
-          }`}>
+          <div className={`rounded-ticket border px-4 py-3 flex items-center gap-3 ${streakWasReset ? "bg-coral/10 border-coral/20" : "bg-marigold/10 border-marigold/20"}`}>
             <span className="text-xl">{streakWasReset ? "💔" : "🔥"}</span>
             <div>
               <p className="text-xs font-bold text-ink">
                 {streakWasReset ? "Streak reset — you missed a day" : `${currentStreak}-day streak`}
               </p>
               <p className="text-[10px] text-slate">
-                {streakWasReset
-                  ? "Start a session today to begin a new streak."
-                  : "Keep it going — study at least 2 min today!"}
+                {streakWasReset ? "Start a session today to begin a new streak." : "Keep it going — study at least 2 min today!"}
               </p>
             </div>
           </div>
@@ -694,9 +584,7 @@ export default function StudyPage() {
             <span className="text-xl">{postStreakResult.counted ? "🔥" : "⏱️"}</span>
             <div>
               <p className="text-xs font-bold text-ink">
-                {postStreakResult.counted
-                  ? `Streak updated: ${postStreakResult.newStreak} day${postStreakResult.newStreak !== 1 ? "s" : ""}!`
-                  : "Session saved — too short to count for streak (min 2 min)"}
+                {postStreakResult.counted ? `Streak updated: ${postStreakResult.newStreak} day${postStreakResult.newStreak !== 1 ? "s" : ""}!` : "Session saved — too short to count for streak (min 2 min)"}
               </p>
             </div>
           </div>
@@ -707,9 +595,7 @@ export default function StudyPage() {
             <span className="text-xl">⏸️</span>
             <div>
               <p className="text-xs font-bold text-ink">Paused — we can't see you</p>
-              <p className="text-[10px] text-slate">
-                Come back into camera view (or tap back into the app) to resume your timer.
-              </p>
+              <p className="text-[10px] text-slate">Come back into camera view (or tap back into the app) to resume your timer.</p>
             </div>
           </div>
         )}
@@ -720,7 +606,7 @@ export default function StudyPage() {
           </div>
         )}
 
-        {/* Main Focus Timer Card */}
+        {/* Main Timer Card */}
         <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
           <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2 flex items-center gap-1.5">
             {isActive && verifiedMode && (
@@ -732,23 +618,17 @@ export default function StudyPage() {
             {formatTimer(seconds)}
           </div>
           {!isActive ? (
-            <button
-              onClick={() => setShowPreModal(true)}
-              className="mt-4 px-8 py-3.5 bg-teal text-white font-bold text-sm rounded-2xl shadow-md shadow-teal/20 hover:bg-teal/90 transition-all"
-            >
+            <button onClick={() => setShowPreModal(true)} className="mt-4 px-8 py-3.5 bg-teal text-white font-bold text-sm rounded-2xl shadow-md shadow-teal/20 hover:bg-teal/90 transition-all">
               ▶ Start Focus Session
             </button>
           ) : (
-            <button
-              onClick={handleStopSession}
-              className="mt-4 px-8 py-3.5 bg-rose-600 text-white font-bold text-sm rounded-2xl shadow-md shadow-rose-600/20 hover:bg-rose-700 transition-all"
-            >
+            <button onClick={handleStopSession} className="mt-4 px-8 py-3.5 bg-rose-600 text-white font-bold text-sm rounded-2xl shadow-md shadow-rose-600/20 hover:bg-rose-700 transition-all">
               ■ Stop & Log Session
             </button>
           )}
         </div>
 
-        {/* Clean Allowed Apps Card with Selector Button */}
+        {/* App Blocker Card */}
         <div className="bg-white rounded-ticket border border-ink/10 p-5 shadow-xs">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -764,7 +644,7 @@ export default function StudyPage() {
             </div>
             <button
               type="button"
-              onClick={() => setShowAppsModal(true)}
+              onClick={() => { setShowAppsModal(true); setAppsSearch(""); }}
               className="px-3.5 py-2 rounded-xl bg-teal/10 hover:bg-teal/20 text-teal text-xs font-bold border border-teal/25 transition-all flex items-center gap-1.5 shrink-0 shadow-2xs"
             >
               <span>⚙️</span>
@@ -772,44 +652,31 @@ export default function StudyPage() {
             </button>
           </div>
 
-          {/* Show Allowed App Badges if user has allowed any */}
           {allowedApps.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-ink/5">
               {allowedApps.map((id) => {
                 const app = allApps.find((a) => a.id === id) || { name: id, icon: "📱" };
                 return (
-                  <span
-                    key={id}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[11px] font-bold"
-                  >
+                  <span key={id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[11px] font-bold">
                     <span>{app.icon}</span>
                     <span>{app.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => toggleAppAllowed(id)}
-                      className="ml-0.5 text-slate/70 hover:text-ink text-[12px]"
-                      title="Remove"
-                    >
-                      ✕
-                    </button>
+                    <button type="button" onClick={() => toggleAppAllowed(id)} className="ml-0.5 text-slate/70 hover:text-ink text-[12px]" title="Remove">✕</button>
                   </span>
                 );
               })}
             </div>
           ) : (
-            <div className="mt-2.5 pt-2.5 border-t border-ink/5 flex items-center justify-between">
-              <span className="text-[10px] text-slate">
-                🔒 0 apps allowed • Social media, games & browsers are completely locked
-              </span>
+            <div className="mt-2.5 pt-2.5 border-t border-ink/5">
+              <span className="text-[10px] text-slate">🔒 0 apps allowed • Social media, games & browsers are completely locked</span>
             </div>
           )}
         </div>
       </main>
 
-      {/* Allowed Apps Selector Modal */}
+      {/* Apps Modal */}
       {showAppsModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 max-h-[85vh] flex flex-col space-y-4 animate-in fade-in slide-in-from-bottom-5">
+          <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 max-h-[85vh] flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-5">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
               <div>
                 <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
@@ -817,58 +684,63 @@ export default function StudyPage() {
                 </h3>
                 <p className="text-[10px] text-slate">
                   {allowedApps.length} of {allApps.length} allowed
+                  {isNativeApp && <span className="ml-1 text-teal font-bold">• From your phone</span>}
                 </p>
               </div>
-              <button
-                onClick={() => setShowAppsModal(false)}
-                className="w-7 h-7 rounded-full bg-ink/5 text-xs text-ink/70 flex items-center justify-center font-bold"
-              >
-                ✕
-              </button>
+              <button onClick={() => setShowAppsModal(false)} className="w-7 h-7 rounded-full bg-ink/5 text-xs text-ink/70 flex items-center justify-center font-bold">✕</button>
             </div>
 
-            {/* Quick Actions */}
+            {/* Search bar — useful when real installed apps list is long */}
+            <div className="relative">
+              <input
+                type="text"
+                value={appsSearch}
+                onChange={(e) => setAppsSearch(e.target.value)}
+                placeholder="Search apps..."
+                className="w-full px-3 py-2 text-xs rounded-xl border border-ink/15 focus:border-teal outline-none pl-7"
+              />
+              <span className="absolute left-2.5 top-2.5 text-slate/50 text-xs">🔍</span>
+            </div>
+
             <div className="flex items-center justify-between gap-2">
               <p className="text-[11px] text-slate">Tap an app to Allow or Block:</p>
               {allowedApps.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleBlockAll}
-                  className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-lg border border-rose-200"
-                >
-                  Block All (0)
+                <button type="button" onClick={handleBlockAll} className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-lg border border-rose-200">
+                  Block All
                 </button>
               )}
             </div>
 
-            {/* Apps Grid */}
-            <div className="overflow-y-auto max-h-56 pr-1 space-y-1.5">
-              <div className="grid grid-cols-2 gap-2">
-                {allApps.map((app) => {
-                  const isAllowed = allowedApps.includes(app.id);
-                  return (
-                    <button
-                      key={app.id}
-                      type="button"
-                      onClick={() => toggleAppAllowed(app.id)}
-                      className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all ${
-                        isAllowed
-                          ? "bg-teal/10 border-teal/40 text-teal shadow-2xs"
-                          : "bg-paper/40 border-ink/10 text-slate hover:bg-paper"
-                      }`}
-                    >
-                      <span className="text-base">{app.icon}</span>
-                      <span className="truncate flex-1 text-left">{app.name}</span>
-                      <span className={`text-[11px] font-black ${isAllowed ? "text-teal" : "text-rose-500"}`}>
-                        {isAllowed ? "✓" : "⛔"}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+            {/* Apps grid — scrollable */}
+            <div className="overflow-y-auto flex-1 pr-1">
+              {!appsLoaded ? (
+                <p className="text-[11px] text-slate text-center py-6">Loading your apps…</p>
+              ) : filteredApps.length === 0 ? (
+                <p className="text-[11px] text-slate text-center py-6">No apps found</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {filteredApps.map((app) => {
+                    const isAllowed = allowedApps.includes(app.id);
+                    return (
+                      <button
+                        key={app.id}
+                        type="button"
+                        onClick={() => toggleAppAllowed(app.id)}
+                        className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all ${isAllowed ? "bg-teal/10 border-teal/40 text-teal shadow-2xs" : "bg-paper/40 border-ink/10 text-slate hover:bg-paper"}`}
+                      >
+                        <span className="text-base">{app.icon}</span>
+                        <span className="truncate flex-1 text-left">{app.name}</span>
+                        <span className={`text-[11px] font-black ${isAllowed ? "text-teal" : "text-rose-500"}`}>
+                          {isAllowed ? "✓" : "⛔"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
-            {/* Add Custom App Input */}
+            {/* Add custom app */}
             <div className="pt-2 border-t border-ink/8">
               <label className="text-[10px] font-bold text-slate block mb-1">
                 + Allow Another App (e.g. Physics Wallah, Chrome, Notion)
@@ -882,23 +754,13 @@ export default function StudyPage() {
                   placeholder="App name..."
                   className="flex-1 px-3 py-2 text-xs rounded-xl border border-ink/15 focus:border-teal outline-none"
                 />
-                <button
-                  type="button"
-                  onClick={handleAddCustomApp}
-                  disabled={!customAppName.trim()}
-                  className="px-3 py-2 bg-teal text-white rounded-xl text-xs font-bold disabled:opacity-40"
-                >
+                <button type="button" onClick={handleAddCustomApp} disabled={!customAppName.trim()} className="px-3 py-2 bg-teal text-white rounded-xl text-xs font-bold disabled:opacity-40">
                   Add
                 </button>
               </div>
             </div>
 
-            {/* Done Button */}
-            <button
-              type="button"
-              onClick={() => setShowAppsModal(false)}
-              className="w-full py-3 rounded-xl bg-ink text-white font-bold text-xs shadow-md"
-            >
+            <button type="button" onClick={() => setShowAppsModal(false)} className="w-full py-3 rounded-xl bg-ink text-white font-bold text-xs shadow-md">
               Done ({allowedApps.length} Allowed)
             </button>
           </div>
@@ -936,29 +798,19 @@ export default function StudyPage() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setVerifiedMode((v) => !v)}
-              className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${
-                verifiedMode ? "bg-teal/10 border-teal/40" : "bg-paper/60 border-ink/10"
-              }`}
-            >
+            <button type="button" onClick={() => setVerifiedMode((v) => !v)}
+              className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${verifiedMode ? "bg-teal/10 border-teal/40" : "bg-paper/60 border-ink/10"}`}>
               <div>
                 <p className="text-xs font-bold text-ink">🎥 Verified Mode</p>
-                <p className="text-[10px] text-slate mt-0.5 max-w-[220px]">
-                  Uses your camera to confirm you're present. Nothing is ever recorded or uploaded — only a yes/no presence signal.
-                </p>
+                <p className="text-[10px] text-slate mt-0.5 max-w-[220px]">Uses your camera to confirm you're present. Nothing is ever recorded or uploaded.</p>
               </div>
               <span className={`shrink-0 w-10 h-6 rounded-full flex items-center px-0.5 transition-all ${verifiedMode ? "bg-teal justify-end" : "bg-ink/15 justify-start"}`}>
                 <span className="w-5 h-5 rounded-full bg-white shadow-xs" />
               </span>
             </button>
 
-            <button
-              onClick={handleStartSession}
-              disabled={modelsLoading}
-              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90 disabled:opacity-50"
-            >
+            <button onClick={handleStartSession} disabled={modelsLoading}
+              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90 disabled:opacity-50">
               {modelsLoading ? "Loading camera check…" : "Start Focus Session"}
             </button>
           </div>
@@ -970,37 +822,19 @@ export default function StudyPage() {
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
             <h3 className="text-base font-black text-ink text-center">Session Finished! 🎉</h3>
-            <p className="text-xs text-slate text-center">
-              Studied {selectedSub} ({selectedTask}) for {Math.round(savedDuration / 60)} mins.
-            </p>
+            <p className="text-xs text-slate text-center">Studied {selectedSub} ({selectedTask}) for {Math.round(savedDuration / 60)} mins.</p>
             {savedDuration >= MIN_STREAK_SECONDS && (
               <p className="text-[11px] text-teal font-bold text-center">🔥 This session counts for your streak!</p>
             )}
-
             {selectedTask === "questions" && (
               <div>
-                <label className="text-[11px] font-bold text-slate block mb-1 text-center">
-                  ✍️ How many questions did you solve?
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={postQCount}
-                  onChange={(e) => setPostQCount(Math.max(0, parseInt(e.target.value) || 0))}
-                  className="w-full p-2.5 text-center text-sm font-bold rounded-xl border border-ink/15 focus:border-teal outline-none"
-                  placeholder="0"
-                />
-                <p className="text-[10px] text-slate text-center mt-1">
-                  Will be added to your {selectedSub} question counter
-                </p>
+                <label className="text-[11px] font-bold text-slate block mb-1 text-center">✍️ How many questions did you solve?</label>
+                <input type="number" min={0} value={postQCount} onChange={(e) => setPostQCount(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="w-full p-2.5 text-center text-sm font-bold rounded-xl border border-ink/15 focus:border-teal outline-none" placeholder="0" />
+                <p className="text-[10px] text-slate text-center mt-1">Will be added to your {selectedSub} question counter</p>
               </div>
             )}
-
-            <button
-              disabled={saving}
-              onClick={handleFinishAndSave}
-              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs"
-            >
+            <button disabled={saving} onClick={handleFinishAndSave} className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs">
               {saving ? "Saving..." : "✓ Save & Log Session"}
             </button>
           </div>
@@ -1015,9 +849,7 @@ export default function StudyPage() {
               <h3 className="text-sm font-bold text-ink">Log Offline Study</h3>
               <button onClick={() => setShowManualModal(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60">✕</button>
             </div>
-            {manualError && (
-              <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2 rounded-lg">⚠️ {manualError}</p>
-            )}
+            {manualError && <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2 rounded-lg">⚠️ {manualError}</p>}
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">Subject</label>
               <div className="grid grid-cols-3 gap-1.5">
@@ -1043,39 +875,30 @@ export default function StudyPage() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-[11px] font-bold text-slate block mb-1">Minutes</label>
-                <input type="number" min={1} value={manualMinutes}
-                  onChange={(e) => setManualMinutes(parseInt(e.target.value) || 0)}
+                <input type="number" min={1} value={manualMinutes} onChange={(e) => setManualMinutes(parseInt(e.target.value) || 0)}
                   className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15" />
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate block mb-1">
-                  {manualTask === "questions" ? "Questions Solved" : "Questions (optional)"}
-                </label>
-                <input type="number" min={0} value={manualQs}
-                  onChange={(e) => setManualQs(parseInt(e.target.value) || 0)}
+                <label className="text-[11px] font-bold text-slate block mb-1">{manualTask === "questions" ? "Questions Solved" : "Questions (optional)"}</label>
+                <input type="number" min={0} value={manualQs} onChange={(e) => setManualQs(parseInt(e.target.value) || 0)}
                   className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15" />
               </div>
             </div>
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">Date</label>
-              <input type="date" value={manualDate}
-                onChange={(e) => setManualDate(e.target.value)}
-                className="w-full p-2 text-xs rounded-lg border border-ink/15" />
+              <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="w-full p-2 text-xs rounded-lg border border-ink/15" />
             </div>
             {manualDate !== new Date().toISOString().split("T")[0] && (
-              <p className="text-[10px] text-slate bg-ink/5 rounded-lg px-3 py-2">
-                ℹ️ Past-date entries update study hours but not your streak (streak is today-only).
-              </p>
+              <p className="text-[10px] text-slate bg-ink/5 rounded-lg px-3 py-2">ℹ️ Past-date entries update study hours but not your streak (streak is today-only).</p>
             )}
-            <button disabled={saving} onClick={handleSaveManualEntry}
-              className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs">
+            <button disabled={saving} onClick={handleSaveManualEntry} className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs">
               {saving ? "Saving..." : "Add to Daily Study Hours"}
             </button>
           </div>
         </div>
       )}
 
-      {/* Liveness challenge — small, non-blocking, bottom-anchored */}
+      {/* Liveness challenge */}
       {livenessPromptOpen && (
         <div className="fixed bottom-24 left-0 right-0 z-50 px-4">
           <div className="max-w-sm mx-auto bg-ink text-white rounded-2xl shadow-2xl p-4 flex items-center gap-3">
@@ -1084,10 +907,7 @@ export default function StudyPage() {
               <p className="text-xs font-bold">Still there?</p>
               <p className="text-[10px] text-white/70">Tap to confirm — {livenessSecondsLeft}s left</p>
             </div>
-            <button
-              onClick={handleConfirmLiveness}
-              className="px-3 py-2 rounded-xl bg-teal text-white text-xs font-bold shrink-0"
-            >
+            <button onClick={handleConfirmLiveness} className="px-3 py-2 rounded-xl bg-teal text-white text-xs font-bold shrink-0">
               I'm here
             </button>
           </div>
