@@ -31,7 +31,7 @@ jobs:
         run: |
           flutter create --org com.prepwise --project-name prepwise prepwise_app
           cd prepwise_app
-          flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler flutter_custom_tabs
+          flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler
           echo "" >> pubspec.yaml
           echo "dependency_overrides:" >> pubspec.yaml
           echo "  permission_handler_android: 12.0.13" >> pubspec.yaml
@@ -64,20 +64,6 @@ jobs:
 
           content = content.replace("<application", permissions + "    <application", 1)
 
-          queries_block = """
-              <queries>
-                  <intent>
-                      <action android:name="android.intent.action.VIEW" />
-                      <data android:scheme="https" />
-                  </intent>
-                  <intent>
-                      <action android:name="android.intent.action.VIEW" />
-                      <data android:scheme="http" />
-                  </intent>
-              </queries>
-          """
-          content = content.replace("</manifest>", queries_block + "\n</manifest>")
-
           with open(manifest_path, "w", encoding="utf-8") as f:
               f.write(content)
           print("Manifest updated successfully!")
@@ -94,8 +80,6 @@ jobs:
           package com.prepwise.prepwise
 
           import android.content.Intent
-          import android.content.pm.ApplicationInfo
-          import android.content.pm.PackageManager
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
@@ -145,7 +129,6 @@ jobs:
           import 'package:wakelock_plus/wakelock_plus.dart';
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
-          import 'package:flutter_custom_tabs/flutter_custom_tabs.dart' as custom_tabs;
 
           void main() async {
             WidgetsFlutterBinding.ensureInitialized();
@@ -260,6 +243,7 @@ jobs:
                     },
                     onNavigationRequest: (request) {
                       final url = request.url;
+                      // Only block truly external non-web schemes
                       if (url.startsWith('intent://') ||
                           url.startsWith('tel:') ||
                           url.startsWith('mailto:') ||
@@ -270,30 +254,12 @@ jobs:
                         } catch (_) {}
                         return NavigationDecision.prevent;
                       }
-                      if (url.contains('accounts.google.com') ||
-                          url.contains('oauth') ||
-                          url.contains('auth/callback') ||
-                          url.contains('signin')) {
-                        try {
-                          custom_tabs.launchUrl(
-                            Uri.parse(url),
-                            customTabsOptions: custom_tabs.CustomTabsOptions(
-                              colorSchemes: custom_tabs.CustomTabsColorSchemes.defaults(
-                                toolbarColor: const Color(0xFF0F172A),
-                              ),
-                              shareState: custom_tabs.CustomTabsShareState.off,
-                              showTitle: true,
-                            ),
-                          );
-                        } catch (_) {
-                          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-                        }
-                        return NavigationDecision.prevent;
-                      }
+                      // PDF: open natively
                       if (url.endsWith('.pdf') || url.contains('/pdf/') || url.contains('type=pdf')) {
                         launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                         return NavigationDecision.prevent;
                       }
+                      // Everything else (including OAuth/Google sign-in) stays in WebView
                       return NavigationDecision.navigate;
                     },
                   ),
@@ -323,22 +289,6 @@ jobs:
                         final pdfUrl = data['url'] as String? ?? '';
                         if (pdfUrl.isNotEmpty) {
                           launchUrl(Uri.parse(pdfUrl), mode: LaunchMode.externalApplication);
-                        }
-                      } else if (action == 'openUrl') {
-                        final targetUrl = data['url'] as String? ?? '';
-                        if (targetUrl.isNotEmpty) {
-                          try {
-                            custom_tabs.launchUrl(
-                              Uri.parse(targetUrl),
-                              customTabsOptions: custom_tabs.CustomTabsOptions(
-                                colorSchemes: custom_tabs.CustomTabsColorSchemes.defaults(
-                                  toolbarColor: const Color(0xFF0F172A),
-                                ),
-                              ),
-                            );
-                          } catch (_) {
-                            launchUrl(Uri.parse(targetUrl), mode: LaunchMode.externalApplication);
-                          }
                         }
                       } else if (action == 'requestCamera' || action == 'requestPermissions') {
                         await [Permission.camera, Permission.microphone].request();
