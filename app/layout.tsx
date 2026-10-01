@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import PostHogInit from "@/components/PostHogInit";
+import FcmSync from "@/components/FcmSync";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const spaceGrotesk = Space_Grotesk({
@@ -42,6 +43,7 @@ export default function RootLayout({
       </head>
       <body className="font-body bg-paper text-ink antialiased">
         <PostHogInit />
+        <FcmSync />
         {children}
       </body>
     </html>
