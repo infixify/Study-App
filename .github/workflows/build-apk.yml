@@ -54,35 +54,39 @@ jobs:
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          python3 - << 'JSON_EOF'
+          python3 -c "import sys, textwrap; exec(textwrap.dedent(sys.stdin.read()))" << 'JSON_EOF'
           import os, sys, json
-
           raw_json = os.environ.get("GOOGLE_SERVICES_JSON", "").strip()
           if not raw_json:
-              print("::error::GitHub Secret GOOGLE_SERVICES_JSON is empty or missing!")
+              print("::error::GitHub Secret GOOGLE_SERVICES_JSON is empty or missing! Please add it in Repo Settings -> Secrets -> Actions.")
               sys.exit(1)
 
           try:
               parsed = json.loads(raw_json)
               print("google-services.json is valid JSON!")
           except Exception as e:
-              print(f"::error::GOOGLE_SERVICES_JSON is not valid JSON: {e}")
+              print(f"::error::GOOGLE_SERVICES_JSON is not valid JSON! Error: {e}")
               sys.exit(1)
 
           target_path = "prepwise_app/android/app/google-services.json"
           os.makedirs(os.path.dirname(target_path), exist_ok=True)
           with open(target_path, "w", encoding="utf-8") as f:
               json.dump(parsed, f, indent=2)
-          print(f"Saved {target_path} ({os.path.getsize(target_path)} bytes)")
+          print(f"Successfully saved valid {target_path} ({os.path.getsize(target_path)} bytes)")
           JSON_EOF
 
       - name: Configure Android Manifest and Permissions
         run: |
           cd prepwise_app
-          python3 - << 'PY_MANIFEST'
+          python3 -c "import sys, textwrap; exec(textwrap.dedent(sys.stdin.read()))" << 'PY_MANIFEST'
+          import os
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           with open(manifest_path, "r", encoding="utf-8") as f:
               content = f.read()
+
+          # 1. Add xmlns:tools if missing
+          if 'xmlns:tools="http://schemas.android.com/tools"' not in content:
+              content = content.replace('<manifest', '<manifest\n    xmlns:tools="http://schemas.android.com/tools"', 1)
 
           permissions = """
               <uses-permission android:name="android.permission.INTERNET"/>
@@ -94,11 +98,9 @@ jobs:
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
               <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
               <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-              <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" tools:ignore="ProtectedPermissions"/>
               <uses-feature android:name="android.hardware.camera" android:required="false" />
               <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
               <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -138,13 +140,13 @@ jobs:
 
           with open(manifest_path, "w", encoding="utf-8") as f:
               f.write(content)
-          print("AndroidManifest.xml successfully updated.")
+          print("AndroidManifest.xml configured successfully.")
           PY_MANIFEST
 
       - name: Patch Gradle Configurations (Google Services & Desugaring)
         run: |
           cd prepwise_app
-          cat << 'PY_GRADLE' > update_gradle.py
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'PY_GRADLE' > update_gradle.py
           import re, os
 
           if os.path.exists("android/settings.gradle.kts"):
@@ -258,7 +260,7 @@ jobs:
       - name: Write Accessibility Service Config XML
         run: |
           mkdir -p prepwise_app/android/app/src/main/res/xml
-          cat << 'EOF' > prepwise_app/android/app/src/main/res/xml/accessibility_service_config.xml
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'XML_EOF' > prepwise_app/android/app/src/main/res/xml/accessibility_service_config.xml
           <?xml version="1.0" encoding="utf-8"?>
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
               android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
@@ -268,22 +270,21 @@ jobs:
               android:description="@string/accessibility_service_description"
               android:notificationTimeout="100"
               android:packageNames="" />
-          EOF
-
+          XML_EOF
           mkdir -p prepwise_app/android/app/src/main/res/values
-          python3 - << 'PY_STRINGS'
+          python3 -c "import sys, textwrap; exec(textwrap.dedent(sys.stdin.read()))" << 'PY_STRINGS'
           import os
           path = "prepwise_app/android/app/src/main/res/values/strings.xml"
           if os.path.exists(path):
-              with open(path, "r") as f:
+              with open(path, "r", encoding="utf-8") as f:
                   content = f.read()
               if "accessibility_service_description" not in content:
                   content = content.replace("</resources>",
                       '    <string name="accessibility_service_description">PrepWise Focus Guard monitors foreground apps during focus sessions to block distractions.</string>\n</resources>')
-                  with open(path, "w") as f:
+                  with open(path, "w", encoding="utf-8") as f:
                       f.write(content)
           else:
-              with open(path, "w") as f:
+              with open(path, "w", encoding="utf-8") as f:
                   f.write('<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="app_name">PrepWise</string>\n    <string name="accessibility_service_description">PrepWise Focus Guard monitors foreground apps during focus sessions to block distractions.</string>\n</resources>\n')
           print("strings.xml updated.")
           PY_STRINGS
@@ -291,8 +292,7 @@ jobs:
       - name: Write Native Kotlin Files
         run: |
           mkdir -p prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise
-
-          cat << 'EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/MainActivity.kt
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_MAIN_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/MainActivity.kt
           package com.prepwise.prepwise
 
           import android.content.Intent
@@ -400,9 +400,8 @@ jobs:
                   }
               }
           }
-          EOF
-
-          cat << 'EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/PrepWiseAccessibilityService.kt
+          KT_MAIN_EOF
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_SVC_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/PrepWiseAccessibilityService.kt
           package com.prepwise.prepwise
 
           import android.accessibilityservice.AccessibilityService
@@ -457,7 +456,7 @@ jobs:
 
               override fun onInterrupt() {}
           }
-          EOF
+          KT_SVC_EOF
 
       - name: Write Dart Services and Widgets
         run: |
@@ -466,7 +465,7 @@ jobs:
           mkdir -p prepwise_app/lib/bridge
           mkdir -p prepwise_app/lib/screens
 
-          cat << 'EOF' > prepwise_app/lib/services/app_toast.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_TOAST_EOF' > prepwise_app/lib/services/app_toast.dart
           import 'package:flutter/services.dart';
 
           class AppToast {
@@ -477,9 +476,9 @@ jobs:
               } catch (_) {}
             }
           }
-          EOF
+          DART_TOAST_EOF
 
-          cat << 'EOF' > prepwise_app/lib/services/wakelock_service.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_WAKE_EOF' > prepwise_app/lib/services/wakelock_service.dart
           import 'package:wakelock_plus/wakelock_plus.dart';
 
           class WakelockService {
@@ -490,9 +489,9 @@ jobs:
               try { await WakelockPlus.disable(); } catch (_) {}
             }
           }
-          EOF
+          DART_WAKE_EOF
 
-          cat << 'EOF' > prepwise_app/lib/services/google_auth_service.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_AUTH_EOF' > prepwise_app/lib/services/google_auth_service.dart
           import 'package:flutter/foundation.dart';
           import 'package:google_sign_in/google_sign_in.dart';
 
@@ -528,9 +527,9 @@ jobs:
               }
             }
           }
-          EOF
+          DART_AUTH_EOF
 
-          cat << 'EOF' > prepwise_app/lib/services/focus_session_service.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_FOCUS_EOF' > prepwise_app/lib/services/focus_session_service.dart
           import 'dart:async';
           import 'package:flutter/foundation.dart';
           import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -647,9 +646,9 @@ jobs:
               try { await _notifications.cancel(notificationId); } catch (_) {}
             }
           }
-          EOF
+          DART_FOCUS_EOF
 
-          cat << 'EOF' > prepwise_app/lib/services/pdf_download_service.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_PDF_EOF' > prepwise_app/lib/services/pdf_download_service.dart
           import 'dart:io';
           import 'package:http/http.dart' as http;
           import 'package:path_provider/path_provider.dart';
@@ -690,9 +689,9 @@ jobs:
               }
             }
           }
-          EOF
+          DART_PDF_EOF
 
-          cat << 'EOF' > prepwise_app/lib/services/notification_service.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_NOTIF_EOF' > prepwise_app/lib/services/notification_service.dart
           import 'dart:convert';
           import 'package:firebase_core/firebase_core.dart';
           import 'package:firebase_messaging/firebase_messaging.dart';
@@ -786,9 +785,9 @@ jobs:
               });
             }
           }
-          EOF
+          DART_NOTIF_EOF
 
-          cat << 'EOF' > prepwise_app/lib/services/app_blocker_service.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_BLOCK_EOF' > prepwise_app/lib/services/app_blocker_service.dart
           import 'package:flutter/services.dart';
           import 'package:flutter/foundation.dart';
           import 'app_toast.dart';
@@ -891,9 +890,9 @@ jobs:
               }
             }
           }
-          EOF
+          DART_BLOCK_EOF
 
-          cat << 'WEOF' > prepwise_app/lib/widgets/floating_focus_dot.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_DOT_EOF' > prepwise_app/lib/widgets/floating_focus_dot.dart
           import 'package:flutter/material.dart';
           import '../services/focus_session_service.dart';
 
@@ -1028,9 +1027,9 @@ jobs:
               );
             }
           }
-          WEOF
+          DART_DOT_EOF
 
-          cat << 'EOF' > prepwise_app/lib/bridge/app_bridge_handler.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_BRIDGE_EOF' > prepwise_app/lib/bridge/app_bridge_handler.dart
           import 'dart:convert';
           import 'package:flutter/services.dart';
           import 'package:flutter/foundation.dart';
@@ -1153,9 +1152,9 @@ jobs:
               webViewController.runJavaScript("(function(){if(typeof window.onNotificationDeepLink==='function'){window.onNotificationDeepLink('$payload');}})();");
             }
           }
-          EOF
+          DART_BRIDGE_EOF
 
-          cat << 'EOF' > prepwise_app/lib/main.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_MAIN_EOF' > prepwise_app/lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:firebase_core/firebase_core.dart';
@@ -1197,9 +1196,9 @@ jobs:
               );
             }
           }
-          EOF
+          DART_MAIN_EOF
 
-          cat << 'EOF' > prepwise_app/lib/screens/webview_screen.dart
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_WEB_EOF' > prepwise_app/lib/screens/webview_screen.dart
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:webview_flutter/webview_flutter.dart';
@@ -1385,7 +1384,7 @@ jobs:
               );
             }
           }
-          EOF
+          DART_WEB_EOF
 
       - name: Accept Android Licenses and Ensure SDK 36
         run: |
