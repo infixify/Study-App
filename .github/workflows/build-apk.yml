@@ -116,7 +116,7 @@ jobs:
           """
 
           if "android.permission.INTERNET" not in content:
-              content = content.replace("<manifest", "<manifest" + permissions, 1)
+              content = content.replace("<application", permissions + "\n    <application", 1)
 
           if "FlutterFirebaseMessagingBackgroundService" not in content:
               content = content.replace("</application>", fcm_service + "\n    </application>")
@@ -132,7 +132,6 @@ jobs:
           cat << 'PY_GRADLE' > update_gradle.py
           import re, os
 
-          # 1. Update settings.gradle.kts or settings.gradle
           if os.path.exists("android/settings.gradle.kts"):
               with open("android/settings.gradle.kts", "r") as f:
                   s = f.read()
@@ -152,7 +151,6 @@ jobs:
                   f.write(s)
               print("settings.gradle patched")
 
-          # 2. Update app/build.gradle.kts or app/build.gradle
           if os.path.exists("android/app/build.gradle.kts"):
               with open("android/app/build.gradle.kts", "r") as f:
                   a = f.read()
@@ -196,7 +194,6 @@ jobs:
           mkdir -p prepwise_app/lib/services
           mkdir -p prepwise_app/lib/widgets
 
-          # 1. Google Auth Service
           cat << 'EOF' > prepwise_app/lib/services/google_auth_service.dart
           import 'package:flutter/foundation.dart';
           import 'package:google_sign_in/google_sign_in.dart';
@@ -252,7 +249,6 @@ jobs:
           }
           EOF
 
-          # 2. Focus Session Service
           cat << 'EOF' > prepwise_app/lib/services/focus_session_service.dart
           import 'dart:async';
           import 'package:flutter/foundation.dart';
@@ -401,7 +397,6 @@ jobs:
           }
           EOF
 
-          # 3. PDF Download Service
           cat << 'EOF' > prepwise_app/lib/services/pdf_download_service.dart
           import 'dart:io';
           import 'package:http/http.dart' as http;
@@ -446,7 +441,6 @@ jobs:
           }
           EOF
 
-          # 4. Floating Focus Dot Widget
           cat << 'EOF' > prepwise_app/lib/widgets/floating_focus_dot.dart
           import 'package:flutter/material.dart';
           import '../services/focus_session_service.dart';
@@ -982,7 +976,6 @@ jobs:
                       final data = jsonDecode(message.message) as Map<String, dynamic>;
                       final action = data['action'] as String? ?? '';
 
-                      // 1. Native 1-Tap Google Sign-In
                       if (action == 'nativeGoogleSignIn') {
                         final res = await GoogleAuthService().signIn();
                         if (res.success && res.idToken != null) {
@@ -1006,7 +999,6 @@ jobs:
                           """);
                         }
                       }
-                      // 2. Focus Session Live Notification
                       else if (action == 'startFocusNotification') {
                         final subject = data['subject'] as String? ?? 'General';
                         final mode = data['mode'] as String? ?? 'Study';
@@ -1024,12 +1016,10 @@ jobs:
                         WakelockPlus.disable();
                         HapticFeedback.mediumImpact();
                       }
-                      // 3. Cam Face Verification Status
                       else if (action == 'updateCamStatus') {
                         final status = data['status'] as String? ?? 'verified';
                         FocusSessionService().updateCamStatus(status);
                       }
-                      // 4. Download PDF natively to device Downloads
                       else if (action == 'downloadPdf') {
                         final pdfUrl = data['url'] as String? ?? '';
                         final title = data['title'] as String?;
@@ -1037,7 +1027,6 @@ jobs:
                           await PdfDownloadService.downloadAndOpenPdf(pdfUrl, customTitle: title);
                         }
                       }
-                      // 5. Wakelock / Strict Mode
                       else if (action == 'startStrictTimer') {
                         WakelockPlus.enable();
                         HapticFeedback.heavyImpact();
@@ -1045,18 +1034,15 @@ jobs:
                         WakelockPlus.disable();
                         HapticFeedback.vibrate();
                       }
-                      // 6. Haptic Feedback
                       else if (action == 'vibrate') {
                         final type = data['type'] as String? ?? 'medium';
                         if (type == 'heavy') HapticFeedback.heavyImpact();
                         else if (type == 'light') HapticFeedback.lightImpact();
                         else HapticFeedback.mediumImpact();
                       }
-                      // 7. Request Camera / Mic Permissions
                       else if (action == 'requestCamera' || action == 'requestPermissions') {
                         await [Permission.camera, Permission.microphone, Permission.notification].request();
                       }
-                      // 8. Refresh Installed Apps
                       else if (action == 'getInstalledApps') {
                         await _injectInstalledApps();
                       }
@@ -1095,7 +1081,6 @@ jobs:
                           color: const Color(0xFF0D9488),
                           minHeight: 3,
                         ),
-                      // Minimal Floating Status Dot (Green/Red indicator with Tap-to-Preview)
                       const FloatingFocusDot(),
                     ]),
                   ),
