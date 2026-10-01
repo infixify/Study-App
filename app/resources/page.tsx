@@ -1,3 +1,4 @@
+// app/resources/page.tsx
 "use client";
 
 import { createElement as e, useEffect, useState } from "react";
@@ -20,6 +21,33 @@ export default function ResourcesPage() {
   const [loading, setLoading] = useState(true);
   const [activeType, setActiveType] = useState<string | null>(null);
   const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
+
+  // Auto-intercept direct PDF downloads to use Native DownloadManager instead of redirecting to Chrome
+  useEffect(() => {
+    const handleDocumentClick = (event: MouseEvent) => {
+      const target = (event.target as HTMLElement).closest("a, button");
+      if (!target) return;
+
+      const href = (target as HTMLAnchorElement).href;
+      const downloadAttr = target.getAttribute("download");
+      const title = target.textContent?.trim() || downloadAttr || "PrepWise_Resource";
+
+      if (href && (href.toLowerCase().endsWith(".pdf") || href.includes("application/pdf") || downloadAttr !== null)) {
+        if (typeof window !== "undefined" && (window as any).AppBridge) {
+          event.preventDefault();
+          event.stopPropagation();
+          (window as any).AppBridge.postMessage(JSON.stringify({
+            action: "downloadPdf",
+            url: href,
+            title: title,
+          }));
+        }
+      }
+    };
+
+    document.addEventListener("click", handleDocumentClick, true);
+    return () => document.removeEventListener("click", handleDocumentClick, true);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
