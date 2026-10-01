@@ -29,33 +29,34 @@ jobs:
 
       - name: Generate Flutter Wrapper & Build APK
         run: |
-          # 1. Create clean Flutter project
           flutter create --org com.prepwise --project-name prepwise prepwise_app
           cd prepwise_app
-
-          # 2. Add dependencies including permission_handler & webview_flutter_android
           flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler
-
-          # 3. Add Android permissions (Camera, Microphone, Notifications, Wakelock)
-          sed -i '/<application/i \
-    <uses-permission android:name="android.permission.INTERNET"/>\n\
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n\
-    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n\
-    <uses-permission android:name="android.permission.VIBRATE"/>\n\
-    <uses-permission android:name="android.permission.CAMERA"/>\n\
-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n\
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>\n\
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n\
-    <uses-feature android:name="android.hardware.camera" android:required="false" />\n\
-    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />\n\
-    <uses-feature android:name="android.hardware.microphone" android:required="false" />' android/app/src/main/AndroidManifest.xml
-
-          # 4. Set minSdk to 21
+          
+          python3 -c "
+          with open('android/app/src/main/AndroidManifest.xml') as f:
+              c = f.read()
+          perms = '''    <uses-permission android:name=\"android.permission.INTERNET\"/>
+              <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>
+              <uses-permission android:name=\"android.permission.WAKE_LOCK\"/>
+              <uses-permission android:name=\"android.permission.VIBRATE\"/>
+              <uses-permission android:name=\"android.permission.CAMERA\"/>
+              <uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>
+              <uses-permission android:name=\"android.permission.MODIFY_AUDIO_SETTINGS\"/>
+              <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>
+              <uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" />
+              <uses-feature android:name=\"android.hardware.camera.autofocus\" android:required=\"false\" />
+              <uses-feature android:name=\"android.hardware.microphone\" android:required=\"false\" />
+          '''
+          c = c.replace('<application', perms + '    <application')
+          with open('android/app/src/main/AndroidManifest.xml', 'w') as f:
+              f.write(c)
+          "
+          
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g' android/app/build.gradle || true
           sed -i 's/minSdk = flutter.minSdk/minSdk = 21/g' android/app/build.gradle || true
-
-          # 5. Write main.dart with Native Permissions & WebRTC grant
-          cat << 'DART' > lib/main.dart
+          
+          cat << 'DART_CODE' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:webview_flutter/webview_flutter.dart';
@@ -108,7 +109,6 @@ jobs:
               _setupWebView();
             }
 
-            // App start par Notification, Camera & Mic permissions maangna
             Future<void> _requestAllPermissions() async {
               try {
                 await [
@@ -117,7 +117,7 @@ jobs:
                   Permission.microphone,
                 ].request();
               } catch (e) {
-                debugPrint("Permission error: $e");
+                debugPrint('Permission error: $e');
               }
             }
 
@@ -190,7 +190,6 @@ jobs:
                   },
                 );
 
-              // Android WebView ke andar Camera/Mic stream ko allow karna
               if (controller.platform is AndroidWebViewController) {
                 final androidController = controller.platform as AndroidWebViewController;
                 androidController.setMediaPlaybackRequiresUserGesture(false);
@@ -233,9 +232,8 @@ jobs:
               );
             }
           }
-          DART
+          DART_CODE
 
-          # 6. Build Release APK
           flutter build apk --release
 
       - name: Upload Release APK
