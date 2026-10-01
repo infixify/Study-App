@@ -7,6 +7,16 @@ import { loadAndReconcileStreak, saveFocusSession, MIN_STREAK_SECONDS } from "@/
 import AppHeader from "@/components/dashboard/AppHeader";
 import BottomNav from "@/components/dashboard/BottomNav";
 
+// AppBridge TypeScript Declaration for Native Communication
+declare global {
+  interface Window {
+    AppBridge?: {
+      postMessage: (message: string) => void;
+    };
+    onNativeFCMToken?: (token: string) => void;
+  }
+}
+
 type SubjectType = "Physics" | "Chemistry" | "Mathematics" | "Biology";
 type StudyTaskType = "theory" | "questions" | "revision";
 
@@ -50,6 +60,7 @@ export default function StudyPage() {
   const [strictMode, setStrictMode] = useState(true);
 
   const [allowedApps, setAllowedApps] = useState<string[]>(["pdf_reader", "calculator"]);
+  const [isNativeApp, setIsNativeApp] = useState(false);
 
   const [showPostModal, setShowPostModal] = useState(false);
   const [savedDuration, setSavedDuration] = useState(0);
@@ -91,6 +102,11 @@ export default function StudyPage() {
       : ["Physics", "Chemistry", "Mathematics"];
 
   useEffect(() => {
+    // Detect if running inside Flutter Native Shell
+    if (typeof window !== "undefined" && window.AppBridge) {
+      setIsNativeApp(true);
+    }
+
     async function loadUser() {
       const { data: authData } = await supabase.auth.getUser();
       const user = authData?.user;
@@ -130,6 +146,18 @@ export default function StudyPage() {
       : [...allowedApps, appId];
     setAllowedApps(updated);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
+
+    // Update Flutter bridge dynamically if session is active
+    if (isActive && typeof window !== "undefined" && window.AppBridge) {
+      try {
+        window.AppBridge.postMessage(
+          JSON.stringify({
+            action: "startStrictTimer",
+            allowedApps: updated,
+          })
+        );
+      } catch (err) {}
+    }
   };
 
   async function flushDiffToDailyLogs(currentSeconds: number, dateOverride?: string) {
@@ -333,6 +361,26 @@ export default function StudyPage() {
       livenessIntervalRef.current = setInterval(triggerLivenessChallenge, LIVENESS_CHALLENGE_INTERVAL_SECONDS * 1000);
     }
 
+    // Trigger Native Flutter App Blocker & Wakelock
+    if (typeof window !== "undefined" && window.AppBridge) {
+      try {
+        window.AppBridge.postMessage(
+          JSON.stringify({
+            action: "startStrictTimer",
+            allowedApps: allowedApps,
+          })
+        );
+        window.AppBridge.postMessage(
+          JSON.stringify({
+            action: "vibrate",
+            type: "light",
+          })
+        );
+      } catch (err) {
+        console.error("AppBridge post error:", err);
+      }
+    }
+
     setShowPreModal(false);
     setSeconds(0);
     lastSyncedSecondsRef.current = 0;
@@ -345,6 +393,25 @@ export default function StudyPage() {
   };
 
   const handleStopSession = () => {
+    // Release Native Flutter App Blocker & Trigger Completion Vibration
+    if (typeof window !== "undefined" && window.AppBridge) {
+      try {
+        window.AppBridge.postMessage(
+          JSON.stringify({
+            action: "stopStrictTimer",
+          })
+        );
+        window.AppBridge.postMessage(
+          JSON.stringify({
+            action: "vibrate",
+            type: "heavy",
+          })
+        );
+      } catch (err) {
+        console.error("AppBridge stop error:", err);
+      }
+    }
+
     setIsActive(false);
     setSavedDuration(seconds);
     setShowPostModal(true);
@@ -510,7 +577,14 @@ export default function StudyPage() {
       <main className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="font-display text-2xl text-ink">Focus Mode</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="font-display text-2xl text-ink">Focus Mode</h1>
+              {isNativeApp && (
+                <span className="text-[10px] font-black bg-teal/15 text-teal px-2 py-0.5 rounded-full border border-teal/30">
+                  🛡️ Native Protected
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate mt-0.5">
               Target: <span className="font-bold text-teal">{targetExam}</span> • Zero Distractions
             </p>
