@@ -31,7 +31,7 @@ jobs:
         run: |
           flutter create --org com.prepwise --project-name prepwise prepwise_app
           cd prepwise_app
-          flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler flutter_custom_tabs device_apps
+          flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler flutter_custom_tabs
           echo "" >> pubspec.yaml
           echo "dependency_overrides:" >> pubspec.yaml
           echo "  permission_handler_android: 12.0.13" >> pubspec.yaml
@@ -56,7 +56,7 @@ jobs:
               <uses-permission android:name="android.permission.RECORD_AUDIO"/>
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission"/>
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
               <uses-feature android:name="android.hardware.camera" android:required="false" />
               <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
               <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -78,8 +78,6 @@ jobs:
           """
           content = content.replace("</manifest>", queries_block + "\n</manifest>")
 
-          ET.fromstring(content.replace('tools:ignore="QueryAllPackagesPermission"', ''))
-
           with open(manifest_path, "w", encoding="utf-8") as f:
               f.write(content)
           print("Manifest updated successfully!")
@@ -89,7 +87,53 @@ jobs:
           find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdkVersion/minSdk = 21/g" {} + || true
           find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdk/minSdk = 21/g" {} + || true
 
-      - name: Write Main Code
+      - name: Write Kotlin MainActivity
+        run: |
+          mkdir -p prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise
+          cat << 'EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/MainActivity.kt
+          package com.prepwise.prepwise
+
+          import android.content.Intent
+          import android.content.pm.ApplicationInfo
+          import android.content.pm.PackageManager
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          import org.json.JSONArray
+          import org.json.JSONObject
+
+          class MainActivity : FlutterActivity() {
+              private val CHANNEL = "com.prepwise/apps"
+
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+                      if (call.method == "getInstalledApps") {
+                          try {
+                              val pm = packageManager
+                              val intent = Intent(Intent.ACTION_MAIN, null)
+                              intent.addCategory(Intent.CATEGORY_LAUNCHER)
+                              val apps = pm.queryIntentActivities(intent, 0)
+                              val jsonArray = JSONArray()
+                              for (app in apps) {
+                                  val obj = JSONObject()
+                                  obj.put("name", app.loadLabel(pm).toString())
+                                  obj.put("packageName", app.activityInfo.packageName)
+                                  jsonArray.put(obj)
+                              }
+                              result.success(jsonArray.toString())
+                          } catch (e: Exception) {
+                              result.error("APPS_ERROR", e.message, null)
+                          }
+                      } else {
+                          result.notImplemented()
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Write Main Dart Code
         run: |
           cd prepwise_app
           cat << 'EOF' > lib/main.dart
@@ -102,7 +146,6 @@ jobs:
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
           import 'package:flutter_custom_tabs/flutter_custom_tabs.dart' as custom_tabs;
-          import 'package:device_apps/device_apps.dart';
 
           void main() async {
             WidgetsFlutterBinding.ensureInitialized();
@@ -148,6 +191,7 @@ jobs:
             late final WebViewController _controller;
             bool _isLoading = true;
             int _progress = 0;
+            static const _appsChannel = MethodChannel('com.prepwise/apps');
 
             @override
             void initState() {
@@ -164,29 +208,20 @@ jobs:
                   Permission.microphone,
                 ].request();
               } catch (e) {
-                debugPrint('Permission error: \$e');
+                debugPrint('Permission error: $e');
               }
             }
 
             Future<void> _injectInstalledApps() async {
               try {
-                List<Application> apps = await DeviceApps.getInstalledApplications(
-                  includeSystemApps: false,
-                  includeAppIcons: false,
-                  onlyAppsWithLaunchIntent: true,
-                );
-                List<Map<String, String>> appList = apps.map((app) => {
-                  'name': app.appName,
-                  'packageName': app.packageName,
-                }).toList();
-                final jsonStr = jsonEncode(appList);
+                final String jsonStr = await _appsChannel.invokeMethod('getInstalledApps');
                 final escaped = jsonStr.replaceAll("'", "\\'");
                 await _controller.runJavaScript(
                   "window.__nativeInstalledApps = JSON.parse('$escaped'); "
                   "if (window.onInstalledAppsReady) window.onInstalledAppsReady(window.__nativeInstalledApps);"
                 );
               } catch (e) {
-                debugPrint('InstalledApps error: \$e');
+                debugPrint('InstalledApps error: $e');
               }
             }
 
@@ -311,7 +346,7 @@ jobs:
                         await _injectInstalledApps();
                       }
                     } catch (e) {
-                      debugPrint('Bridge error: \$e');
+                      debugPrint('Bridge error: $e');
                     }
                   },
                 );
