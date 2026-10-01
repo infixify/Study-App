@@ -84,7 +84,6 @@ jobs:
           with open(manifest_path, "r", encoding="utf-8") as f:
               content = f.read()
 
-          # 1. Add xmlns:tools if missing
           if 'xmlns:tools="http://schemas.android.com/tools"' not in content:
               content = content.replace('<manifest', '<manifest\n    xmlns:tools="http://schemas.android.com/tools"', 1)
 
@@ -106,7 +105,7 @@ jobs:
               <uses-feature android:name="android.hardware.microphone" android:required="false" />
           """
 
-          fcm_and_services = """
+          fcm_service = """
                   <service
                       android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingBackgroundService"
                       android:permission="android.permission.BIND_JOB_SERVICE"
@@ -118,29 +117,17 @@ jobs:
                           <action android:name="com.google.firebase.MESSAGING_EVENT" />
                       </intent-filter>
                   </service>
-                  <service
-                      android:name=".PrepWiseAccessibilityService"
-                      android:exported="true"
-                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-                      android:label="PrepWise Focus Guard">
-                      <intent-filter>
-                          <action android:name="android.accessibilityservice.AccessibilityService" />
-                      </intent-filter>
-                      <meta-data
-                          android:name="android.accessibilityservice"
-                          android:resource="@xml/accessibility_service_config" />
-                  </service>
           """
 
           if "android.permission.INTERNET" not in content:
               content = content.replace("<application", permissions + "\n    <application", 1)
 
           if "FlutterFirebaseMessagingBackgroundService" not in content:
-              content = content.replace("</application>", fcm_and_services + "\n    </application>")
+              content = content.replace("</application>", fcm_service + "\n    </application>")
 
           with open(manifest_path, "w", encoding="utf-8") as f:
               f.write(content)
-          print("AndroidManifest.xml configured successfully.")
+          print("Clean Play-Protect-safe AndroidManifest.xml configured.")
           PY_MANIFEST
 
       - name: Patch Gradle Configurations (Google Services & Desugaring)
@@ -257,47 +244,22 @@ jobs:
           PY_GRADLE
           python3 update_gradle.py
 
-      - name: Write Accessibility Service Config XML
-        run: |
-          mkdir -p prepwise_app/android/app/src/main/res/xml
-          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'XML_EOF' > prepwise_app/android/app/src/main/res/xml/accessibility_service_config.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
-              android:accessibilityFeedbackType="feedbackAllMask"
-              android:accessibilityFlags="flagDefault"
-              android:canRetrieveWindowContent="false"
-              android:description="@string/accessibility_service_description"
-              android:notificationTimeout="100"
-              android:packageNames="" />
-          XML_EOF
-          mkdir -p prepwise_app/android/app/src/main/res/values
-          python3 -c "import sys, textwrap; exec(textwrap.dedent(sys.stdin.read()))" << 'PY_STRINGS'
-          import os
-          path = "prepwise_app/android/app/src/main/res/values/strings.xml"
-          if os.path.exists(path):
-              with open(path, "r", encoding="utf-8") as f:
-                  content = f.read()
-              if "accessibility_service_description" not in content:
-                  content = content.replace("</resources>",
-                      '    <string name="accessibility_service_description">PrepWise Focus Guard monitors foreground apps during focus sessions to block distractions.</string>\n</resources>')
-                  with open(path, "w", encoding="utf-8") as f:
-                      f.write(content)
-          else:
-              with open(path, "w", encoding="utf-8") as f:
-                  f.write('<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="app_name">PrepWise</string>\n    <string name="accessibility_service_description">PrepWise Focus Guard monitors foreground apps during focus sessions to block distractions.</string>\n</resources>\n')
-          print("strings.xml updated.")
-          PY_STRINGS
-
       - name: Write Native Kotlin Files
         run: |
           mkdir -p prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_MAIN_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/MainActivity.kt
           package com.prepwise.prepwise
 
+          import android.app.AppOpsManager
+          import android.app.usage.UsageEvents
+          import android.app.usage.UsageStatsManager
+          import android.content.Context
           import android.content.Intent
           import android.net.Uri
           import android.os.Build
+          import android.os.Handler
+          import android.os.Looper
+          import android.os.Process
           import android.provider.Settings
           import android.widget.Toast
           import io.flutter.embedding.android.FlutterActivity
@@ -310,7 +272,19 @@ jobs:
               private val CHANNEL_APPS = "com.prepwise/apps"
               private val CHANNEL_TOAST = "com.prepwise/toast"
               private val CHANNEL_OVERLAY = "com.prepwise/overlay"
-              private val CHANNEL_ACCESSIBILITY = "com.prepwise/accessibility"
+              private val CHANNEL_BLOCKER = "com.prepwise/accessibility"
+
+              private var blockedApps: List<String> = emptyList()
+              private var isBlockingEnabled = false
+              private val handler = Handler(Looper.getMainLooper())
+              private val blockerRunnable = object : Runnable {
+                  override fun run() {
+                      if (isBlockingEnabled && blockedApps.isNotEmpty()) {
+                          checkForegroundApp()
+                          handler.postDelayed(this, 1200)
+                      }
+                  }
+              }
 
               override fun onNewIntent(intent: Intent) {
                   super.onNewIntent(intent)
@@ -320,6 +294,7 @@ jobs:
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
 
+                  // Toast Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST).setMethodCallHandler { call, result ->
                       if (call.method == "showToast") {
                           val msg = call.argument<String>("message") ?: ""
@@ -330,6 +305,7 @@ jobs:
                       }
                   }
 
+                  // Apps Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_APPS).setMethodCallHandler { call, result ->
                       if (call.method == "getInstalledApps") {
                           try {
@@ -353,6 +329,7 @@ jobs:
                       }
                   }
 
+                  // Overlay Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_OVERLAY).setMethodCallHandler { call, result ->
                       when (call.method) {
                           "canDrawOverlays" -> {
@@ -375,88 +352,82 @@ jobs:
                       }
                   }
 
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_ACCESSIBILITY).setMethodCallHandler { call, result ->
+                  // Focus Blocker Channel (UsageStatsManager - Play Protect Safe)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_BLOCKER).setMethodCallHandler { call, result ->
                       when (call.method) {
-                          "isAccessibilityEnabled" -> {
-                              val enabled = PrepWiseAccessibilityService.isServiceEnabled(this)
-                              result.success(enabled)
+                          "isAccessibilityEnabled", "hasUsagePermission" -> {
+                              result.success(hasUsageStatsPermission())
                           }
-                          "openAccessibilitySettings" -> {
-                              startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                              result.success(true)
+                          "openAccessibilitySettings", "openUsageSettings" -> {
+                              try {
+                                  startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                                  result.success(true)
+                              } catch (e: Exception) {
+                                  result.error("SETTINGS_ERROR", e.message, null)
+                              }
                           }
                           "setBlockedApps" -> {
                               val apps = call.argument<List<String>>("blockedApps") ?: emptyList()
-                              PrepWiseAccessibilityService.setBlockedApps(apps)
+                              blockedApps = apps
                               result.success(true)
                           }
                           "setBlockingEnabled" -> {
                               val enabled = call.argument<Boolean>("enabled") ?: false
-                              PrepWiseAccessibilityService.setBlockingEnabled(enabled)
+                              isBlockingEnabled = enabled
+                              handler.removeCallbacks(blockerRunnable)
+                              if (enabled) {
+                                  handler.post(blockerRunnable)
+                              }
                               result.success(true)
                           }
                           else -> result.notImplemented()
                       }
                   }
               }
+
+              private fun hasUsageStatsPermission(): Boolean {
+                  val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+                  val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
+                  } else {
+                      appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
+                  }
+                  return mode == AppOpsManager.MODE_ALLOWED
+              }
+
+              private fun checkForegroundApp() {
+                  try {
+                      val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+                      val time = System.currentTimeMillis()
+                      val events = usm.queryEvents(time - 3000, time)
+                      var currentPackage: String? = null
+                      val event = UsageEvents.Event()
+                      while (events.hasNextEvent()) {
+                          events.getNextEvent(event)
+                          if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                              currentPackage = event.packageName
+                          }
+                      }
+
+                      if (currentPackage != null && currentPackage != packageName && currentPackage != "com.android.systemui") {
+                          if (blockedApps.contains(currentPackage)) {
+                              val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+                              if (launchIntent != null) {
+                                  launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                                  startActivity(launchIntent)
+                                  Toast.makeText(applicationContext, "Focus Session Active! Distraction blocked.", Toast.LENGTH_SHORT).show()
+                              }
+                          }
+                      }
+                  } catch (_: Exception) {}
+              }
+
+              override fun onDestroy() {
+                  handler.removeCallbacks(blockerRunnable)
+                  super.onDestroy()
+              }
           }
           KT_MAIN_EOF
-          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_SVC_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/PrepWiseAccessibilityService.kt
-          package com.prepwise.prepwise
-
-          import android.accessibilityservice.AccessibilityService
-          import android.content.Context
-          import android.content.Intent
-          import android.view.accessibility.AccessibilityEvent
-
-          class PrepWiseAccessibilityService : AccessibilityService() {
-
-              companion object {
-                  private var blockedApps: List<String> = emptyList()
-                  private var blockingEnabled: Boolean = false
-                  private const val OUR_PACKAGE = "com.prepwise.prepwise"
-
-                  fun setBlockedApps(apps: List<String>) {
-                      blockedApps = apps
-                  }
-
-                  fun setBlockingEnabled(enabled: Boolean) {
-                      blockingEnabled = enabled
-                  }
-
-                  fun isServiceEnabled(context: Context): Boolean {
-                      val serviceName = "$OUR_PACKAGE/.PrepWiseAccessibilityService"
-                      val enabledServices = android.provider.Settings.Secure.getString(
-                          context.contentResolver,
-                          android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-                      ) ?: return false
-                      return enabledServices.contains(serviceName)
-                  }
-              }
-
-              override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-                  if (!blockingEnabled) return
-                  if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-
-                  val packageName = event.packageName?.toString() ?: return
-
-                  if (packageName == OUR_PACKAGE) return
-                  if (packageName == "com.android.systemui") return
-                  if (packageName == "com.android.launcher" || packageName.contains("launcher")) return
-
-                  val isBlocked = blockedApps.isNotEmpty() && blockedApps.contains(packageName)
-                  if (isBlocked) {
-                      val launchIntent = packageManager.getLaunchIntentForPackage(OUR_PACKAGE)
-                      if (launchIntent != null) {
-                          launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                          startActivity(launchIntent)
-                      }
-                  }
-              }
-
-              override fun onInterrupt() {}
-          }
-          KT_SVC_EOF
 
       - name: Write Dart Services and Widgets
         run: |
@@ -797,7 +768,7 @@ jobs:
             factory AppBlockerService() => _instance;
             AppBlockerService._internal();
 
-            static const _accessChannel = MethodChannel('com.prepwise/accessibility');
+            static const _channel = MethodChannel('com.prepwise/accessibility');
             static const _overlayChannel = MethodChannel('com.prepwise/overlay');
 
             bool _isStrictActive = false;
@@ -808,21 +779,29 @@ jobs:
             Future<bool> canDrawOverlays() async {
               try {
                 return await _overlayChannel.invokeMethod('canDrawOverlays') as bool? ?? false;
-              } catch (_) { return false; }
+              } catch (_) {
+                return false;
+              }
             }
 
             Future<void> requestOverlayPermission() async {
-              try { await _overlayChannel.invokeMethod('requestOverlayPermission'); } catch (_) {}
+              try {
+                await _overlayChannel.invokeMethod('requestOverlayPermission');
+              } catch (_) {}
             }
 
             Future<bool> isAccessibilityEnabled() async {
               try {
-                return await _accessChannel.invokeMethod('isAccessibilityEnabled') as bool? ?? false;
-              } catch (_) { return false; }
+                return await _channel.invokeMethod('isAccessibilityEnabled') as bool? ?? false;
+              } catch (_) {
+                return false;
+              }
             }
 
             Future<void> openAccessibilitySettings() async {
-              try { await _accessChannel.invokeMethod('openAccessibilitySettings'); } catch (_) {}
+              try {
+                await _channel.invokeMethod('openAccessibilitySettings');
+              } catch (_) {}
             }
 
             Future<void> startStrictTimer(List<String> allowedPackages) async {
@@ -831,7 +810,7 @@ jobs:
 
               final bool accessOk = await isAccessibilityEnabled();
               if (!accessOk) {
-                AppToast.show("Enable PrepWise Focus Guard in Accessibility Settings to block apps.");
+                AppToast.show("Please enable Usage Access for PrepWise to block apps during focus sessions.");
                 await openAccessibilitySettings();
                 return;
               }
@@ -848,13 +827,12 @@ jobs:
                     .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
                     .toList();
 
-                await _accessChannel.invokeMethod('setBlockedApps', {'blockedApps': blockedPackages});
-                await _accessChannel.invokeMethod('setBlockingEnabled', {'enabled': true});
+                await _channel.invokeMethod('setBlockedApps', {'blockedApps': blockedPackages});
+                await _channel.invokeMethod('setBlockingEnabled', {'enabled': true});
+                AppToast.show("Focus Mode Active! Non-whitelisted apps are blocked.");
               } catch (e) {
                 debugPrint('[AppBlockerService] Error starting blocker: $e');
               }
-
-              AppToast.show("Focus Mode Active! Non-whitelisted apps are blocked.");
             }
 
             List<dynamic> _parseJsonArray(String raw) {
@@ -872,14 +850,16 @@ jobs:
                   }
                 }
                 return result;
-              } catch (_) { return []; }
+              } catch (_) {
+                return [];
+              }
             }
 
             Future<void> stopStrictTimer() async {
               _isStrictActive = false;
               try {
-                await _accessChannel.invokeMethod('setBlockingEnabled', {'enabled': false});
-                await _accessChannel.invokeMethod('setBlockedApps', {'blockedApps': <String>[]});
+                await _channel.invokeMethod('setBlockingEnabled', {'enabled': false});
+                await _channel.invokeMethod('setBlockedApps', {'blockedApps': <String>[]});
               } catch (_) {}
               AppToast.show("Focus session ended. Apps are unlocked.");
             }
