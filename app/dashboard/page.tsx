@@ -9,6 +9,16 @@ import AppHeader from "@/components/dashboard/AppHeader";
 import AiMentorCard from "@/components/dashboard/AiMentorCard";
 import AiChatSheet from "@/components/dashboard/AiChatSheet";
 
+// Declare global Window interface for Native Flutter Push Notification Listener
+declare global {
+  interface Window {
+    AppBridge?: {
+      postMessage: (message: string) => void;
+    };
+    onNativeFCMToken?: (token: string) => void;
+  }
+}
+
 interface ExamScheduleItem {
   id: string;
   exam_key: string;
@@ -191,10 +201,10 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
   },
   {
     id: "meme-placeholder-1",
-    quote: "[Insert Meme / Roast Text Here - e.g. Kal subah 4 baje uthke padhenge... aur fir 10 baje aankh khuli]",
-    character: "[Insert Character / Name]",
-    show: "[Insert Show / Meme]",
-    icon_or_sticker: "🍫",
+    quote: "Pehle chapter me hi ghee khatam ho gaya? Abhi toh poori syllabus bachi hai bhai! Utho aur padho!",
+    character: "Rajkummar Rao",
+    show: "Stree (Meme)",
+    icon_or_sticker: "/memes/rajkummar-rao-ghee.gif",
     color: "from-purple-500 to-indigo-500",
     bg: "bg-purple-50",
     border: "border-purple-200",
@@ -203,9 +213,9 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
   },
   {
     id: "meme-placeholder-2",
-    quote: "[Insert Meme / Roast Text Here - e.g. Formula yaad kiya tha mechanics ka, exam me thermo pooch liya]",
-    character: "[Insert Character / Name]",
-    show: "[Insert Show / Meme]",
+    quote: "Formula yaad kiya tha mechanics ka, exam me thermo pooch liya! Revision karo jaldi!",
+    character: "Study Panic",
+    show: "Student Reality",
     icon_or_sticker: "📱",
     color: "from-emerald-500 to-teal-500",
     bg: "bg-emerald-50",
@@ -342,19 +352,25 @@ function HeroWidget({
   const greeting = getGreeting(name, hour);
   const todayHours = (todayFocusMins / 60).toFixed(1);
 
-  // Dynamic font scaling: long quotes/greetings shrink instead of getting
-  // cut off with "..." or breaking mid-word. No clamp/truncate anywhere below.
-  const greetingFontClass = greeting.length > 40 ? "text-[13px]" : "text-base";
+  // Dynamic font scaling: long quotes/greetings shrink cleanly without
+  // getting cut off with "..." or breaking words with hyphens.
+  const greetingFontClass = greeting.length > 35 ? "text-xs" : "text-sm sm:text-base";
+  const quoteLength = currentItem?.quote?.length ?? 0;
   const quoteFontClass =
-    (currentItem?.quote?.length ?? 0) > 140
-      ? "text-[10px]"
-      : (currentItem?.quote?.length ?? 0) > 80
-      ? "text-[11px]"
-      : "text-xs";
+    quoteLength > 130
+      ? "text-[10.5px] leading-tight"
+      : quoteLength > 80
+      ? "text-[11.5px] leading-snug"
+      : "text-xs leading-snug";
+
+  // Safe URL encoding (handles spaces or special characters in filenames like "(1).gif")
+  const rawMediaSrc = currentItem?.icon_or_sticker || "";
   const isExternalImage =
-    currentItem?.icon_or_sticker?.startsWith("http://") ||
-    currentItem?.icon_or_sticker?.startsWith("https://") ||
-    currentItem?.icon_or_sticker?.startsWith("/");
+    rawMediaSrc.startsWith("http://") ||
+    rawMediaSrc.startsWith("https://") ||
+    rawMediaSrc.startsWith("/");
+
+  const safeMediaSrc = isExternalImage ? encodeURI(rawMediaSrc) : rawMediaSrc;
 
   return (
     <div className="rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-slate-200/80 bg-white">
@@ -369,7 +385,7 @@ function HeroWidget({
               PrepWise Dashboard
             </p>
             <h2
-              className={`${greetingFontClass} font-black text-slate-900 leading-tight break-normal [hyphens:none]`}
+              className={`${greetingFontClass} font-black text-slate-900 leading-snug break-normal [hyphens:none]`}
             >
               {greeting}
             </h2>
@@ -438,7 +454,7 @@ function HeroWidget({
           </button>
         </div>
 
-        {/* ─── PROMINENT CARD WITH ENLARGED MEDIA BOX (NO WASTED SPACE) ─── */}
+        {/* ─── PROMINENT CARD WITH ENLARGED MEDIA BOX (NO CUTOFFS) ─── */}
         {currentItem && (
           <button
             type="button"
@@ -446,13 +462,13 @@ function HeroWidget({
             className={`w-full text-left rounded-2xl border ${currentItem.border} ${currentItem.bg} p-2.5 sm:p-3 active:scale-[0.98] transition-all relative overflow-hidden group shadow-2xs`}
           >
             <div className="flex items-center gap-3">
-              {/* ENLARGED MEDIA BOX (80px) — PROMINENT FOR ANIMATED GIFS & PORTRAITS */}
+              {/* ENLARGED MEDIA BOX (80px) FOR HIGH-QUALITY GIFS & PHOTOS */}
               <div
                 className={`w-20 h-20 rounded-2xl flex-shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden bg-black/5 relative`}
               >
                 {isExternalImage && !imgError ? (
                   <img
-                    src={currentItem.icon_or_sticker}
+                    src={safeMediaSrc}
                     alt={currentItem.character}
                     className="w-full h-full object-cover rounded-2xl"
                     onError={() => setImgError(true)}
@@ -464,10 +480,10 @@ function HeroWidget({
                 )}
               </div>
 
-              {/* Text Info */}
+              {/* Text Info (Full text display with zero hyphen cuts) */}
               <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
                 <p
-                  className={`${quoteFontClass} font-bold leading-snug ${currentItem.text} break-normal [hyphens:none]`}
+                  className={`${quoteFontClass} font-bold ${currentItem.text} break-normal [hyphens:none]`}
                 >
                   "{currentItem.quote}"
                 </p>
@@ -504,7 +520,7 @@ function HeroWidget({
   );
 }
 
-// ─── MULTI-DAY STUDY SPLIT TIMELINE (Weekly / Monthly / Custom) ─────
+// ─── MULTI-DAY STUDY SPLIT TIMELINE ─────
 function StudySplitTimelineWidget({ logs }: { logs: DailyLogItem[] }) {
   const [rangeMode, setRangeMode] = useState<"weekly" | "monthly" | "custom">("weekly");
   const [customStart, setCustomStart] = useState<string>(() => {
@@ -794,6 +810,30 @@ export default function DashboardPage() {
   const [examSchedules, setExamSchedules] = useState<ExamScheduleItem[]>([]);
   const [shiftsMap, setShiftsMap] = useState<Record<string, ExamShift[]>>({});
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
+
+  // 🔔 Automatic FCM Push Notification Token Sync to Supabase
+  useEffect(() => {
+    async function syncNativeToken(token: string) {
+      if (!token) return;
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData?.user?.id) {
+        await supabase
+          .from("users")
+          .update({ fcm_token: token, updated_at: new Date().toISOString() })
+          .eq("uid", authData.user.id);
+      }
+    }
+
+    const cachedToken = localStorage.getItem("prepwise_native_fcm_token");
+    if (cachedToken) {
+      syncNativeToken(cachedToken);
+    }
+
+    window.onNativeFCMToken = (token: string) => {
+      localStorage.setItem("prepwise_native_fcm_token", token);
+      syncNativeToken(token);
+    };
+  }, []);
 
   useEffect(() => {
     async function loadData() {
@@ -1394,7 +1434,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 6. MULTI-DAY STUDY SPLIT TIMELINE (Weekly / Monthly / Custom) */}
+        {/* 6. MULTI-DAY STUDY SPLIT TIMELINE */}
         <StudySplitTimelineWidget logs={allPastLogs} />
 
         {/* 7. 12-WEEK CONSISTENCY MATRIX */}
