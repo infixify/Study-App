@@ -196,31 +196,31 @@ jobs:
           if os.path.exists("android/build.gradle.kts"):
               with open("android/build.gradle.kts", "r") as f:
                   b = f.read()
-              fix_kts = """
-subprojects {
-    afterEvaluate {
-        if (project.hasProperty("android")) {
-            val androidExt = project.extensions.findByName("android")
-            if (androidExt != null) {
-                try {
-                    val m = androidExt.javaClass.getMethod("compileSdkVersion", Int::class.javaPrimitiveType)
-                    m.invoke(androidExt, 34)
-                } catch (_: Throwable) {
-                    try {
-                        val m2 = androidExt.javaClass.getMethod("setCompileSdkVersion", Int::class.javaPrimitiveType)
-                        m2.invoke(androidExt, 34)
-                    } catch (_: Throwable) {}
-                }
-            }
-        }
-    }
-    tasks.configureEach {
-        if (name.contains("AarMetadata", ignoreCase = true)) {
-            enabled = false
-        }
-    }
-}
-"""
+              fix_kts = (
+                  "\nsubprojects {\n"
+                  "    afterEvaluate {\n"
+                  "        if (project.hasProperty(\"android\")) {\n"
+                  "            val androidExt = project.extensions.findByName(\"android\")\n"
+                  "            if (androidExt != null) {\n"
+                  "                try {\n"
+                  "                    val m = androidExt.javaClass.getMethod(\"compileSdkVersion\", Int::class.javaPrimitiveType)\n"
+                  "                    m.invoke(androidExt, 34)\n"
+                  "                } catch (_: Throwable) {\n"
+                  "                    try {\n"
+                  "                        val m2 = androidExt.javaClass.getMethod(\"setCompileSdkVersion\", Int::class.javaPrimitiveType)\n"
+                  "                        m2.invoke(androidExt, 34)\n"
+                  "                    } catch (_: Throwable) {}\n"
+                  "                }\n"
+                  "            }\n"
+                  "        }\n"
+                  "    }\n"
+                  "    tasks.configureEach {\n"
+                  "        if (name.contains(\"AarMetadata\", ignoreCase = true)) {\n"
+                  "            enabled = false\n"
+                  "        }\n"
+                  "    }\n"
+                  "}\n"
+              )
               if "AarMetadata" not in b:
                   b += fix_kts
                   with open("android/build.gradle.kts", "w") as f:
@@ -230,22 +230,22 @@ subprojects {
           elif os.path.exists("android/build.gradle"):
               with open("android/build.gradle", "r") as f:
                   b = f.read()
-              fix_groovy = """
-subprojects {
-    afterEvaluate { project ->
-        if (project.hasProperty('android')) {
-            project.android {
-                compileSdkVersion 34
-            }
-        }
-    }
-    tasks.configureEach { task ->
-        if (task.name.toLowerCase().contains("aarmetadata")) {
-            task.enabled = false
-        }
-    }
-}
-"""
+              fix_groovy = (
+                  "\nsubprojects {\n"
+                  "    afterEvaluate { project ->\n"
+                  "        if (project.hasProperty('android')) {\n"
+                  "            project.android {\n"
+                  "                compileSdkVersion 34\n"
+                  "            }\n"
+                  "        }\n"
+                  "    }\n"
+                  "    tasks.configureEach { task ->\n"
+                  "        if (task.name.toLowerCase().contains(\"aarmetadata\")) {\n"
+                  "            task.enabled = false\n"
+                  "        }\n"
+                  "    }\n"
+                  "}\n"
+              )
               if "AarMetadata" not in b and "aarmetadata" not in b:
                   b += fix_groovy
                   with open("android/build.gradle", "w") as f:
@@ -468,7 +468,7 @@ subprojects {
           }
           EOF
 
-          # 3. PDF Download Service (Native without third-party fluttertoast)
+          # 3. PDF Download Service
           cat << 'EOF' > prepwise_app/lib/services/pdf_download_service.dart
           import 'dart:io';
           import 'package:http/http.dart' as http;
@@ -832,7 +832,7 @@ subprojects {
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
 
-                  // Toast Channel (Native OS Toast)
+                  // Toast Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST).setMethodCallHandler { call, result ->
                       if (call.method == "showToast") {
                           val msg = call.argument<String>("message") ?: ""
