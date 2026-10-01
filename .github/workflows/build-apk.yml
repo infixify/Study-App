@@ -411,8 +411,8 @@ jobs:
             Future<void> _updateNotification() async {
               if (!_isSessionActive) return;
               final String timeStr = _formatTime(_elapsedSeconds);
-              final String title = "ðŸŽ¯ PrepWise Focus Session";
-              final String body = "â±ï¸ $timeStr  â€¢  Studying: $_subject | Mode: $_mode";
+              final String title = "PrepWise Focus Session";
+              final String body = "$timeStr | Studying: $_subject | Mode: $_mode";
 
               final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
                 channelId,
@@ -429,7 +429,7 @@ jobs:
                 actions: const <AndroidNotificationAction>[
                   AndroidNotificationAction(
                     'STOP_FOCUS_SESSION',
-                    'ðŸ›‘ Stop Focus Session',
+                    'Stop Focus Session',
                     showsUserInterface: true,
                     cancelNotification: false,
                   ),
@@ -505,7 +505,7 @@ jobs:
                 final file = File("${targetDir.path}/$filename");
                 await file.writeAsBytes(response.bodyBytes);
 
-                AppToast.show("âœ“ Saved to Downloads/PrepWise! Opening...");
+                AppToast.show("Saved to Downloads/PrepWise! Opening...");
                 await OpenFilex.open(file.path);
               } catch (e) {
                 debugPrint("PDF download error: $e");
@@ -659,7 +659,7 @@ jobs:
                       ),
                     ),
                     const SizedBox(height: 8),
-                    const Center(child: Text("Tap dot to collapse â€¢ Drag anywhere", style: TextStyle(color: Colors.white38, fontSize: 10))),
+                    const Center(child: Text("Tap dot to collapse - Drag anywhere", style: TextStyle(color: Colors.white38, fontSize: 10))),
                   ],
                 ),
               );
