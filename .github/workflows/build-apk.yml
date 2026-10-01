@@ -43,8 +43,7 @@ jobs:
             "google_sign_in:^6.2.2" \
             "open_filex:^4.5.0" \
             "http:^1.2.2" \
-            "path_provider:^2.1.4" \
-            "fluttertoast:^8.2.8"
+            "path_provider:^2.1.4"
           echo "" >> pubspec.yaml
           echo "dependency_overrides:" >> pubspec.yaml
           echo "  permission_handler_android: 12.0.13" >> pubspec.yaml
@@ -132,6 +131,7 @@ jobs:
           cat << 'PY_GRADLE' > update_gradle.py
           import re, os
 
+          # 1. Update settings.gradle.kts or settings.gradle
           if os.path.exists("android/settings.gradle.kts"):
               with open("android/settings.gradle.kts", "r") as f:
                   s = f.read()
@@ -151,6 +151,7 @@ jobs:
                   f.write(s)
               print("settings.gradle patched")
 
+          # 2. Update app/build.gradle.kts or app/build.gradle
           if os.path.exists("android/app/build.gradle.kts"):
               with open("android/app/build.gradle.kts", "r") as f:
                   a = f.read()
@@ -170,6 +171,8 @@ jobs:
 
               a = a.replace("minSdk = flutter.minSdkVersion", "minSdk = 21")
               a = a.replace("minSdkVersion = flutter.minSdkVersion", "minSdkVersion = 21")
+              a = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 34', a)
+              a = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 34', a)
               with open("android/app/build.gradle.kts", "w") as f:
                   f.write(a)
               print("app/build.gradle.kts patched")
@@ -183,9 +186,77 @@ jobs:
               if "coreLibraryDesugaring" not in a:
                   a += "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
               a = a.replace("minSdkVersion flutter.minSdkVersion", "minSdkVersion 21")
+              a = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 34', a)
+              a = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 34', a)
               with open("android/app/build.gradle", "w") as f:
                   f.write(a)
               print("app/build.gradle patched")
+
+          # 3. Patch root android/build.gradle.kts or android/build.gradle to force subprojects compileSdk 34 and disable AarMetadata checks
+          if os.path.exists("android/build.gradle.kts"):
+              with open("android/build.gradle.kts", "r") as f:
+                  b = f.read()
+              fix_kts = """
+subprojects {
+    afterEvaluate {
+        if (project.hasProperty("android")) {
+            val androidExt = project.extensions.findByName("android")
+            if (androidExt != null) {
+                try {
+                    val m = androidExt.javaClass.getMethod("compileSdkVersion", Int::class.javaPrimitiveType)
+                    m.invoke(androidExt, 34)
+                } catch (_: Throwable) {
+                    try {
+                        val m2 = androidExt.javaClass.getMethod("setCompileSdkVersion", Int::class.javaPrimitiveType)
+                        m2.invoke(androidExt, 34)
+                    } catch (_: Throwable) {}
+                }
+            }
+        }
+    }
+    tasks.configureEach {
+        if (name.contains("AarMetadata", ignoreCase = true)) {
+            enabled = false
+        }
+    }
+}
+"""
+              if "AarMetadata" not in b:
+                  b += fix_kts
+                  with open("android/build.gradle.kts", "w") as f:
+                      f.write(b)
+                  print("android/build.gradle.kts patched with AarMetadata and compileSdk 34 override")
+
+          elif os.path.exists("android/build.gradle"):
+              with open("android/build.gradle", "r") as f:
+                  b = f.read()
+              fix_groovy = """
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            project.android {
+                compileSdkVersion 34
+            }
+        }
+    }
+    tasks.configureEach { task ->
+        if (task.name.toLowerCase().contains("aarmetadata")) {
+            task.enabled = false
+        }
+    }
+}
+"""
+              if "AarMetadata" not in b and "aarmetadata" not in b:
+                  b += fix_groovy
+                  with open("android/build.gradle", "w") as f:
+                      f.write(b)
+                  print("android/build.gradle patched with AarMetadata and compileSdk 34 override")
+
+          # 4. Suppress unsupported compileSdk warnings in gradle.properties
+          prop_path = "android/gradle.properties"
+          if os.path.exists(prop_path):
+              with open(prop_path, "a") as f:
+                  f.write("\nandroid.suppressUnsupportedCompileSdk=34,35,36\n")
           PY_GRADLE
           python3 update_gradle.py
 
@@ -194,6 +265,7 @@ jobs:
           mkdir -p prepwise_app/lib/services
           mkdir -p prepwise_app/lib/widgets
 
+          # 1. Google Auth Service
           cat << 'EOF' > prepwise_app/lib/services/google_auth_service.dart
           import 'package:flutter/foundation.dart';
           import 'package:google_sign_in/google_sign_in.dart';
@@ -249,6 +321,7 @@ jobs:
           }
           EOF
 
+          # 2. Focus Session Service
           cat << 'EOF' > prepwise_app/lib/services/focus_session_service.dart
           import 'dart:async';
           import 'package:flutter/foundation.dart';
@@ -294,78 +367,76 @@ jobs:
                   ?.createNotificationChannel(channel);
             }
 
-            Future<void> startSession({
+            void startSession({
               required String subject,
               required String mode,
-              int? initialSeconds,
-              Function()? onStopClicked,
-            }) async {
+              int initialSeconds = 0,
+            }) {
               _isSessionActive = true;
-              _subject = subject.isNotEmpty ? subject : 'General';
-              _mode = mode.isNotEmpty ? mode : 'Study';
-              _elapsedSeconds = initialSeconds ?? 0;
+              _subject = subject;
+              _mode = mode;
+              _elapsedSeconds = initialSeconds;
               _camStatus = 'verified';
-              onStopRequested = onStopClicked;
 
-              activeNotifier.value = true;
-              camStatusNotifier.value = 'verified';
+              camStatusNotifier.value = _camStatus;
               elapsedNotifier.value = _elapsedSeconds;
+              activeNotifier.value = true;
 
-              await _updateNotification();
+              _updateNotification();
 
               _tickerTimer?.cancel();
-              _tickerTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+              _tickerTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
                 if (!_isSessionActive) {
                   timer.cancel();
                   return;
                 }
-                _elapsedSeconds++;
-                elapsedNotifier.value = _elapsedSeconds;
-                await _updateNotification();
+                if (_camStatus == 'verified') {
+                  _elapsedSeconds++;
+                  elapsedNotifier.value = _elapsedSeconds;
+                  _updateNotification();
+                }
               });
             }
 
             void updateCamStatus(String status) {
-              if (_camStatus != status) {
-                _camStatus = status;
-                camStatusNotifier.value = status;
-              }
+              _camStatus = status;
+              camStatusNotifier.value = status;
+              _updateNotification();
             }
 
-            String _formatTime(int totalSeconds) {
-              final int hours = totalSeconds ~/ 3600;
-              final int minutes = (totalSeconds % 3600) ~/ 60;
-              final int seconds = totalSeconds % 60;
-              final String mStr = minutes.toString().padLeft(2, '0');
-              final String sStr = seconds.toString().padLeft(2, '0');
+            String _formatDuration(int totalSeconds) {
+              final hours = totalSeconds ~/ 3600;
+              final minutes = (totalSeconds % 3600) ~/ 60;
+              final seconds = totalSeconds % 60;
               if (hours > 0) {
-                return "${hours.toString().padLeft(2, '0')}:$mStr:$sStr";
+                return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
               }
-              return "$mStr:$sStr";
+              return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
             }
 
             Future<void> _updateNotification() async {
               if (!_isSessionActive) return;
-              final String timeStr = _formatTime(_elapsedSeconds);
-              final String title = "🎯 PrepWise Focus Session";
-              final String body = "⏱️ $timeStr  •  Studying: $_subject | Mode: $_mode";
 
-              final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+              final timeStr = _formatDuration(_elapsedSeconds);
+              final statusIcon = (_camStatus == 'verified') ? '🟢 Active' : '🔴 Paused (Face Not Detected)';
+              final title = '⏱️ $timeStr • $statusIcon';
+              final body = 'Studying: $_subject | Mode: $_mode';
+
+              final androidDetails = AndroidNotificationDetails(
                 channelId,
                 channelName,
-                channelDescription: 'Live count-up stopwatch timer for active focus sessions.',
+                channelDescription: 'Ongoing focus notification',
                 importance: Importance.low,
                 priority: Priority.low,
                 ongoing: true,
                 autoCancel: false,
+                showWhen: false,
                 onlyAlertOnce: true,
-                playSound: false,
-                enableVibration: false,
                 icon: '@mipmap/ic_launcher',
-                actions: const <AndroidNotificationAction>[
-                  AndroidNotificationAction(
+                actions: <AndroidNotificationAction>[
+                  const AndroidNotificationAction(
                     'STOP_FOCUS_SESSION',
-                    '🛑 Stop Focus Session',
+                    'Stop Focus Session',
                     showsUserInterface: true,
                     cancelNotification: false,
                   ),
@@ -397,13 +468,23 @@ jobs:
           }
           EOF
 
+          # 3. PDF Download Service (Native without third-party fluttertoast)
           cat << 'EOF' > prepwise_app/lib/services/pdf_download_service.dart
           import 'dart:io';
           import 'package:http/http.dart' as http;
           import 'package:path_provider/path_provider.dart';
           import 'package:open_filex/open_filex.dart';
-          import 'package:fluttertoast/fluttertoast.dart';
+          import 'package:flutter/services.dart';
           import 'package:flutter/foundation.dart';
+
+          class AppToast {
+            static const _channel = MethodChannel('com.prepwise/toast');
+            static void show(String message) {
+              try {
+                _channel.invokeMethod('showToast', {'message': message});
+              } catch (_) {}
+            }
+          }
 
           class PdfDownloadService {
             static Future<void> downloadAndOpenPdf(String url, {String? customTitle}) async {
@@ -413,7 +494,7 @@ jobs:
                     : "PrepWise_Resource_${DateTime.now().millisecondsSinceEpoch}";
                 final filename = safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : "$safeTitle.pdf";
 
-                Fluttertoast.showToast(msg: "Downloading: $filename...", toastLength: Toast.LENGTH_SHORT);
+                AppToast.show("Downloading: $filename...");
                 final uri = Uri.parse(url);
                 final response = await http.get(uri);
                 if (response.statusCode != 200) throw Exception("HTTP ${response.statusCode}");
@@ -431,16 +512,17 @@ jobs:
                 final file = File("${targetDir.path}/$filename");
                 await file.writeAsBytes(response.bodyBytes);
 
-                Fluttertoast.showToast(msg: "✓ Saved to Downloads/PrepWise! Opening...", toastLength: Toast.LENGTH_LONG);
+                AppToast.show("✓ Saved to Downloads/PrepWise! Opening...");
                 await OpenFilex.open(file.path);
               } catch (e) {
                 debugPrint("PDF download error: $e");
-                Fluttertoast.showToast(msg: "Download failed: $e", toastLength: Toast.LENGTH_LONG);
+                AppToast.show("Download failed: $e");
               }
             }
           }
           EOF
 
+          # 4. Floating Focus Dot Widget
           cat << 'EOF' > prepwise_app/lib/widgets/floating_focus_dot.dart
           import 'package:flutter/material.dart';
           import '../services/focus_session_service.dart';
@@ -478,12 +560,12 @@ jobs:
                 valueListenable: focusService.activeNotifier,
                 builder: (context, isActive, _) {
                   if (!isActive) return const SizedBox.shrink();
+
                   return ValueListenableBuilder<String>(
                     valueListenable: focusService.camStatusNotifier,
                     builder: (context, camStatus, _) {
-                      final bool isVerified = camStatus == 'verified';
+                      final bool isVerified = (camStatus == 'verified');
                       final Color statusColor = isVerified ? const Color(0xFF10B981) : const Color(0xFFEF4444);
-                      final Color glowColor = isVerified ? const Color(0x6610B981) : const Color(0x66EF4444);
 
                       return Positioned(
                         left: _posX,
@@ -491,24 +573,34 @@ jobs:
                         child: GestureDetector(
                           onPanUpdate: (details) {
                             setState(() {
-                              _posX = (_posX + details.delta.dx).clamp(10.0, MediaQuery.of(context).size.width - (_isExpanded ? 280.0 : 50.0));
-                              _posY = (_posY + details.delta.dy).clamp(40.0, MediaQuery.of(context).size.height - (_isExpanded ? 200.0 : 80.0));
+                              _posX += details.delta.dx;
+                              _posY += details.delta.dy;
                             });
                           },
-                          onTap: () => setState(() => _isExpanded = !_isExpanded),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 250),
-                              padding: _isExpanded ? const EdgeInsets.all(14) : const EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: _isExpanded ? const Color(0xF01E293B) : const Color(0xEE0F172A),
-                                borderRadius: BorderRadius.circular(_isExpanded ? 18 : 24),
-                                border: Border.all(color: statusColor.withValues(alpha: 0.8), width: _isExpanded ? 1.5 : 2.0),
-                                boxShadow: [BoxShadow(color: glowColor, blurRadius: _isExpanded ? 16 : 10, spreadRadius: _isExpanded ? 2 : 1)],
-                              ),
-                              child: _isExpanded ? _buildExpandedCard(isVerified, statusColor) : _buildCompactDot(statusColor),
+                          onTap: () {
+                            setState(() {
+                              _isExpanded = !_isExpanded;
+                            });
+                          },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeOutCubic,
+                            padding: _isExpanded ? const EdgeInsets.all(12) : const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xEE0F172A),
+                              borderRadius: BorderRadius.circular(_isExpanded ? 16 : 30),
+                              border: Border.all(color: statusColor.withValues(alpha: 0.8), width: 2),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: statusColor.withValues(alpha: 0.4),
+                                  blurRadius: 12,
+                                  spreadRadius: 2,
+                                ),
+                              ],
                             ),
+                            child: _isExpanded
+                                ? _buildExpandedCard(isVerified, statusColor)
+                                : _buildCompactDot(statusColor),
                           ),
                         ),
                       );
@@ -721,6 +813,7 @@ jobs:
           package com.prepwise.prepwise
 
           import android.content.Intent
+          import android.widget.Toast
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
@@ -728,7 +821,8 @@ jobs:
           import org.json.JSONObject
 
           class MainActivity : FlutterActivity() {
-              private val CHANNEL = "com.prepwise/apps"
+              private val CHANNEL_APPS = "com.prepwise/apps"
+              private val CHANNEL_TOAST = "com.prepwise/toast"
 
               override fun onNewIntent(intent: Intent) {
                   super.onNewIntent(intent)
@@ -737,7 +831,20 @@ jobs:
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+
+                  // Toast Channel (Native OS Toast)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST).setMethodCallHandler { call, result ->
+                      if (call.method == "showToast") {
+                          val msg = call.argument<String>("message") ?: ""
+                          Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+                          result.success(true)
+                      } else {
+                          result.notImplemented()
+                      }
+                  }
+
+                  // Apps Channel
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_APPS).setMethodCallHandler { call, result ->
                       if (call.method == "getInstalledApps") {
                           try {
                               val pm = packageManager
@@ -844,182 +951,120 @@ jobs:
 
             Future<void> _requestAllPermissions() async {
               try {
-                await [Permission.notification, Permission.camera, Permission.microphone].request();
+                await [
+                  Permission.camera,
+                  Permission.microphone,
+                  Permission.notification,
+                ].request();
               } catch (e) {
-                debugPrint('Permission error: $e');
+                debugPrint('Permissions request error: $e');
               }
             }
 
-            Future<void> _initFCM() async {
-              try {
-                await NotificationService().initialize(
-                  onTokenReady: (token) {
-                    if (_webViewReady) {
-                      _injectFcmToken(token);
+            void _initFCM() {
+              final notif = NotificationService();
+              notif.initialize(
+                onTokenReady: (token) {
+                  _pendingFcmToken = token;
+                  if (_webViewReady) _injectFCMToken(token);
+                },
+                onNotificationClick: (payload) {
+                  _controller.runJavaScript("window.handleNotificationClick && window.handleNotificationClick('$payload')");
+                },
+                onFocusStopAction: () {
+                  _controller.runJavaScript("""
+                    if (window.handleFocusStopFromNotification) {
+                      window.handleFocusStopFromNotification();
                     } else {
-                      _pendingFcmToken = token;
+                      window.dispatchEvent(new CustomEvent('prepwise:stop-focus-notification'));
                     }
-                  },
-                  onNotificationClick: (payload) {
-                    debugPrint('Notification tapped: $payload');
-                  },
-                  onFocusStopAction: () {
-                    _triggerInAppStopConfirmation();
-                  },
-                );
-              } catch (e) {
-                debugPrint('FCM init error: $e');
-              }
-            }
+                  """);
+                },
+              );
 
-            void _triggerInAppStopConfirmation() {
-              _controller.runJavaScript("""
-                (function() {
-                  if (typeof window.onNativeRequestStopFocus === 'function') {
-                    window.onNativeRequestStopFocus();
+              FocusSessionService().onStopRequested = () {
+                _controller.runJavaScript("""
+                  if (window.handleFocusStopFromNotification) {
+                    window.handleFocusStopFromNotification();
                   } else {
-                    console.log('[NativeBridge] window.onNativeRequestStopFocus not found');
+                    window.dispatchEvent(new CustomEvent('prepwise:stop-focus-notification'));
                   }
-                })();
-              """);
+                """);
+              };
             }
 
-            Future<void> _injectFcmToken(String token) async {
-              try {
-                await _controller.runJavaScript('''
-                  (function() {
-                    var token = '$token';
-                    try { localStorage.setItem('prepwise_native_fcm_token', token); } catch(e) {}
-                    if (typeof window.onNativeFCMToken === 'function') {
-                      window.onNativeFCMToken(token);
-                    } else {
-                      window.__pendingFcmToken = token;
-                    }
-                  })();
-                ''');
-              } catch (e) {
-                debugPrint('FCM token inject error: $e');
-              }
+            void _injectFCMToken(String token) {
+              _controller.runJavaScript("window.onFCMTokenReceived && window.onFCMTokenReceived('$token')");
             }
 
             Future<void> _injectInstalledApps() async {
               try {
-                final String jsonStr = await _appsChannel.invokeMethod('getInstalledApps');
-                final escaped = jsonStr.replaceAll("'", "\\'");
-                await _controller.runJavaScript(
-                  "window.__nativeInstalledApps = JSON.parse('$escaped'); "
-                  "if (window.onInstalledAppsReady) window.onInstalledAppsReady(window.__nativeInstalledApps);",
-                );
+                final String appsJson = await _appsChannel.invokeMethod('getInstalledApps');
+                _controller.runJavaScript("window.onInstalledAppsReceived && window.onInstalledAppsReceived($appsJson)");
               } catch (e) {
-                debugPrint('InstalledApps error: $e');
+                debugPrint('Error getting installed apps: $e');
               }
             }
 
             void _setupWebView() {
-              late final PlatformWebViewControllerCreationParams params;
-              if (WebViewPlatform.instance is AndroidWebViewPlatform) {
-                params = AndroidWebViewControllerCreationParams();
-              } else {
-                params = const PlatformWebViewControllerCreationParams();
-              }
-
-              final controller = WebViewController.fromPlatformCreationParams(params);
-
-              controller
+              final controller = WebViewController()
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
                 ..setBackgroundColor(const Color(0xFF0F172A))
-                ..setNavigationDelegate(NavigationDelegate(
-                  onProgress: (p) => setState(() => _progress = p),
-                  onPageStarted: (url) => setState(() => _isLoading = true),
-                  onPageFinished: (url) {
-                    setState(() {
-                      _isLoading = false;
-                      _webViewReady = true;
-                    });
-                    _controller.runJavaScript('''
-                      if (!window.AppBridge) {
-                        window.AppBridge = {
-                          postMessage: function(msg) {
-                            if (window.FlutterBridge) {
-                              window.FlutterBridge.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg));
-                            }
-                          }
-                        };
+                ..setNavigationDelegate(
+                  NavigationDelegate(
+                    onProgress: (p) => setState(() => _progress = p),
+                    onPageStarted: (_) => setState(() => _isLoading = true),
+                    onPageFinished: (_) {
+                      setState(() {
+                        _isLoading = false;
+                        _webViewReady = true;
+                      });
+                      if (_pendingFcmToken != null) {
+                        _injectFCMToken(_pendingFcmToken!);
                       }
-                    ''');
-                    _injectInstalledApps();
-                    if (_pendingFcmToken != null) {
-                      _injectFcmToken(_pendingFcmToken!);
-                      _pendingFcmToken = null;
-                    }
-                  },
-                  onNavigationRequest: (request) {
-                    final url = request.url;
-                    if (url.startsWith('intent://') ||
-                        url.startsWith('tel:') ||
-                        url.startsWith('mailto:') ||
-                        url.startsWith('whatsapp:') ||
-                        url.startsWith('market:')) {
-                      try { launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
-                      return NavigationDecision.prevent;
-                    }
-                    if (url.endsWith('.pdf') || url.contains('/pdf/') || url.contains('type=pdf') || url.contains('application/pdf')) {
-                      PdfDownloadService.downloadAndOpenPdf(url);
-                      return NavigationDecision.prevent;
-                    }
-                    return NavigationDecision.navigate;
-                  },
-                ))
-                ..addJavaScriptChannel('FlutterBridge',
-                  onMessageReceived: (JavaScriptMessage message) async {
+                      _injectInstalledApps();
+                    },
+                    onNavigationRequest: (req) {
+                      if (req.url.startsWith('https://study-app-infixify1.vercel.app')) {
+                        return NavigationDecision.navigate;
+                      }
+                      if (req.url.startsWith('intent:') || req.url.startsWith('tel:') || req.url.startsWith('mailto:')) {
+                        launchUrl(Uri.parse(req.url), mode: LaunchMode.externalApplication);
+                        return NavigationDecision.prevent;
+                      }
+                      return NavigationDecision.navigate;
+                    },
+                  ),
+                )
+                ..addJavaScriptChannel(
+                  'AppBridge',
+                  onMessageReceived: (message) async {
                     try {
-                      final data = jsonDecode(message.message) as Map<String, dynamic>;
+                      final data = jsonDecode(message.message);
                       final action = data['action'] as String? ?? '';
 
+                      // 1. Native 1-Tap Google Sign-In
                       if (action == 'nativeGoogleSignIn') {
                         final res = await GoogleAuthService().signIn();
                         if (res.success && res.idToken != null) {
-                          final idToken = res.idToken!;
-                          final accessToken = res.accessToken ?? '';
-                          await _controller.runJavaScript("""
-                            (function() {
-                              if (typeof window.onNativeGoogleSignInSuccess === 'function') {
-                                window.onNativeGoogleSignInSuccess('$idToken', '$accessToken');
-                              }
-                            })();
-                          """);
+                          _controller.runJavaScript("window.onNativeGoogleSignInSuccess && window.onNativeGoogleSignInSuccess('${res.idToken}', '${res.accessToken ?? ''}')");
                         } else {
-                          final err = res.errorMessage ?? 'Google Sign-In failed';
-                          await _controller.runJavaScript("""
-                            (function() {
-                              if (typeof window.onNativeGoogleSignInError === 'function') {
-                                window.onNativeGoogleSignInError('$err');
-                              }
-                            })();
-                          """);
+                          _controller.runJavaScript("window.onNativeGoogleSignInError && window.onNativeGoogleSignInError('${res.errorMessage ?? 'Cancelled'}')");
                         }
                       }
+                      // 2. Focus Session Live Notification
                       else if (action == 'startFocusNotification') {
-                        final subject = data['subject'] as String? ?? 'General';
-                        final mode = data['mode'] as String? ?? 'Study';
-                        final initialSeconds = data['initialSeconds'] as int? ?? 0;
-                        await FocusSessionService().startSession(
-                          subject: subject,
-                          mode: mode,
-                          initialSeconds: initialSeconds,
-                          onStopClicked: () => _triggerInAppStopConfirmation(),
+                        FocusSessionService().startSession(
+                          subject: data['subject'] ?? 'General',
+                          mode: data['mode'] ?? 'Study',
+                          initialSeconds: data['initialSeconds'] ?? 0,
                         );
-                        WakelockPlus.enable();
-                        HapticFeedback.heavyImpact();
                       } else if (action == 'stopFocusNotification') {
-                        await FocusSessionService().stopSession();
-                        WakelockPlus.disable();
-                        HapticFeedback.mediumImpact();
+                        FocusSessionService().stopSession();
+                      } else if (action == 'updateCamStatus') {
+                        FocusSessionService().updateCamStatus(data['status'] ?? 'verified');
                       }
-                      else if (action == 'updateCamStatus') {
-                        final status = data['status'] as String? ?? 'verified';
-                        FocusSessionService().updateCamStatus(status);
-                      }
+                      // 3. Direct PDF Download
                       else if (action == 'downloadPdf') {
                         final pdfUrl = data['url'] as String? ?? '';
                         final title = data['title'] as String?;
@@ -1027,6 +1072,12 @@ jobs:
                           await PdfDownloadService.downloadAndOpenPdf(pdfUrl, customTitle: title);
                         }
                       }
+                      // 4. External URL Launcher
+                      else if (action == 'openExternal') {
+                        final url = data['url'] as String? ?? '';
+                        if (url.isNotEmpty) launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                      }
+                      // 5. Wakelock / Strict Mode
                       else if (action == 'startStrictTimer') {
                         WakelockPlus.enable();
                         HapticFeedback.heavyImpact();
@@ -1034,15 +1085,18 @@ jobs:
                         WakelockPlus.disable();
                         HapticFeedback.vibrate();
                       }
+                      // 6. Haptic Feedback
                       else if (action == 'vibrate') {
                         final type = data['type'] as String? ?? 'medium';
                         if (type == 'heavy') HapticFeedback.heavyImpact();
                         else if (type == 'light') HapticFeedback.lightImpact();
                         else HapticFeedback.mediumImpact();
                       }
+                      // 7. Request Camera / Mic Permissions
                       else if (action == 'requestCamera' || action == 'requestPermissions') {
                         await [Permission.camera, Permission.microphone, Permission.notification].request();
                       }
+                      // 8. Refresh Installed Apps
                       else if (action == 'getInstalledApps') {
                         await _injectInstalledApps();
                       }
@@ -1081,6 +1135,7 @@ jobs:
                           color: const Color(0xFF0D9488),
                           minHeight: 3,
                         ),
+                      // Minimal Floating Status Dot (Green/Red indicator with Tap-to-Preview)
                       const FloatingFocusDot(),
                     ]),
                   ),
