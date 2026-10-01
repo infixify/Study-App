@@ -97,12 +97,16 @@ jobs:
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
               <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
-              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
               <uses-feature android:name="android.hardware.camera" android:required="false" />
               <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
               <uses-feature android:name="android.hardware.microphone" android:required="false" />
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.MAIN" />
+                      <category android:name="android.intent.category.LAUNCHER" />
+                  </intent>
+              </queries>
           """
 
           fcm_service = """
@@ -438,26 +442,42 @@ jobs:
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_TOAST_EOF' > prepwise_app/lib/services/app_toast.dart
           import 'package:flutter/services.dart';
+          import 'package:flutter/foundation.dart';
 
           class AppToast {
-            static const _channel = MethodChannel('com.prepwise/toast');
+            static const MethodChannel _channel = MethodChannel('com.prepwise/toast');
+
             static void show(String message) {
               try {
                 _channel.invokeMethod('showToast', {'message': message});
-              } catch (_) {}
+              } catch (e) {
+                debugPrint('[AppToast] $message');
+              }
             }
           }
           DART_TOAST_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_WAKE_EOF' > prepwise_app/lib/services/wakelock_service.dart
           import 'package:wakelock_plus/wakelock_plus.dart';
+          import 'package:flutter/foundation.dart';
 
           class WakelockService {
             static Future<void> enable() async {
-              try { await WakelockPlus.enable(); } catch (_) {}
+              try {
+                await WakelockPlus.enable();
+                debugPrint("Wakelock enabled: Screen will stay on during study session.");
+              } catch (e) {
+                debugPrint("Failed to enable wakelock: $e");
+              }
             }
+
             static Future<void> disable() async {
-              try { await WakelockPlus.disable(); } catch (_) {}
+              try {
+                await WakelockPlus.disable();
+                debugPrint("Wakelock disabled: Screen sleep behavior restored.");
+              } catch (e) {
+                debugPrint("Failed to disable wakelock: $e");
+              }
             }
           }
           DART_WAKE_EOF
@@ -472,8 +492,18 @@ jobs:
             final String? accessToken;
             final String? email;
             final String? displayName;
+            final String? photoUrl;
             final String? errorMessage;
-            GoogleAuthResult({required this.success, this.idToken, this.accessToken, this.email, this.displayName, this.errorMessage});
+
+            GoogleAuthResult({
+              required this.success,
+              this.idToken,
+              this.accessToken,
+              this.email,
+              this.displayName,
+              this.photoUrl,
+              this.errorMessage,
+            });
           }
 
           class GoogleAuthService {
@@ -481,20 +511,59 @@ jobs:
             factory GoogleAuthService() => _instance;
             GoogleAuthService._internal();
 
-            final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email', 'profile', 'openid']);
+            final GoogleSignIn _googleSignIn = GoogleSignIn(
+              scopes: [
+                'email',
+                'profile',
+                'openid',
+              ],
+            );
 
+            /// Performs native 1-Tap Google Sign-In
+            /// Returns ID Token & Access Token for Supabase signInWithIdToken
             Future<GoogleAuthResult> signIn() async {
               try {
+                debugPrint('[GoogleAuthService] Launching 1-Tap Google Account Picker...');
+                // Ensure previous session is signed out for fresh account picking if needed
                 await _googleSignIn.signOut();
+
                 final GoogleSignInAccount? account = await _googleSignIn.signIn();
                 if (account == null) {
-                  return GoogleAuthResult(success: false, errorMessage: 'User cancelled');
+                  debugPrint('[GoogleAuthService] User cancelled Google Account Picker.');
+                  return GoogleAuthResult(
+                    success: false,
+                    errorMessage: 'User cancelled Google Sign-In',
+                  );
                 }
+
                 final GoogleSignInAuthentication auth = await account.authentication;
-                return GoogleAuthResult(success: true, idToken: auth.idToken, accessToken: auth.accessToken, email: account.email, displayName: account.displayName);
+                final String? idToken = auth.idToken;
+                final String? accessToken = auth.accessToken;
+
+                debugPrint('[GoogleAuthService] Success! Got ID Token for: ${account.email}');
+
+                return GoogleAuthResult(
+                  success: true,
+                  idToken: idToken,
+                  accessToken: accessToken,
+                  email: account.email,
+                  displayName: account.displayName,
+                  photoUrl: account.photoUrl,
+                );
               } catch (e) {
-                debugPrint('[GoogleAuthService] Error: $e');
-                return GoogleAuthResult(success: false, errorMessage: e.toString());
+                debugPrint('[GoogleAuthService] Sign-In Error: $e');
+                return GoogleAuthResult(
+                  success: false,
+                  errorMessage: e.toString(),
+                );
+              }
+            }
+
+            Future<void> signOut() async {
+              try {
+                await _googleSignIn.signOut();
+              } catch (e) {
+                debugPrint('[GoogleAuthService] Sign-Out Error: $e');
               }
             }
           }
@@ -518,16 +587,24 @@ jobs:
 
             bool _isSessionActive = false;
             String _subject = 'General';
-            String _mode = 'Study';
+            String _mode = 'Practice'; // 'Practice' or 'Study'
+            DateTime? _startTime;
             Timer? _tickerTimer;
-            String _camStatus = 'verified';
+            String _camStatus = 'verified'; // 'verified' (green) or 'lost' (red)
             int _elapsedSeconds = 0;
 
             bool get isSessionActive => _isSessionActive;
+            String get subject => _subject;
+            String get mode => _mode;
+            String get camStatus => _camStatus;
+            int get elapsedSeconds => _elapsedSeconds;
+
+            // Listeners for UI state
             final ValueNotifier<String> camStatusNotifier = ValueNotifier<String>('verified');
             final ValueNotifier<int> elapsedNotifier = ValueNotifier<int>(0);
             final ValueNotifier<bool> activeNotifier = ValueNotifier<bool>(false);
 
+            // Callback triggered when stop is clicked on notification
             Function()? onStopRequested;
 
             Future<void> initializeNotificationChannel() async {
@@ -535,61 +612,89 @@ jobs:
                 channelId,
                 channelName,
                 description: 'Live continuous notification during active Focus Mode study sessions.',
-                importance: Importance.low,
+                importance: Importance.low, // Silent updates: no annoying sound every second
                 playSound: false,
                 enableVibration: false,
                 showBadge: false,
               );
+
               await _notifications
                   .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
                   ?.createNotificationChannel(channel);
             }
 
-            Future<void> startSession({required String subject, required String mode, int? initialSeconds, Function()? onStopClicked}) async {
+            /// Start Focus Session Live Notification with Real-Time Stopwatch
+            Future<void> startSession({
+              required String subject,
+              required String mode,
+              int? initialSeconds,
+              Function()? onStopClicked,
+            }) async {
               _isSessionActive = true;
               _subject = subject.isNotEmpty ? subject : 'General';
               _mode = mode.isNotEmpty ? mode : 'Study';
+              _startTime = DateTime.now();
               _elapsedSeconds = initialSeconds ?? 0;
               _camStatus = 'verified';
               onStopRequested = onStopClicked;
+
               activeNotifier.value = true;
               camStatusNotifier.value = 'verified';
               elapsedNotifier.value = _elapsedSeconds;
+
+              debugPrint("[FocusSessionService] Starting session: $_subject ($_mode)");
+
               await _updateNotification();
+
+              // Start periodic 1-second ticker to sync count-up timer
               _tickerTimer?.cancel();
               _tickerTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-                if (!_isSessionActive) { timer.cancel(); return; }
+                if (!_isSessionActive) {
+                  timer.cancel();
+                  return;
+                }
                 _elapsedSeconds++;
                 elapsedNotifier.value = _elapsedSeconds;
                 await _updateNotification();
               });
             }
 
+            /// Updates the camera tracking status (verified = green, lost = red)
             void updateCamStatus(String status) {
               if (_camStatus != status) {
                 _camStatus = status;
                 camStatusNotifier.value = status;
+                debugPrint("[FocusSessionService] Cam status updated to: $status");
               }
             }
 
+            /// Formats seconds to HH:mm:ss or mm:ss
             String _formatTime(int totalSeconds) {
               final int hours = totalSeconds ~/ 3600;
               final int minutes = (totalSeconds % 3600) ~/ 60;
               final int seconds = totalSeconds % 60;
+
               final String mStr = minutes.toString().padLeft(2, '0');
               final String sStr = seconds.toString().padLeft(2, '0');
-              if (hours > 0) return "${hours.toString().padLeft(2, '0')}:$mStr:$sStr";
+
+              if (hours > 0) {
+                final String hStr = hours.toString().padLeft(2, '0');
+                return "$hStr:$mStr:$sStr";
+              }
               return "$mStr:$sStr";
             }
 
             Future<void> _updateNotification() async {
               if (!_isSessionActive) return;
+
               final String timeStr = _formatTime(_elapsedSeconds);
               final String title = "PrepWise Focus Session";
-              final String body = "$timeStr  |  Studying: $_subject | Mode: $_mode";
+              final String body = "$timeStr - Studying: $_subject | Mode: $_mode";
+
               final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-                channelId, channelName,
-                channelDescription: 'Live count-up stopwatch for focus sessions.',
+                channelId,
+                channelName,
+                channelDescription: 'Live count-up stopwatch timer for active focus sessions.',
                 importance: Importance.low,
                 priority: Priority.low,
                 ongoing: true,
@@ -599,22 +704,43 @@ jobs:
                 enableVibration: false,
                 icon: '@mipmap/ic_launcher',
                 actions: const <AndroidNotificationAction>[
-                  AndroidNotificationAction('STOP_FOCUS_SESSION', 'Stop Focus Session', showsUserInterface: true, cancelNotification: false),
+                  AndroidNotificationAction(
+                    'STOP_FOCUS_SESSION',
+                    'Stop Focus Session',
+                    showsUserInterface: true,
+                    cancelNotification: false,
+                  ),
                 ],
               );
+
+              final NotificationDetails notificationDetails = NotificationDetails(android: androidDetails);
+
               try {
-                await _notifications.show(notificationId, title, body, NotificationDetails(android: androidDetails), payload: 'FOCUS_SESSION_STOP_ACTION');
+                await _notifications.show(
+                  notificationId,
+                  title,
+                  body,
+                  notificationDetails,
+                  payload: 'FOCUS_SESSION_STOP_ACTION',
+                );
               } catch (e) {
-                debugPrint("[FocusSessionService] Notification error: $e");
+                debugPrint("[FocusSessionService] Notification update error: $e");
               }
             }
 
+            /// Stop Focus Session and dismiss notification
             Future<void> stopSession() async {
               _isSessionActive = false;
               _tickerTimer?.cancel();
               _tickerTimer = null;
               activeNotifier.value = false;
-              try { await _notifications.cancel(notificationId); } catch (_) {}
+
+              try {
+                await _notifications.cancel(notificationId);
+                debugPrint("[FocusSessionService] Focus session stopped & notification dismissed.");
+              } catch (e) {
+                debugPrint("[FocusSessionService] Error cancelling notification: $e");
+              }
             }
           }
           DART_FOCUS_EOF
@@ -624,39 +750,73 @@ jobs:
           import 'package:http/http.dart' as http;
           import 'package:path_provider/path_provider.dart';
           import 'package:open_filex/open_filex.dart';
-          import 'package:flutter/foundation.dart';
+          import 'package:url_launcher/url_launcher.dart';
           import 'app_toast.dart';
+          import 'package:flutter/foundation.dart';
 
           class PdfDownloadService {
             static Future<void> downloadAndOpenPdf(String url, {String? customTitle}) async {
               try {
                 final safeTitle = (customTitle != null && customTitle.trim().isNotEmpty)
                     ? customTitle.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_\-\. ]'), '_')
-                    : "PrepWise_Resource_${DateTime.now().millisecondsSinceEpoch}";
+                    : "NCERT_Resource_${DateTime.now().millisecondsSinceEpoch}";
+
                 final filename = safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : "$safeTitle.pdf";
 
-                AppToast.show("Downloading: $filename...");
-                final uri = Uri.parse(url);
-                final response = await http.get(uri);
-                if (response.statusCode != 200) throw Exception("HTTP ${response.statusCode}");
+                AppToast.show("Loading NCERT: $filename...");
 
+                final uri = Uri.parse(url);
+
+                // Browser User-Agent and referer headers so ncert.nic.in allows download
+                final response = await http.get(
+                  uri,
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+                    'Accept': 'application/pdf,application/octet-stream,*/*',
+                    'Referer': 'https://ncert.nic.in/',
+                  },
+                ).timeout(const Duration(seconds: 30));
+
+                if (response.statusCode != 200) {
+                  throw Exception("Server returned HTTP ${response.statusCode}");
+                }
+
+                // Safe storage path that works on all Android versions (10, 11, 12, 13, 14, 15)
                 Directory? targetDir;
                 try {
-                  if (Platform.isAndroid) {
-                    final publicDownload = Directory('/storage/emulated/0/Download/PrepWise');
-                    if (!await publicDownload.exists()) await publicDownload.create(recursive: true);
-                    targetDir = publicDownload;
+                  final extDir = await getExternalStorageDirectory();
+                  if (extDir != null) {
+                    final ncertFolder = Directory("${extDir.path}/NCERT");
+                    if (!await ncertFolder.exists()) {
+                      await ncertFolder.create(recursive: true);
+                    }
+                    targetDir = ncertFolder;
                   }
                 } catch (_) {}
+
                 targetDir ??= await getApplicationDocumentsDirectory();
 
                 final file = File("${targetDir.path}/$filename");
                 await file.writeAsBytes(response.bodyBytes);
-                AppToast.show("Saved to Downloads/PrepWise! Opening...");
-                await OpenFilex.open(file.path);
+
+                AppToast.show("Opening NCERT Textbook...");
+
+                // Open directly in native Android PDF viewer using OpenFilex
+                final result = await OpenFilex.open(file.path);
+                debugPrint("[PdfDownloadService] OpenFilex result: ${result.type} - ${result.message}");
+
+                if (result.type != ResultType.done) {
+                  // Fallback: launch external viewer directly if OpenFilex could not open
+                  await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                }
               } catch (e) {
-                debugPrint("PDF download error: $e");
-                AppToast.show("Download failed: $e");
+                debugPrint("[PdfDownloadService] Download error: $e");
+                AppToast.show("Opening NCERT in browser...");
+                try {
+                  await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                } catch (err) {
+                  AppToast.show("Could not open NCERT: $e");
+                }
               }
             }
           }
@@ -673,7 +833,7 @@ jobs:
           @pragma('vm:entry-point')
           Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
             await Firebase.initializeApp();
-            debugPrint("Handling background FCM: ${message.messageId}");
+            debugPrint("Handling background FCM message: ${message.messageId}");
           }
 
           class NotificationService {
@@ -691,68 +851,123 @@ jobs:
             Function(String payload)? onNotificationTapped;
             Function()? onFocusStopActionClicked;
 
-            Future<void> initialize({Function(String token)? onTokenReady, Function(String payload)? onNotificationClick, Function()? onFocusStopAction}) async {
+            Future<void> initialize({
+              Function(String token)? onTokenReady,
+              Function(String payload)? onNotificationClick,
+              Function()? onFocusStopAction,
+            }) async {
               onTokenReceived = onTokenReady;
               onNotificationTapped = onNotificationClick;
               onFocusStopActionClicked = onFocusStopAction;
 
+              // 1. Request Permission
               try {
-                await _fcm.requestPermission(alert: true, badge: true, sound: true, provisional: false);
+                NotificationSettings settings = await _fcm.requestPermission(
+                  alert: true,
+                  badge: true,
+                  sound: true,
+                  provisional: false,
+                );
+                debugPrint('FCM Authorization Status: ${settings.authorizationStatus}');
               } catch (e) {
                 debugPrint('FCM requestPermission error: $e');
               }
 
-              const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+              // 2. Initialize Local Notifications
+              const AndroidInitializationSettings androidSettings =
+                  AndroidInitializationSettings('@mipmap/ic_launcher');
+              const InitializationSettings initSettings =
+                  InitializationSettings(android: androidSettings);
+
               await _localNotifications.initialize(
-                const InitializationSettings(android: androidSettings),
+                initSettings,
                 onDidReceiveNotificationResponse: (NotificationResponse response) {
+                  debugPrint('[NotificationService] Response actionId: ${response.actionId}, payload: ${response.payload}');
+
+                  // Handle Stop Focus Session action button click
                   if (response.actionId == 'STOP_FOCUS_SESSION' || response.payload == 'FOCUS_SESSION_STOP_ACTION') {
-                    onFocusStopActionClicked?.call();
-                    FocusSessionService().onStopRequested?.call();
+                    if (onFocusStopActionClicked != null) {
+                      onFocusStopActionClicked!();
+                    }
+                    final focusService = FocusSessionService();
+                    if (focusService.onStopRequested != null) {
+                      focusService.onStopRequested!();
+                    }
                     return;
                   }
-                  if (response.payload != null) onNotificationTapped?.call(response.payload!);
+
+                  if (response.payload != null && onNotificationTapped != null) {
+                    onNotificationTapped!(response.payload!);
+                  }
                 },
               );
 
+              // 3. Android High-Importance Broadcast Channel
               const AndroidNotificationChannel broadcastChannel = AndroidNotificationChannel(
                 'prepwise_broadcast_channel',
                 'PrepWise Notifications',
-                description: 'Important study updates and reminders.',
+                description: 'Important study updates, broadcasts, and reminders.',
                 importance: Importance.max,
                 playSound: true,
                 enableVibration: true,
               );
-              await _localNotifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.createNotificationChannel(broadcastChannel);
 
+              await _localNotifications
+                  .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+                  ?.createNotificationChannel(broadcastChannel);
+
+              // 4. Initialize Live Focus Session Channel
               await FocusSessionService().initializeNotificationChannel();
 
+              // 5. Get and monitor FCM Device Token
               try {
                 _fcmToken = await _fcm.getToken();
-                if (_fcmToken != null) onTokenReceived?.call(_fcmToken!);
+                debugPrint("FCM Device Token: $_fcmToken");
+                if (_fcmToken != null && onTokenReceived != null) {
+                  onTokenReceived!(_fcmToken!);
+                }
               } catch (e) {
-                debugPrint("FCM token error: $e");
+                debugPrint("Error fetching FCM token: $e");
               }
 
               _fcm.onTokenRefresh.listen((newToken) {
                 _fcmToken = newToken;
-                onTokenReceived?.call(newToken);
+                if (onTokenReceived != null) {
+                  onTokenReceived!(newToken);
+                }
               });
 
+              // 6. Handle Foreground Push Messages
               FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-                final notification = message.notification;
-                final android = message.notification?.android;
+                RemoteNotification? notification = message.notification;
+                AndroidNotification? android = message.notification?.android;
+
                 if (notification != null && android != null && !kIsWeb) {
                   _localNotifications.show(
-                    notification.hashCode, notification.title, notification.body,
-                    const NotificationDetails(android: AndroidNotificationDetails('prepwise_broadcast_channel', 'PrepWise Notifications', icon: '@mipmap/ic_launcher', importance: Importance.max, priority: Priority.high)),
+                    notification.hashCode,
+                    notification.title,
+                    notification.body,
+                    NotificationDetails(
+                      android: AndroidNotificationDetails(
+                        broadcastChannel.id,
+                        broadcastChannel.name,
+                        channelDescription: broadcastChannel.description,
+                        icon: '@mipmap/ic_launcher',
+                        importance: Importance.max,
+                        priority: Priority.high,
+                        playSound: true,
+                      ),
+                    ),
                     payload: jsonEncode(message.data),
                   );
                 }
               });
 
               FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-                if (onNotificationTapped != null) onNotificationTapped!(jsonEncode(message.data));
+                debugPrint("FCM notification opened from background: ${message.data}");
+                if (onNotificationTapped != null) {
+                  onNotificationTapped!(jsonEncode(message.data));
+                }
               });
             }
           }
@@ -810,9 +1025,9 @@ jobs:
 
               final bool accessOk = await isAccessibilityEnabled();
               if (!accessOk) {
-                AppToast.show("Please enable Usage Access for PrepWise to block apps during focus sessions.");
+                AppToast.show("Tip: Enable 'Usage Access' for PrepWise to block distracting apps during Focus Mode.");
                 await openAccessibilitySettings();
-                return;
+                // Allow the session to proceed without getting stuck
               }
 
               try {
@@ -829,10 +1044,14 @@ jobs:
 
                 await _channel.invokeMethod('setBlockedApps', {'blockedApps': blockedPackages});
                 await _channel.invokeMethod('setBlockingEnabled', {'enabled': true});
-                AppToast.show("Focus Mode Active! Non-whitelisted apps are blocked.");
+                AppToast.show("Focus Mode Active! Distractions will be redirected.");
               } catch (e) {
                 debugPrint('[AppBlockerService] Error starting blocker: $e');
               }
+            }
+
+            void onAppExitedToBackground() {
+              // Background lifecycle hook
             }
 
             List<dynamic> _parseJsonArray(String raw) {
@@ -859,15 +1078,7 @@ jobs:
               _isStrictActive = false;
               try {
                 await _channel.invokeMethod('setBlockingEnabled', {'enabled': false});
-                await _channel.invokeMethod('setBlockedApps', {'blockedApps': <String>[]});
               } catch (_) {}
-              AppToast.show("Focus session ended. Apps are unlocked.");
-            }
-
-            void onAppExitedToBackground() {
-              if (_isStrictActive) {
-                AppToast.show("Focus timer is running! Stay on PrepWise.");
-              }
             }
           }
           DART_BLOCK_EOF
@@ -1034,22 +1245,27 @@ jobs:
 
                 switch (action) {
                   case 'nativeGoogleSignIn':
-                    final result = await GoogleAuthService().signIn();
-                    if (result.success && result.idToken != null) {
-                      final idToken = result.idToken!;
-                      final accessToken = result.accessToken ?? '';
-                      await webViewController.runJavaScript("(function(){if(typeof window.onNativeGoogleSignInSuccess==='function'){window.onNativeGoogleSignInSuccess('$idToken','$accessToken');}else{window.__pendingGoogleTokens={idToken:'$idToken',accessToken:'$accessToken'};}})();");
-                    } else {
-                      final err = result.errorMessage ?? 'Google Sign-In failed';
-                      await webViewController.runJavaScript("(function(){if(typeof window.onNativeGoogleSignInError==='function'){window.onNativeGoogleSignInError('$err');}})();");
-                    }
+                    await triggerNativeGoogleSignIn();
                     break;
 
                   case 'startFocusNotification':
+                    // Request camera permission if starting Focus Mode
+                    try {
+                      final camGranted = await Permission.camera.isGranted;
+                      if (!camGranted) {
+                        await Permission.camera.request();
+                      }
+                    } catch (_) {}
+
                     final String subject = data['subject'] ?? 'General';
                     final String mode = data['mode'] ?? 'Study';
                     final int initialSeconds = data['initialSeconds'] ?? 0;
-                    await FocusSessionService().startSession(subject: subject, mode: mode, initialSeconds: initialSeconds, onStopClicked: () => triggerInAppStopConfirmation());
+                    await FocusSessionService().startSession(
+                      subject: subject,
+                      mode: mode,
+                      initialSeconds: initialSeconds,
+                      onStopClicked: () => triggerInAppStopConfirmation(),
+                    );
                     await WakelockService.enable();
                     HapticFeedback.heavyImpact();
                     break;
@@ -1084,9 +1300,13 @@ jobs:
 
                   case 'vibrate':
                     final String type = data['type'] ?? 'medium';
-                    if (type == 'heavy') HapticFeedback.heavyImpact();
-                    else if (type == 'light') HapticFeedback.lightImpact();
-                    else HapticFeedback.mediumImpact();
+                    if (type == 'heavy') {
+                      HapticFeedback.heavyImpact();
+                    } else if (type == 'light') {
+                      HapticFeedback.lightImpact();
+                    } else {
+                      HapticFeedback.mediumImpact();
+                    }
                     break;
 
                   case 'toast':
@@ -1099,10 +1319,12 @@ jobs:
                     break;
 
                   case 'requestAccessibilityPermission':
+                  case 'requestUsagePermission':
                     await AppBlockerService().openAccessibilitySettings();
                     break;
 
                   case 'checkAccessibilityEnabled':
+                  case 'checkUsagePermission':
                     final bool enabled = await AppBlockerService().isAccessibilityEnabled();
                     await webViewController.runJavaScript("(function(){if(typeof window.onAccessibilityStatus==='function'){window.onAccessibilityStatus($enabled);}})();");
                     break;
@@ -1117,6 +1339,35 @@ jobs:
                 }
               } catch (e) {
                 debugPrint("AppBridge error: $e");
+              }
+            }
+
+            Future<void> triggerNativeGoogleSignIn() async {
+              try {
+                AppToast.show("Opening 1-Tap Google Sign-In...");
+                final result = await GoogleAuthService().signIn();
+                if (result.success && result.idToken != null) {
+                  final idToken = result.idToken!;
+                  final accessToken = result.accessToken ?? '';
+                  AppToast.show("Signed in as ${result.email ?? 'Google account'}!");
+                  await webViewController.runJavaScript(
+                    "(function(){"
+                    "if(typeof window.onNativeGoogleSignInSuccess==='function'){"
+                    "  window.onNativeGoogleSignInSuccess('$idToken','$accessToken');"
+                    "}else{"
+                    "  window.__pendingGoogleTokens={idToken:'$idToken',accessToken:'$accessToken'};"
+                    "}"
+                    "})();"
+                  );
+                } else if (!result.success && result.errorMessage != null && !result.errorMessage!.contains('cancelled')) {
+                  final err = result.errorMessage!;
+                  AppToast.show("Google Sign-In: $err");
+                  await webViewController.runJavaScript(
+                    "(function(){if(typeof window.onNativeGoogleSignInError==='function'){window.onNativeGoogleSignInError('$err');}})();"
+                  );
+                }
+              } catch (e) {
+                debugPrint("triggerNativeGoogleSignIn error: $e");
               }
             }
 
@@ -1144,24 +1395,36 @@ jobs:
 
           void main() async {
             WidgetsFlutterBinding.ensureInitialized();
-            await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-            SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-              statusBarColor: Colors.transparent,
-              statusBarIconBrightness: Brightness.light,
-              systemNavigationBarColor: Color(0xFF0F172A),
-              systemNavigationBarIconBrightness: Brightness.light,
-            ));
+
+            // Lock to portrait orientation for handheld academic cockpit UX
+            await SystemChrome.setPreferredOrientations([
+              DeviceOrientation.portraitUp,
+            ]);
+
+            // Set system navigation bar and status bar colors to match PrepWise ink palette
+            SystemChrome.setSystemUIOverlayStyle(
+              const SystemUiOverlayStyle(
+                statusBarColor: Colors.transparent,
+                statusBarIconBrightness: Brightness.light,
+                systemNavigationBarColor: Color(0xFF0F172A),
+                systemNavigationBarIconBrightness: Brightness.light,
+              ),
+            );
+
+            // Initialize Firebase safely (gracefully degrades if google-services.json not yet placed)
             try {
               await Firebase.initializeApp();
               FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
             } catch (e) {
-              debugPrint("Firebase init error: $e");
+              debugPrint("Firebase not yet configured locally: $e");
             }
+
             runApp(const PrepWiseApp());
           }
 
           class PrepWiseApp extends StatelessWidget {
             const PrepWiseApp({super.key});
+
             @override
             Widget build(BuildContext context) {
               return MaterialApp(
@@ -1170,7 +1433,11 @@ jobs:
                 theme: ThemeData(
                   useMaterial3: true,
                   scaffoldBackgroundColor: const Color(0xFF0F172A),
-                  colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0D9488), brightness: Brightness.dark, surface: const Color(0xFF0F172A)),
+                  colorScheme: ColorScheme.fromSeed(
+                    seedColor: const Color(0xFF0D9488),
+                    brightness: Brightness.dark,
+                    surface: const Color(0xFF0F172A),
+                  ),
                 ),
                 home: const WebViewScreen(),
               );
@@ -1181,6 +1448,7 @@ jobs:
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_WEB_EOF' > prepwise_app/lib/screens/webview_screen.dart
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
+          import 'package:permission_handler/permission_handler.dart';
           import 'package:webview_flutter/webview_flutter.dart';
           import 'package:webview_flutter_android/webview_flutter_android.dart';
           import 'package:url_launcher/url_launcher.dart';
@@ -1214,8 +1482,23 @@ jobs:
             void initState() {
               super.initState();
               WidgetsBinding.instance.addObserver(this);
+              _requestStartupPermissions();
               _initWebView();
               _initNotifications();
+            }
+
+            Future<void> _requestStartupPermissions() async {
+              try {
+                // Prompt user for Camera, Microphone, and Notification permissions at launch
+                // so Camera Verified Focus Mode and Alerts work without background failure.
+                await [
+                  Permission.camera,
+                  Permission.microphone,
+                  Permission.notification,
+                ].request();
+              } catch (e) {
+                debugPrint("Startup permissions error: $e");
+              }
             }
 
             void _initWebView() {
@@ -1236,7 +1519,40 @@ jobs:
                   onPageStarted: (String url) => setState(() { _isLoading = true; _hasError = false; }),
                   onPageFinished: (String url) {
                     setState(() => _isLoading = false);
-                    controller.runJavaScript("(function(){if(!window.AppBridge){window.AppBridge={postMessage:function(msg){if(window.FlutterBridge){window.FlutterBridge.postMessage(typeof msg==='string'?msg:JSON.stringify(msg));}}}}})();");
+                    controller.runJavaScript("""
+                      (function(){
+                        if(!window.AppBridge){
+                          window.AppBridge = {
+                            postMessage: function(msg) {
+                              if(window.FlutterBridge) {
+                                window.FlutterBridge.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg));
+                              }
+                            }
+                          };
+                        }
+                        // Intercept Google Sign In button clicks on the web page to trigger native 1-Tap bottom sheet
+                        if(!window.__googleClickInterceptAttached){
+                          window.__googleClickInterceptAttached = true;
+                          document.addEventListener('click', function(e) {
+                            var target = e.target;
+                            while(target && target !== document.body) {
+                              if(target.tagName === 'BUTTON' || target.tagName === 'A' || target.getAttribute('role') === 'button') {
+                                var txt = (target.innerText || target.textContent || '').toLowerCase();
+                                if(txt.includes('google') || txt.includes('continue with google') || txt.includes('sign in with google')) {
+                                  if(window.AppBridge) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    window.AppBridge.postMessage(JSON.stringify({action: 'nativeGoogleSignIn'}));
+                                    return;
+                                  }
+                                }
+                              }
+                              target = target.parentElement;
+                            }
+                          }, true);
+                        }
+                      })();
+                    """);
                     final token = NotificationService().fcmToken;
                     if (token != null) _bridgeHandler.injectFCMToken(token);
                     _injectInstalledApps();
@@ -1246,14 +1562,29 @@ jobs:
                   },
                   onNavigationRequest: (NavigationRequest request) {
                     final url = request.url;
+
+                    // 1. Intercept Google OAuth / Supabase Google redirects to trigger Native 1-Tap bottom sheet
+                    if (url.contains('accounts.google.com') ||
+                        url.contains('/auth/v1/authorize?provider=google') ||
+                        url.contains('provider=google')) {
+                      _bridgeHandler.triggerNativeGoogleSignIn();
+                      return NavigationDecision.prevent;
+                    }
+
+                    // 2. Intercept non-http protocols
                     if (url.startsWith('intent://') || url.startsWith('tel:') || url.startsWith('mailto:') || url.startsWith('whatsapp:') || url.startsWith('market:')) {
                       try { launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
                       return NavigationDecision.prevent;
                     }
-                    if (url.toLowerCase().endsWith('.pdf') || url.contains('application/pdf')) {
+
+                    // 3. Intercept NCERT and other PDF downloads
+                    if (url.toLowerCase().endsWith('.pdf') ||
+                        url.contains('application/pdf') ||
+                        url.contains('ncert.nic.in/textbook/pdf')) {
                       PdfDownloadService.downloadAndOpenPdf(url);
                       return NavigationDecision.prevent;
                     }
+
                     return NavigationDecision.navigate;
                   },
                 ));
@@ -1335,12 +1666,18 @@ jobs:
                       if (_isLoading && _progress < 1.0)
                         Positioned(
                           top: 0, left: 0, right: 0,
-                          child: LinearProgressIndicator(value: _progress, backgroundColor: Colors.transparent, valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF0D9488)), minHeight: 2.5),
+                          child: LinearProgressIndicator(
+                            value: _progress,
+                            backgroundColor: Colors.transparent,
+                            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF0D9488)),
+                            minHeight: 2.5,
+                          ),
                         ),
                       if (_hasError)
                         Container(
                           color: const Color(0xFF0F172A),
-                          width: double.infinity, height: double.infinity,
+                          width: double.infinity,
+                          height: double.infinity,
                           padding: const EdgeInsets.all(24),
                           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                             const Icon(Icons.wifi_off_rounded, size: 64, color: Color(0xFFF59E0B)),
@@ -1350,7 +1687,12 @@ jobs:
                             const Text("Unable to connect to PrepWise servers. Check your internet connection.", textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
                             const SizedBox(height: 24),
                             ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF0D9488),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
                               onPressed: () { setState(() { _hasError = false; _isLoading = true; }); _controller.loadRequest(Uri.parse(appUrl)); },
                               icon: const Icon(Icons.refresh_rounded),
                               label: const Text("Retry Connection", style: TextStyle(fontWeight: FontWeight.bold)),
