@@ -20,15 +20,21 @@ declare global {
 type SubjectType = "Physics" | "Chemistry" | "Mathematics" | "Biology";
 type StudyTaskType = "theory" | "questions" | "revision";
 
-const APP_LIST = [
-  { id: "instagram", name: "Instagram", icon: "📸" },
-  { id: "youtube", name: "YouTube", icon: "▶️" },
-  { id: "whatsapp", name: "WhatsApp", icon: "💬" },
-  { id: "snapchat", name: "Snapchat", icon: "👻" },
-  { id: "telegram", name: "Telegram", icon: "✈️" },
-  { id: "games", name: "Games & Social Media", icon: "🎮" },
+interface AppItem {
+  id: string;
+  name: string;
+  icon: string;
+}
+
+const DEFAULT_APP_LIST: AppItem[] = [
   { id: "pdf_reader", name: "PDF Reader", icon: "📄" },
   { id: "calculator", name: "Calculator", icon: "🧮" },
+  { id: "youtube", name: "YouTube", icon: "▶️" },
+  { id: "whatsapp", name: "WhatsApp", icon: "💬" },
+  { id: "instagram", name: "Instagram", icon: "📸" },
+  { id: "telegram", name: "Telegram", icon: "✈️" },
+  { id: "snapchat", name: "Snapchat", icon: "👻" },
+  { id: "games", name: "Games & Social Media", icon: "🎮" },
 ];
 
 const SYNC_INTERVAL_SECONDS = 60;
@@ -59,7 +65,11 @@ export default function StudyPage() {
   const [selectedTask, setSelectedTask] = useState<StudyTaskType>("questions");
   const [strictMode, setStrictMode] = useState(true);
 
-  const [allowedApps, setAllowedApps] = useState<string[]>(["pdf_reader", "calculator"]);
+  // Allowed apps starts EMPTY (No default apps preloaded)
+  const [allowedApps, setAllowedApps] = useState<string[]>([]);
+  const [allApps, setAllApps] = useState<AppItem[]>(DEFAULT_APP_LIST);
+  const [showAppsModal, setShowAppsModal] = useState(false);
+  const [customAppName, setCustomAppName] = useState("");
   const [isNativeApp, setIsNativeApp] = useState(false);
 
   const [showPostModal, setShowPostModal] = useState(false);
@@ -134,9 +144,20 @@ export default function StudyPage() {
     }
     loadUser();
 
+    // Load any saved preference if the user had selected before
     const savedAllowed = localStorage.getItem("prepwise_allowed_apps");
     if (savedAllowed) {
-      try { setAllowedApps(JSON.parse(savedAllowed)); } catch (e) {}
+      try {
+        setAllowedApps(JSON.parse(savedAllowed));
+      } catch (e) {}
+    }
+
+    const savedCustomApps = localStorage.getItem("prepwise_custom_apps");
+    if (savedCustomApps) {
+      try {
+        const customParsed: AppItem[] = JSON.parse(savedCustomApps);
+        setAllApps([...DEFAULT_APP_LIST, ...customParsed]);
+      } catch (e) {}
     }
   }, []);
 
@@ -154,6 +175,44 @@ export default function StudyPage() {
           JSON.stringify({
             action: "startStrictTimer",
             allowedApps: updated,
+          })
+        );
+      } catch (err) {}
+    }
+  };
+
+  const handleAddCustomApp = () => {
+    const trimmed = customAppName.trim();
+    if (!trimmed) return;
+    const newId = `custom_${trimmed.toLowerCase().replace(/\s+/g, "_")}_${Date.now()}`;
+    const newApp: AppItem = { id: newId, name: trimmed, icon: "📱" };
+
+    const updatedApps = [...allApps, newApp];
+    setAllApps(updatedApps);
+    
+    // Automatically select the new app
+    const updatedAllowed = [...allowedApps, newId];
+    setAllowedApps(updatedAllowed);
+    localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updatedAllowed));
+
+    // Persist custom app list
+    const customOnly = updatedApps.filter(
+      (a) => !DEFAULT_APP_LIST.some((d) => d.id === a.id)
+    );
+    localStorage.setItem("prepwise_custom_apps", JSON.stringify(customOnly));
+
+    setCustomAppName("");
+  };
+
+  const handleBlockAll = () => {
+    setAllowedApps([]);
+    localStorage.setItem("prepwise_allowed_apps", JSON.stringify([]));
+    if (isActive && typeof window !== "undefined" && window.AppBridge) {
+      try {
+        window.AppBridge.postMessage(
+          JSON.stringify({
+            action: "startStrictTimer",
+            allowedApps: [],
           })
         );
       } catch (err) {}
@@ -244,7 +303,19 @@ export default function StudyPage() {
 
   async function startCamera(): Promise<boolean> {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      // Trigger native permission bridge if running inside Flutter app
+      if (typeof window !== "undefined" && window.AppBridge) {
+        try {
+          window.AppBridge.postMessage(
+            JSON.stringify({ action: "requestCamera" })
+          );
+        } catch (_) {}
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -252,8 +323,11 @@ export default function StudyPage() {
       }
       setCameraError(null);
       return true;
-    } catch (e) {
-      setCameraError("Camera permission denied. Verified Mode needs camera access to run.");
+    } catch (e: any) {
+      console.warn("Camera access failed:", e);
+      setCameraError(
+        "Camera permission denied. Please allow camera access in app settings for Verified Mode."
+      );
       return false;
     }
   }
@@ -646,6 +720,7 @@ export default function StudyPage() {
           </div>
         )}
 
+        {/* Main Focus Timer Card */}
         <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
           <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2 flex items-center gap-1.5">
             {isActive && verifiedMode && (
@@ -673,40 +748,162 @@ export default function StudyPage() {
           )}
         </div>
 
+        {/* Clean Allowed Apps Card with Selector Button */}
         <div className="bg-white rounded-ticket border border-ink/10 p-5 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-bold text-ink flex items-center gap-1.5">
-              <span>🛡️</span>
-              <span>Allowed Apps During Session</span>
-            </h3>
-            <span className="text-[10px] font-bold text-slate">{allowedApps.length} Allowed</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="text-xl">🛡️</span>
+              <div>
+                <h3 className="text-xs font-bold text-ink">Strict Focus App Blocker</h3>
+                <p className="text-[11px] text-slate mt-0.5">
+                  {allowedApps.length === 0
+                    ? "All apps blocked by default (Full strict mode)"
+                    : `${allowedApps.length} app${allowedApps.length > 1 ? "s" : ""} allowed during session`}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAppsModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-teal/10 hover:bg-teal/20 text-teal text-xs font-bold border border-teal/25 transition-all flex items-center gap-1.5 shrink-0 shadow-2xs"
+            >
+              <span>⚙️</span>
+              <span>{allowedApps.length === 0 ? "Select Apps" : "Edit Apps"}</span>
+            </button>
           </div>
-          <p className="text-[11px] text-slate mb-3">
-            Everything is blocked by default. Tap an app to allow it during focus sessions.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {APP_LIST.map((app) => {
-              const isAllowed = allowedApps.includes(app.id);
-              return (
-                <button
-                  key={app.id}
-                  type="button"
-                  onClick={() => toggleAppAllowed(app.id)}
-                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all ${
-                    isAllowed
-                      ? "bg-teal/10 border-teal/30 text-teal shadow-2xs"
-                      : "bg-paper/50 border-ink/10 text-slate hover:bg-paper"
-                  }`}
-                >
-                  <span>{app.icon}</span>
-                  <span className="truncate flex-1 text-left">{app.name}</span>
-                  <span className="text-[10px]">{isAllowed ? "✓" : "⛔"}</span>
-                </button>
-              );
-            })}
-          </div>
+
+          {/* Show Allowed App Badges if user has allowed any */}
+          {allowedApps.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-ink/5">
+              {allowedApps.map((id) => {
+                const app = allApps.find((a) => a.id === id) || { name: id, icon: "📱" };
+                return (
+                  <span
+                    key={id}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[11px] font-bold"
+                  >
+                    <span>{app.icon}</span>
+                    <span>{app.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleAppAllowed(id)}
+                      className="ml-0.5 text-slate/70 hover:text-ink text-[12px]"
+                      title="Remove"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-2.5 pt-2.5 border-t border-ink/5 flex items-center justify-between">
+              <span className="text-[10px] text-slate">
+                🔒 0 apps allowed • Social media, games & browsers are completely locked
+              </span>
+            </div>
+          )}
         </div>
       </main>
+
+      {/* Allowed Apps Selector Modal */}
+      {showAppsModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 max-h-[85vh] flex flex-col space-y-4 animate-in fade-in slide-in-from-bottom-5">
+            <div className="flex items-center justify-between pb-2 border-b border-ink/8">
+              <div>
+                <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
+                  <span>🛡️</span> Allowed Apps Settings
+                </h3>
+                <p className="text-[10px] text-slate">
+                  {allowedApps.length} of {allApps.length} allowed
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAppsModal(false)}
+                className="w-7 h-7 rounded-full bg-ink/5 text-xs text-ink/70 flex items-center justify-center font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] text-slate">Tap an app to Allow or Block:</p>
+              {allowedApps.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleBlockAll}
+                  className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-lg border border-rose-200"
+                >
+                  Block All (0)
+                </button>
+              )}
+            </div>
+
+            {/* Apps Grid */}
+            <div className="overflow-y-auto max-h-56 pr-1 space-y-1.5">
+              <div className="grid grid-cols-2 gap-2">
+                {allApps.map((app) => {
+                  const isAllowed = allowedApps.includes(app.id);
+                  return (
+                    <button
+                      key={app.id}
+                      type="button"
+                      onClick={() => toggleAppAllowed(app.id)}
+                      className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                        isAllowed
+                          ? "bg-teal/10 border-teal/40 text-teal shadow-2xs"
+                          : "bg-paper/40 border-ink/10 text-slate hover:bg-paper"
+                      }`}
+                    >
+                      <span className="text-base">{app.icon}</span>
+                      <span className="truncate flex-1 text-left">{app.name}</span>
+                      <span className={`text-[11px] font-black ${isAllowed ? "text-teal" : "text-rose-500"}`}>
+                        {isAllowed ? "✓" : "⛔"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Add Custom App Input */}
+            <div className="pt-2 border-t border-ink/8">
+              <label className="text-[10px] font-bold text-slate block mb-1">
+                + Allow Another App (e.g. Physics Wallah, Chrome, Notion)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={customAppName}
+                  onChange={(e) => setCustomAppName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddCustomApp()}
+                  placeholder="App name..."
+                  className="flex-1 px-3 py-2 text-xs rounded-xl border border-ink/15 focus:border-teal outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCustomApp}
+                  disabled={!customAppName.trim()}
+                  className="px-3 py-2 bg-teal text-white rounded-xl text-xs font-bold disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {/* Done Button */}
+            <button
+              type="button"
+              onClick={() => setShowAppsModal(false)}
+              className="w-full py-3 rounded-xl bg-ink text-white font-bold text-xs shadow-md"
+            >
+              Done ({allowedApps.length} Allowed)
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Pre-Session Modal */}
       {showPreModal && (
