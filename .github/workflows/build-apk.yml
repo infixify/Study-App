@@ -29,20 +29,21 @@ jobs:
 
       - name: Create Flutter App
         run: |
-          flutter create --org com.prepwise --project-name prepwise prepwise_app
+          flutter create --platforms=android --org com.prepwise --project-name prepwise prepwise_app
           cd prepwise_app
           flutter pub add \
             webview_flutter \
             webview_flutter_android \
-            wakelock_plus \
+            "wakelock_plus:^1.2.8" \
             url_launcher \
             permission_handler \
             firebase_core \
             firebase_messaging \
-            flutter_local_notifications
+            "flutter_local_notifications:^17.2.4"
           echo "" >> pubspec.yaml
           echo "dependency_overrides:" >> pubspec.yaml
           echo "  permission_handler_android: 12.0.13" >> pubspec.yaml
+          echo "  flutter_local_notifications: 17.2.4" >> pubspec.yaml
           flutter pub get
 
       - name: Inject google-services.json
@@ -55,6 +56,8 @@ jobs:
         run: |
           cd prepwise_app
           cat << 'PY_SCRIPT' > update_manifest.py
+          import xml.etree.ElementTree as ET
+
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           with open(manifest_path, "r", encoding="utf-8") as f:
               content = f.read()
@@ -86,6 +89,7 @@ jobs:
 
           content = content.replace("<application", permissions + "    <application", 1)
           content = content.replace("</application>", fcm_service + "    </application>", 1)
+          ET.fromstring(content)
 
           with open(manifest_path, "w", encoding="utf-8") as f:
               f.write(content)
@@ -99,64 +103,74 @@ jobs:
       - name: Add google-services Gradle plugin
         run: |
           cd prepwise_app
-          SETTINGS_KTS="android/settings.gradle.kts"
-          SETTINGS_GROOVY="android/settings.gradle"
-          APP_KTS="android/app/build.gradle.kts"
-          APP_GROOVY="android/app/build.gradle"
+          cat << 'PY_GRADLE' > update_gradle.py
+          import os, re
 
-          if [ -f "$SETTINGS_KTS" ]; then
-            python3 - << 'PYEOF'
-          path = "android/settings.gradle.kts"
-          with open(path, "r") as f:
-              content = f.read()
-          plugin_line = '    id("com.google.gms.google-services") version "4.4.1" apply false'
-          if "com.google.gms.google-services" not in content:
-              if "plugins {" in content:
-                  content = content.replace("plugins {", "plugins {\n" + plugin_line, 1)
-              else:
-                  content = 'plugins {\n' + plugin_line + '\n}\n' + content
-          with open(path, "w") as f:
-              f.write(content)
-          print("settings.gradle.kts updated")
-          PYEOF
+          # 1. Update settings.gradle.kts or settings.gradle
+          if os.path.exists("android/settings.gradle.kts"):
+              with open("android/settings.gradle.kts", "r") as f:
+                  s = f.read()
+              plugin_line = '    id("com.google.gms.google-services") version "4.4.1" apply false\n'
+              if "com.google.gms.google-services" not in s:
+                  if "plugins {" in s:
+                      s = s.replace("plugins {", "plugins {\n" + plugin_line, 1)
+                  else:
+                      s = "plugins {\n" + plugin_line + "}\n" + s
+              with open("android/settings.gradle.kts", "w") as f:
+                  f.write(s)
+              print("settings.gradle.kts patched")
+          elif os.path.exists("android/settings.gradle"):
+              with open("android/settings.gradle", "r") as f:
+                  s = f.read()
+              plugin_line = "    id 'com.google.gms.google-services' version '4.4.1' apply false\n"
+              if "com.google.gms.google-services" not in s and "plugins {" in s:
+                  s = s.replace("plugins {", "plugins {\n" + plugin_line, 1)
+              with open("android/settings.gradle", "w") as f:
+                  f.write(s)
+              print("settings.gradle patched")
 
-            python3 - << 'PYEOF'
-          path = "android/app/build.gradle.kts"
-          with open(path, "r") as f:
-              content = f.read()
-          plugin_line = '    id("com.google.gms.google-services")'
-          if "com.google.gms.google-services" not in content:
-              if "plugins {" in content:
-                  content = content.replace("plugins {", "plugins {\n" + plugin_line, 1)
-              else:
-                  content = 'plugins {\n' + plugin_line + '\n}\n' + content
-          with open(path, "w") as f:
-              f.write(content)
-          print("app/build.gradle.kts updated")
-          PYEOF
+          # 2. Update app/build.gradle.kts or app/build.gradle
+          if os.path.exists("android/app/build.gradle.kts"):
+              with open("android/app/build.gradle.kts", "r") as f:
+                  a = f.read()
+              app_plugin = '    id("com.google.gms.google-services")\n'
+              if "com.google.gms.google-services" not in a:
+                  m = re.search(r'plugins\s*\{([^}]*)\}', a)
+                  if m:
+                      a = a[:m.end()-1] + app_plugin + a[m.end()-1:]
+                  elif "plugins {" in a:
+                      a = a.replace("plugins {", "plugins {\n" + app_plugin, 1)
 
-          elif [ -f "$SETTINGS_GROOVY" ]; then
-            python3 - << 'PYEOF'
-          path = "android/settings.gradle"
-          with open(path, "r") as f:
-              content = f.read()
-          plugin_line = "    id 'com.google.gms.google-services' version '4.4.1' apply false"
-          if "com.google.gms.google-services" not in content:
-              if "plugins {" in content:
-                  content = content.replace("plugins {", "plugins {\n" + plugin_line, 1)
-          with open(path, "w") as f:
-              f.write(content)
-          print("settings.gradle updated")
-          PYEOF
+              if "isCoreLibraryDesugaringEnabled" not in a:
+                  a = a.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true")
 
-            echo "" >> "$APP_GROOVY"
-            echo "apply plugin: 'com.google.gms.google-services'" >> "$APP_GROOVY"
-          fi
+              if "coreLibraryDesugaring" not in a:
+                  a += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
 
+              a = a.replace("minSdk = flutter.minSdkVersion", "minSdk = 21")
+              a = a.replace("minSdkVersion = flutter.minSdkVersion", "minSdkVersion = 21")
+              with open("android/app/build.gradle.kts", "w") as f:
+                  f.write(a)
+              print("app/build.gradle.kts patched")
+          elif os.path.exists("android/app/build.gradle"):
+              with open("android/app/build.gradle", "r") as f:
+                  a = f.read()
+              if "apply plugin: 'com.google.gms.google-services'" not in a:
+                  a += "\napply plugin: 'com.google.gms.google-services'\n"
+              if "coreLibraryDesugaringEnabled" not in a:
+                  a = a.replace("compileOptions {", "compileOptions {\n        coreLibraryDesugaringEnabled true")
+              if "coreLibraryDesugaring" not in a:
+                  a += "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
+              a = a.replace("minSdkVersion flutter.minSdkVersion", "minSdkVersion 21")
+              with open("android/app/build.gradle", "w") as f:
+                  f.write(a)
+              print("app/build.gradle patched")
+          PY_GRADLE
+          python3 update_gradle.py
           echo "=== settings.gradle.kts first 30 lines ==="
           head -30 android/settings.gradle.kts 2>/dev/null || head -30 android/settings.gradle 2>/dev/null
-          echo "=== app/build.gradle.kts first 20 lines ==="
-          head -20 android/app/build.gradle.kts 2>/dev/null || true
+          echo "=== app/build.gradle.kts ==="
+          cat android/app/build.gradle.kts 2>/dev/null || head -30 android/app/build.gradle 2>/dev/null
 
       - name: Write notification_service.dart
         run: |
