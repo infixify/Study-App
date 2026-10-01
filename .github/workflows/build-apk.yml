@@ -31,7 +31,7 @@ jobs:
         run: |
           flutter create --org com.prepwise --project-name prepwise prepwise_app
           cd prepwise_app
-          flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler flutter_custom_tabs installed_apps
+          flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler flutter_custom_tabs device_apps
           echo "" >> pubspec.yaml
           echo "dependency_overrides:" >> pubspec.yaml
           echo "  permission_handler_android: 12.0.13" >> pubspec.yaml
@@ -102,8 +102,7 @@ jobs:
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
           import 'package:flutter_custom_tabs/flutter_custom_tabs.dart' as custom_tabs;
-          import 'package:installed_apps/installed_apps.dart';
-          import 'package:installed_apps/app_info.dart';
+          import 'package:device_apps/device_apps.dart';
 
           void main() async {
             WidgetsFlutterBinding.ensureInitialized();
@@ -171,10 +170,14 @@ jobs:
 
             Future<void> _injectInstalledApps() async {
               try {
-                List<AppInfo> apps = await InstalledApps.getInstalledApps(true, true);
+                List<Application> apps = await DeviceApps.getInstalledApplications(
+                  includeSystemApps: false,
+                  includeAppIcons: false,
+                  onlyAppsWithLaunchIntent: true,
+                );
                 List<Map<String, String>> appList = apps.map((app) => {
-                  'name': app.name ?? '',
-                  'packageName': app.packageName ?? '',
+                  'name': app.appName,
+                  'packageName': app.packageName,
                 }).toList();
                 final jsonStr = jsonEncode(appList);
                 final escaped = jsonStr.replaceAll("'", "\\'");
