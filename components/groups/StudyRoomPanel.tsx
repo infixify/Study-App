@@ -32,6 +32,13 @@ export default function StudyRoomPanel({ groupId, userId, displayName }: StudyRo
   const channelRef = useRef<any>(null);
   const joinedRef = useRef(false);
 
+  // FIX #4: Attach local stream to video element whenever both are ready
+  useEffect(() => {
+    if (joined && localStreamRef.current && localVideoRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+    }
+  }, [joined]);
+
   function createPeerConnection(remoteId: string, remoteName: string) {
     const pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
 
@@ -71,7 +78,10 @@ export default function StudyRoomPanel({ groupId, userId, displayName }: StudyRo
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localStreamRef.current = stream;
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      // FIX #4: attach immediately if ref is already mounted
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
     } catch (e) {
       setError("Couldn't access camera/mic. Check your browser permissions.");
       return;
@@ -159,6 +169,10 @@ export default function StudyRoomPanel({ groupId, userId, displayName }: StudyRo
           payload: { id: userId, name: displayName },
         });
         setJoined(true);
+        // FIX #4: also set here in case video ref mounted after stream acquired but before joined=true
+        if (localVideoRef.current && localStreamRef.current) {
+          localVideoRef.current.srcObject = localStreamRef.current;
+        }
       }
     });
   }
