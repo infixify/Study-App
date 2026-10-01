@@ -1,3 +1,4 @@
+// app/onboarding/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -49,6 +50,30 @@ export default function OnboardingPage() {
   }
 
   useEffect(() => {
+    // 1-Tap Native Google Sign-In Listener from Android Flutter Bridge
+    if (typeof window !== "undefined") {
+      (window as any).onNativeGoogleSignInSuccess = async (idToken: string, accessToken: string) => {
+        try {
+          const { data: authData, error } = await supabase.auth.signInWithIdToken({
+            provider: "google",
+            token: idToken,
+            access_token: accessToken || undefined,
+          });
+
+          if (!error && authData?.user) {
+            const name =
+              authData.user.user_metadata?.full_name ||
+              authData.user.user_metadata?.name ||
+              authData.user.email ||
+              "there";
+            await goToStep2IfNotOnboarded(authData.user.id, name);
+          }
+        } catch (err) {
+          console.error("[NativeAuth] Sign-in error:", err);
+        }
+      };
+    }
+
     async function checkSession() {
       const { data: sessionData } = await supabase.auth.getUser();
       if (sessionData?.user) {
@@ -86,7 +111,7 @@ export default function OnboardingPage() {
     const result = await saveOnboarding(finalData);
     if (!result.success) {
       setSaveError(result.error || "Something went wrong while saving your profile.");
-      return; // stay on this screen so the user can see the error and retry
+      return;
     }
     router.push("/dashboard");
   }
