@@ -31,7 +31,7 @@ jobs:
         run: |
           flutter create --org com.prepwise --project-name prepwise prepwise_app
           cd prepwise_app
-          flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler
+          flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler flutter_custom_tabs installed_apps
           echo "" >> pubspec.yaml
           echo "dependency_overrides:" >> pubspec.yaml
           echo "  permission_handler_android: 12.0.13" >> pubspec.yaml
@@ -56,13 +56,29 @@ jobs:
               <uses-permission android:name="android.permission.RECORD_AUDIO"/>
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission"/>
               <uses-feature android:name="android.hardware.camera" android:required="false" />
               <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
               <uses-feature android:name="android.hardware.microphone" android:required="false" />
           """
 
           content = content.replace("<application", permissions + "    <application", 1)
-          ET.fromstring(content)
+
+          queries_block = """
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.VIEW" />
+                      <data android:scheme="https" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.intent.action.VIEW" />
+                      <data android:scheme="http" />
+                  </intent>
+              </queries>
+          """
+          content = content.replace("</manifest>", queries_block + "\n</manifest>")
+
+          ET.fromstring(content.replace('tools:ignore="QueryAllPackagesPermission"', ''))
 
           with open(manifest_path, "w", encoding="utf-8") as f:
               f.write(content)
@@ -77,6 +93,7 @@ jobs:
         run: |
           cd prepwise_app
           cat << 'EOF' > lib/main.dart
+          import 'dart:convert';
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:webview_flutter/webview_flutter.dart';
@@ -84,6 +101,9 @@ jobs:
           import 'package:wakelock_plus/wakelock_plus.dart';
           import 'package:url_launcher/url_launcher.dart';
           import 'package:permission_handler/permission_handler.dart';
+          import 'package:flutter_custom_tabs/flutter_custom_tabs.dart' as custom_tabs;
+          import 'package:installed_apps/installed_apps.dart';
+          import 'package:installed_apps/app_info.dart';
 
           void main() async {
             WidgetsFlutterBinding.ensureInitialized();
@@ -91,6 +111,14 @@ jobs:
               DeviceOrientation.portraitUp,
               DeviceOrientation.portraitDown,
             ]);
+            SystemChrome.setSystemUIOverlayStyle(
+              const SystemUiOverlayStyle(
+                statusBarColor: Colors.transparent,
+                statusBarIconBrightness: Brightness.light,
+                systemNavigationBarColor: Color(0xFF0F172A),
+                systemNavigationBarIconBrightness: Brightness.light,
+              ),
+            );
             runApp(const PrepWiseApp());
           }
 
@@ -137,7 +165,25 @@ jobs:
                   Permission.microphone,
                 ].request();
               } catch (e) {
-                debugPrint('Permission error: $e');
+                debugPrint('Permission error: \$e');
+              }
+            }
+
+            Future<void> _injectInstalledApps() async {
+              try {
+                List<AppInfo> apps = await InstalledApps.getInstalledApps(true, true);
+                List<Map<String, String>> appList = apps.map((app) => {
+                  'name': app.name ?? '',
+                  'packageName': app.packageName ?? '',
+                }).toList();
+                final jsonStr = jsonEncode(appList);
+                final escaped = jsonStr.replaceAll("'", "\\'");
+                await _controller.runJavaScript(
+                  "window.__nativeInstalledApps = JSON.parse('$escaped'); "
+                  "if (window.onInstalledAppsReady) window.onInstalledAppsReady(window.__nativeInstalledApps);"
+                );
+              } catch (e) {
+                debugPrint('InstalledApps error: \$e');
               }
             }
 
@@ -172,16 +218,41 @@ jobs:
                           };
                         }
                       ''');
+                      _injectInstalledApps();
                     },
                     onNavigationRequest: (request) {
                       final url = request.url;
-                      if (url.startsWith('intent://') || url.startsWith('tel:') || url.startsWith('mailto:')) {
+                      if (url.startsWith('intent://') ||
+                          url.startsWith('tel:') ||
+                          url.startsWith('mailto:') ||
+                          url.startsWith('whatsapp:') ||
+                          url.startsWith('market:')) {
                         try {
                           launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                         } catch (_) {}
                         return NavigationDecision.prevent;
                       }
-                      if (url.endsWith('.pdf')) {
+                      if (url.contains('accounts.google.com') ||
+                          url.contains('oauth') ||
+                          url.contains('auth/callback') ||
+                          url.contains('signin')) {
+                        try {
+                          custom_tabs.launchUrl(
+                            Uri.parse(url),
+                            customTabsOptions: custom_tabs.CustomTabsOptions(
+                              colorSchemes: custom_tabs.CustomTabsColorSchemes.defaults(
+                                toolbarColor: const Color(0xFF0F172A),
+                              ),
+                              shareState: custom_tabs.CustomTabsShareState.off,
+                              showTitle: true,
+                            ),
+                          );
+                        } catch (_) {
+                          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                        }
+                        return NavigationDecision.prevent;
+                      }
+                      if (url.endsWith('.pdf') || url.contains('/pdf/') || url.contains('type=pdf')) {
                         launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                         return NavigationDecision.prevent;
                       }
@@ -193,19 +264,51 @@ jobs:
                   'FlutterBridge',
                   onMessageReceived: (JavaScriptMessage message) async {
                     try {
-                      if (message.message.contains('startStrictTimer')) {
+                      final data = jsonDecode(message.message) as Map<String, dynamic>;
+                      final action = data['action'] as String? ?? '';
+                      if (action == 'startStrictTimer') {
                         WakelockPlus.enable();
                         HapticFeedback.heavyImpact();
-                      } else if (message.message.contains('stopStrictTimer')) {
+                      } else if (action == 'stopStrictTimer') {
                         WakelockPlus.disable();
                         HapticFeedback.vibrate();
-                      } else if (message.message.contains('vibrate')) {
-                        HapticFeedback.mediumImpact();
-                      } else if (message.message.contains('requestCamera') || message.message.contains('requestPermissions')) {
+                      } else if (action == 'vibrate') {
+                        final type = data['type'] as String? ?? 'medium';
+                        if (type == 'heavy') {
+                          HapticFeedback.heavyImpact();
+                        } else if (type == 'light') {
+                          HapticFeedback.lightImpact();
+                        } else {
+                          HapticFeedback.mediumImpact();
+                        }
+                      } else if (action == 'downloadPdf') {
+                        final pdfUrl = data['url'] as String? ?? '';
+                        if (pdfUrl.isNotEmpty) {
+                          launchUrl(Uri.parse(pdfUrl), mode: LaunchMode.externalApplication);
+                        }
+                      } else if (action == 'openUrl') {
+                        final targetUrl = data['url'] as String? ?? '';
+                        if (targetUrl.isNotEmpty) {
+                          try {
+                            custom_tabs.launchUrl(
+                              Uri.parse(targetUrl),
+                              customTabsOptions: custom_tabs.CustomTabsOptions(
+                                colorSchemes: custom_tabs.CustomTabsColorSchemes.defaults(
+                                  toolbarColor: const Color(0xFF0F172A),
+                                ),
+                              ),
+                            );
+                          } catch (_) {
+                            launchUrl(Uri.parse(targetUrl), mode: LaunchMode.externalApplication);
+                          }
+                        }
+                      } else if (action == 'requestCamera' || action == 'requestPermissions') {
                         await [Permission.camera, Permission.microphone].request();
+                      } else if (action == 'getInstalledApps') {
+                        await _injectInstalledApps();
                       }
                     } catch (e) {
-                      debugPrint('Bridge error: $e');
+                      debugPrint('Bridge error: \$e');
                     }
                   },
                 );
