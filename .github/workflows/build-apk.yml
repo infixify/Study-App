@@ -59,21 +59,21 @@ jobs:
 
           raw_json = os.environ.get("GOOGLE_SERVICES_JSON", "").strip()
           if not raw_json:
-              print("::error::GitHub Secret GOOGLE_SERVICES_JSON is empty or missing! Please add it in Repo Settings -> Secrets -> Actions.")
+              print("::error::GitHub Secret GOOGLE_SERVICES_JSON is empty or missing!")
               sys.exit(1)
 
           try:
               parsed = json.loads(raw_json)
               print("google-services.json is valid JSON!")
           except Exception as e:
-              print(f"::error::GOOGLE_SERVICES_JSON is not valid JSON! Error: {e}")
+              print(f"::error::GOOGLE_SERVICES_JSON is not valid JSON: {e}")
               sys.exit(1)
 
           target_path = "prepwise_app/android/app/google-services.json"
           os.makedirs(os.path.dirname(target_path), exist_ok=True)
           with open(target_path, "w", encoding="utf-8") as f:
               json.dump(parsed, f, indent=2)
-          print(f"Successfully saved valid {target_path} ({os.path.getsize(target_path)} bytes)")
+          print(f"Saved {target_path} ({os.path.getsize(target_path)} bytes)")
           JSON_EOF
 
       - name: Configure Android Manifest and Permissions
@@ -94,13 +94,17 @@ jobs:
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
               <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
+              <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+              <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" tools:ignore="ProtectedPermissions"/>
               <uses-feature android:name="android.hardware.camera" android:required="false" />
               <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
               <uses-feature android:name="android.hardware.microphone" android:required="false" />
           """
 
-          fcm_service = """
+          fcm_and_services = """
                   <service
                       android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingBackgroundService"
                       android:permission="android.permission.BIND_JOB_SERVICE"
@@ -112,13 +116,25 @@ jobs:
                           <action android:name="com.google.firebase.MESSAGING_EVENT" />
                       </intent-filter>
                   </service>
+                  <service
+                      android:name=".PrepWiseAccessibilityService"
+                      android:exported="true"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+                      android:label="PrepWise Focus Guard">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_service_config" />
+                  </service>
           """
 
           if "android.permission.INTERNET" not in content:
               content = content.replace("<application", permissions + "\n    <application", 1)
 
           if "FlutterFirebaseMessagingBackgroundService" not in content:
-              content = content.replace("</application>", fcm_service + "\n    </application>")
+              content = content.replace("</application>", fcm_and_services + "\n    </application>")
 
           with open(manifest_path, "w", encoding="utf-8") as f:
               f.write(content)
@@ -131,7 +147,6 @@ jobs:
           cat << 'PY_GRADLE' > update_gradle.py
           import re, os
 
-          # 1. Update settings.gradle.kts or settings.gradle
           if os.path.exists("android/settings.gradle.kts"):
               with open("android/settings.gradle.kts", "r") as f:
                   s = f.read()
@@ -140,7 +155,6 @@ jobs:
                   s = s.replace("plugins {", "plugins {\n" + plugin_line, 1)
               with open("android/settings.gradle.kts", "w") as f:
                   f.write(s)
-              print("settings.gradle.kts patched")
           elif os.path.exists("android/settings.gradle"):
               with open("android/settings.gradle", "r") as f:
                   s = f.read()
@@ -149,9 +163,7 @@ jobs:
                   s = s.replace("plugins {", "plugins {\n" + plugin_line, 1)
               with open("android/settings.gradle", "w") as f:
                   f.write(s)
-              print("settings.gradle patched")
 
-          # 2. Update app/build.gradle.kts or app/build.gradle
           if os.path.exists("android/app/build.gradle.kts"):
               with open("android/app/build.gradle.kts", "r") as f:
                   a = f.read()
@@ -162,13 +174,10 @@ jobs:
                       a = a[:m.end()-1] + app_plugin + a[m.end()-1:]
                   elif "plugins {" in a:
                       a = a.replace("plugins {", "plugins {\n" + app_plugin, 1)
-
               if "isCoreLibraryDesugaringEnabled" not in a:
                   a = a.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true")
-
               if "coreLibraryDesugaring" not in a:
                   a += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
-
               a = a.replace("minSdk = flutter.minSdkVersion", "minSdk = 21")
               a = a.replace("minSdkVersion = flutter.minSdkVersion", "minSdkVersion = 21")
               a = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', a)
@@ -177,7 +186,6 @@ jobs:
               a = re.sub(r'targetSdkVersion\s*=\s*flutter\.targetSdkVersion', 'targetSdkVersion = 34', a)
               with open("android/app/build.gradle.kts", "w") as f:
                   f.write(a)
-              print("app/build.gradle.kts patched")
           elif os.path.exists("android/app/build.gradle"):
               with open("android/app/build.gradle", "r") as f:
                   a = f.read()
@@ -192,9 +200,7 @@ jobs:
               a = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 34', a)
               with open("android/app/build.gradle", "w") as f:
                   f.write(a)
-              print("app/build.gradle patched")
 
-          # 3. Patch root android/build.gradle.kts or android/build.gradle to force subprojects compileSdk 36
           if os.path.exists("android/build.gradle.kts"):
               with open("android/build.gradle.kts", "r") as f:
                   b = f.read()
@@ -220,7 +226,6 @@ jobs:
                   b += fix_kts
                   with open("android/build.gradle.kts", "w") as f:
                       f.write(b)
-                  print("android/build.gradle.kts patched with compileSdk 36 override")
 
           if os.path.exists("android/build.gradle"):
               with open("android/build.gradle", "r") as f:
@@ -241,22 +246,252 @@ jobs:
                   b += fix_groovy
                   with open("android/build.gradle", "w") as f:
                       f.write(b)
-                  print("android/build.gradle patched with compileSdk 36 override")
 
-          # 4. Suppress unsupported compileSdk warnings in gradle.properties
           prop_path = "android/gradle.properties"
           if os.path.exists(prop_path):
               with open(prop_path, "a") as f:
                   f.write("\nandroid.useAndroidX=true\nandroid.enableJetifier=true\nandroid.suppressUnsupportedCompileSdk=34,35,36,37\n")
+          print("Gradle patching done.")
           PY_GRADLE
           python3 update_gradle.py
 
-      - name: Write Services and Widgets
+      - name: Write Accessibility Service Config XML
+        run: |
+          mkdir -p prepwise_app/android/app/src/main/res/xml
+          cat << 'EOF' > prepwise_app/android/app/src/main/res/xml/accessibility_service_config.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+              android:accessibilityFeedbackType="feedbackAllMask"
+              android:accessibilityFlags="flagDefault"
+              android:canRetrieveWindowContent="false"
+              android:description="@string/accessibility_service_description"
+              android:notificationTimeout="100"
+              android:packageNames="" />
+          EOF
+
+          mkdir -p prepwise_app/android/app/src/main/res/values
+          python3 - << 'PY_STRINGS'
+          import os
+          path = "prepwise_app/android/app/src/main/res/values/strings.xml"
+          if os.path.exists(path):
+              with open(path, "r") as f:
+                  content = f.read()
+              if "accessibility_service_description" not in content:
+                  content = content.replace("</resources>",
+                      '    <string name="accessibility_service_description">PrepWise Focus Guard monitors foreground apps during focus sessions to block distractions.</string>\n</resources>')
+                  with open(path, "w") as f:
+                      f.write(content)
+          else:
+              with open(path, "w") as f:
+                  f.write('<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="app_name">PrepWise</string>\n    <string name="accessibility_service_description">PrepWise Focus Guard monitors foreground apps during focus sessions to block distractions.</string>\n</resources>\n')
+          print("strings.xml updated.")
+          PY_STRINGS
+
+      - name: Write Native Kotlin Files
+        run: |
+          mkdir -p prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise
+
+          cat << 'EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/MainActivity.kt
+          package com.prepwise.prepwise
+
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Build
+          import android.provider.Settings
+          import android.widget.Toast
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          import org.json.JSONArray
+          import org.json.JSONObject
+
+          class MainActivity : FlutterActivity() {
+              private val CHANNEL_APPS = "com.prepwise/apps"
+              private val CHANNEL_TOAST = "com.prepwise/toast"
+              private val CHANNEL_OVERLAY = "com.prepwise/overlay"
+              private val CHANNEL_ACCESSIBILITY = "com.prepwise/accessibility"
+
+              override fun onNewIntent(intent: Intent) {
+                  super.onNewIntent(intent)
+                  setIntent(intent)
+              }
+
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST).setMethodCallHandler { call, result ->
+                      if (call.method == "showToast") {
+                          val msg = call.argument<String>("message") ?: ""
+                          Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+                          result.success(true)
+                      } else {
+                          result.notImplemented()
+                      }
+                  }
+
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_APPS).setMethodCallHandler { call, result ->
+                      if (call.method == "getInstalledApps") {
+                          try {
+                              val pm = packageManager
+                              val intent = Intent(Intent.ACTION_MAIN, null)
+                              intent.addCategory(Intent.CATEGORY_LAUNCHER)
+                              val apps = pm.queryIntentActivities(intent, 0)
+                              val jsonArray = JSONArray()
+                              for (app in apps) {
+                                  val obj = JSONObject()
+                                  obj.put("name", app.loadLabel(pm).toString())
+                                  obj.put("packageName", app.activityInfo.packageName)
+                                  jsonArray.put(obj)
+                              }
+                              result.success(jsonArray.toString())
+                          } catch (e: Exception) {
+                              result.error("APPS_ERROR", e.message, null)
+                          }
+                      } else {
+                          result.notImplemented()
+                      }
+                  }
+
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_OVERLAY).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "canDrawOverlays" -> {
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                  result.success(Settings.canDrawOverlays(this))
+                              } else {
+                                  result.success(true)
+                              }
+                          }
+                          "requestOverlayPermission" -> {
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                  if (!Settings.canDrawOverlays(this)) {
+                                      val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                                      startActivity(intent)
+                                  }
+                              }
+                              result.success(true)
+                          }
+                          else -> result.notImplemented()
+                      }
+                  }
+
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_ACCESSIBILITY).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "isAccessibilityEnabled" -> {
+                              val enabled = PrepWiseAccessibilityService.isServiceEnabled(this)
+                              result.success(enabled)
+                          }
+                          "openAccessibilitySettings" -> {
+                              startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                              result.success(true)
+                          }
+                          "setBlockedApps" -> {
+                              val apps = call.argument<List<String>>("blockedApps") ?: emptyList()
+                              PrepWiseAccessibilityService.setBlockedApps(apps)
+                              result.success(true)
+                          }
+                          "setBlockingEnabled" -> {
+                              val enabled = call.argument<Boolean>("enabled") ?: false
+                              PrepWiseAccessibilityService.setBlockingEnabled(enabled)
+                              result.success(true)
+                          }
+                          else -> result.notImplemented()
+                      }
+                  }
+              }
+          }
+          EOF
+
+          cat << 'EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/PrepWiseAccessibilityService.kt
+          package com.prepwise.prepwise
+
+          import android.accessibilityservice.AccessibilityService
+          import android.content.Context
+          import android.content.Intent
+          import android.view.accessibility.AccessibilityEvent
+
+          class PrepWiseAccessibilityService : AccessibilityService() {
+
+              companion object {
+                  private var blockedApps: List<String> = emptyList()
+                  private var blockingEnabled: Boolean = false
+                  private const val OUR_PACKAGE = "com.prepwise.prepwise"
+
+                  fun setBlockedApps(apps: List<String>) {
+                      blockedApps = apps
+                  }
+
+                  fun setBlockingEnabled(enabled: Boolean) {
+                      blockingEnabled = enabled
+                  }
+
+                  fun isServiceEnabled(context: Context): Boolean {
+                      val serviceName = "$OUR_PACKAGE/.PrepWiseAccessibilityService"
+                      val enabledServices = android.provider.Settings.Secure.getString(
+                          context.contentResolver,
+                          android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+                      ) ?: return false
+                      return enabledServices.contains(serviceName)
+                  }
+              }
+
+              override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+                  if (!blockingEnabled) return
+                  if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+
+                  val packageName = event.packageName?.toString() ?: return
+
+                  if (packageName == OUR_PACKAGE) return
+                  if (packageName == "com.android.systemui") return
+                  if (packageName == "com.android.launcher" || packageName.contains("launcher")) return
+
+                  val isBlocked = blockedApps.isNotEmpty() && blockedApps.contains(packageName)
+                  if (isBlocked) {
+                      val launchIntent = packageManager.getLaunchIntentForPackage(OUR_PACKAGE)
+                      if (launchIntent != null) {
+                          launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                          startActivity(launchIntent)
+                      }
+                  }
+              }
+
+              override fun onInterrupt() {}
+          }
+          EOF
+
+      - name: Write Dart Services and Widgets
         run: |
           mkdir -p prepwise_app/lib/services
           mkdir -p prepwise_app/lib/widgets
+          mkdir -p prepwise_app/lib/bridge
+          mkdir -p prepwise_app/lib/screens
 
-          # 1. Google Auth Service
+          cat << 'EOF' > prepwise_app/lib/services/app_toast.dart
+          import 'package:flutter/services.dart';
+
+          class AppToast {
+            static const _channel = MethodChannel('com.prepwise/toast');
+            static void show(String message) {
+              try {
+                _channel.invokeMethod('showToast', {'message': message});
+              } catch (_) {}
+            }
+          }
+          EOF
+
+          cat << 'EOF' > prepwise_app/lib/services/wakelock_service.dart
+          import 'package:wakelock_plus/wakelock_plus.dart';
+
+          class WakelockService {
+            static Future<void> enable() async {
+              try { await WakelockPlus.enable(); } catch (_) {}
+            }
+            static Future<void> disable() async {
+              try { await WakelockPlus.disable(); } catch (_) {}
+            }
+          }
+          EOF
+
           cat << 'EOF' > prepwise_app/lib/services/google_auth_service.dart
           import 'package:flutter/foundation.dart';
           import 'package:google_sign_in/google_sign_in.dart';
@@ -268,15 +503,7 @@ jobs:
             final String? email;
             final String? displayName;
             final String? errorMessage;
-
-            GoogleAuthResult({
-              required this.success,
-              this.idToken,
-              this.accessToken,
-              this.email,
-              this.displayName,
-              this.errorMessage,
-            });
+            GoogleAuthResult({required this.success, this.idToken, this.accessToken, this.email, this.displayName, this.errorMessage});
           }
 
           class GoogleAuthService {
@@ -284,26 +511,17 @@ jobs:
             factory GoogleAuthService() => _instance;
             GoogleAuthService._internal();
 
-            final GoogleSignIn _googleSignIn = GoogleSignIn(
-              scopes: ['email', 'profile', 'openid'],
-            );
+            final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email', 'profile', 'openid']);
 
             Future<GoogleAuthResult> signIn() async {
               try {
-                debugPrint('[GoogleAuthService] Launching 1-Tap Google Account Picker...');
                 await _googleSignIn.signOut();
                 final GoogleSignInAccount? account = await _googleSignIn.signIn();
                 if (account == null) {
-                  return GoogleAuthResult(success: false, errorMessage: 'User cancelled Google Sign-In');
+                  return GoogleAuthResult(success: false, errorMessage: 'User cancelled');
                 }
                 final GoogleSignInAuthentication auth = await account.authentication;
-                return GoogleAuthResult(
-                  success: true,
-                  idToken: auth.idToken,
-                  accessToken: auth.accessToken,
-                  email: account.email,
-                  displayName: account.displayName,
-                );
+                return GoogleAuthResult(success: true, idToken: auth.idToken, accessToken: auth.accessToken, email: account.email, displayName: account.displayName);
               } catch (e) {
                 debugPrint('[GoogleAuthService] Error: $e');
                 return GoogleAuthResult(success: false, errorMessage: e.toString());
@@ -312,7 +530,6 @@ jobs:
           }
           EOF
 
-          # 2. Focus Session Service
           cat << 'EOF' > prepwise_app/lib/services/focus_session_service.dart
           import 'dart:async';
           import 'package:flutter/foundation.dart';
@@ -358,31 +575,20 @@ jobs:
                   ?.createNotificationChannel(channel);
             }
 
-            Future<void> startSession({
-              required String subject,
-              required String mode,
-              int? initialSeconds,
-              Function()? onStopClicked,
-            }) async {
+            Future<void> startSession({required String subject, required String mode, int? initialSeconds, Function()? onStopClicked}) async {
               _isSessionActive = true;
               _subject = subject.isNotEmpty ? subject : 'General';
               _mode = mode.isNotEmpty ? mode : 'Study';
               _elapsedSeconds = initialSeconds ?? 0;
               _camStatus = 'verified';
               onStopRequested = onStopClicked;
-
               activeNotifier.value = true;
               camStatusNotifier.value = 'verified';
               elapsedNotifier.value = _elapsedSeconds;
-
               await _updateNotification();
-
               _tickerTimer?.cancel();
               _tickerTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-                if (!_isSessionActive) {
-                  timer.cancel();
-                  return;
-                }
+                if (!_isSessionActive) { timer.cancel(); return; }
                 _elapsedSeconds++;
                 elapsedNotifier.value = _elapsedSeconds;
                 await _updateNotification();
@@ -402,9 +608,7 @@ jobs:
               final int seconds = totalSeconds % 60;
               final String mStr = minutes.toString().padLeft(2, '0');
               final String sStr = seconds.toString().padLeft(2, '0');
-              if (hours > 0) {
-                return "${hours.toString().padLeft(2, '0')}:$mStr:$sStr";
-              }
+              if (hours > 0) return "${hours.toString().padLeft(2, '0')}:$mStr:$sStr";
               return "$mStr:$sStr";
             }
 
@@ -412,12 +616,10 @@ jobs:
               if (!_isSessionActive) return;
               final String timeStr = _formatTime(_elapsedSeconds);
               final String title = "PrepWise Focus Session";
-              final String body = "$timeStr | Studying: $_subject | Mode: $_mode";
-
+              final String body = "$timeStr  |  Studying: $_subject | Mode: $_mode";
               final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-                channelId,
-                channelName,
-                channelDescription: 'Live count-up stopwatch timer for active focus sessions.',
+                channelId, channelName,
+                channelDescription: 'Live count-up stopwatch for focus sessions.',
                 importance: Importance.low,
                 priority: Priority.low,
                 ongoing: true,
@@ -427,23 +629,11 @@ jobs:
                 enableVibration: false,
                 icon: '@mipmap/ic_launcher',
                 actions: const <AndroidNotificationAction>[
-                  AndroidNotificationAction(
-                    'STOP_FOCUS_SESSION',
-                    'Stop Focus Session',
-                    showsUserInterface: true,
-                    cancelNotification: false,
-                  ),
+                  AndroidNotificationAction('STOP_FOCUS_SESSION', 'Stop Focus Session', showsUserInterface: true, cancelNotification: false),
                 ],
               );
-
               try {
-                await _notifications.show(
-                  notificationId,
-                  title,
-                  body,
-                  NotificationDetails(android: androidDetails),
-                  payload: 'FOCUS_SESSION_STOP_ACTION',
-                );
+                await _notifications.show(notificationId, title, body, NotificationDetails(android: androidDetails), payload: 'FOCUS_SESSION_STOP_ACTION');
               } catch (e) {
                 debugPrint("[FocusSessionService] Notification error: $e");
               }
@@ -454,30 +644,18 @@ jobs:
               _tickerTimer?.cancel();
               _tickerTimer = null;
               activeNotifier.value = false;
-              try {
-                await _notifications.cancel(notificationId);
-              } catch (_) {}
+              try { await _notifications.cancel(notificationId); } catch (_) {}
             }
           }
           EOF
 
-          # 3. PDF Download Service
           cat << 'EOF' > prepwise_app/lib/services/pdf_download_service.dart
           import 'dart:io';
           import 'package:http/http.dart' as http;
           import 'package:path_provider/path_provider.dart';
           import 'package:open_filex/open_filex.dart';
-          import 'package:flutter/services.dart';
           import 'package:flutter/foundation.dart';
-
-          class AppToast {
-            static const _channel = MethodChannel('com.prepwise/toast');
-            static void show(String message) {
-              try {
-                _channel.invokeMethod('showToast', {'message': message});
-              } catch (_) {}
-            }
-          }
+          import 'app_toast.dart';
 
           class PdfDownloadService {
             static Future<void> downloadAndOpenPdf(String url, {String? customTitle}) async {
@@ -504,7 +682,6 @@ jobs:
 
                 final file = File("${targetDir.path}/$filename");
                 await file.writeAsBytes(response.bodyBytes);
-
                 AppToast.show("Saved to Downloads/PrepWise! Opening...");
                 await OpenFilex.open(file.path);
               } catch (e) {
@@ -515,8 +692,208 @@ jobs:
           }
           EOF
 
-          # 4. Floating Focus Dot Widget
-          cat << 'EOF' > prepwise_app/lib/widgets/floating_focus_dot.dart
+          cat << 'EOF' > prepwise_app/lib/services/notification_service.dart
+          import 'dart:convert';
+          import 'package:firebase_core/firebase_core.dart';
+          import 'package:firebase_messaging/firebase_messaging.dart';
+          import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+          import 'package:flutter/foundation.dart';
+          import 'focus_session_service.dart';
+
+          @pragma('vm:entry-point')
+          Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+            await Firebase.initializeApp();
+            debugPrint("Handling background FCM: ${message.messageId}");
+          }
+
+          class NotificationService {
+            static final NotificationService _instance = NotificationService._internal();
+            factory NotificationService() => _instance;
+            NotificationService._internal();
+
+            final FirebaseMessaging _fcm = FirebaseMessaging.instance;
+            final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+
+            String? _fcmToken;
+            String? get fcmToken => _fcmToken;
+
+            Function(String token)? onTokenReceived;
+            Function(String payload)? onNotificationTapped;
+            Function()? onFocusStopActionClicked;
+
+            Future<void> initialize({Function(String token)? onTokenReady, Function(String payload)? onNotificationClick, Function()? onFocusStopAction}) async {
+              onTokenReceived = onTokenReady;
+              onNotificationTapped = onNotificationClick;
+              onFocusStopActionClicked = onFocusStopAction;
+
+              try {
+                await _fcm.requestPermission(alert: true, badge: true, sound: true, provisional: false);
+              } catch (e) {
+                debugPrint('FCM requestPermission error: $e');
+              }
+
+              const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+              await _localNotifications.initialize(
+                const InitializationSettings(android: androidSettings),
+                onDidReceiveNotificationResponse: (NotificationResponse response) {
+                  if (response.actionId == 'STOP_FOCUS_SESSION' || response.payload == 'FOCUS_SESSION_STOP_ACTION') {
+                    onFocusStopActionClicked?.call();
+                    FocusSessionService().onStopRequested?.call();
+                    return;
+                  }
+                  if (response.payload != null) onNotificationTapped?.call(response.payload!);
+                },
+              );
+
+              const AndroidNotificationChannel broadcastChannel = AndroidNotificationChannel(
+                'prepwise_broadcast_channel',
+                'PrepWise Notifications',
+                description: 'Important study updates and reminders.',
+                importance: Importance.max,
+                playSound: true,
+                enableVibration: true,
+              );
+              await _localNotifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.createNotificationChannel(broadcastChannel);
+
+              await FocusSessionService().initializeNotificationChannel();
+
+              try {
+                _fcmToken = await _fcm.getToken();
+                if (_fcmToken != null) onTokenReceived?.call(_fcmToken!);
+              } catch (e) {
+                debugPrint("FCM token error: $e");
+              }
+
+              _fcm.onTokenRefresh.listen((newToken) {
+                _fcmToken = newToken;
+                onTokenReceived?.call(newToken);
+              });
+
+              FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+                final notification = message.notification;
+                final android = message.notification?.android;
+                if (notification != null && android != null && !kIsWeb) {
+                  _localNotifications.show(
+                    notification.hashCode, notification.title, notification.body,
+                    const NotificationDetails(android: AndroidNotificationDetails('prepwise_broadcast_channel', 'PrepWise Notifications', icon: '@mipmap/ic_launcher', importance: Importance.max, priority: Priority.high)),
+                    payload: jsonEncode(message.data),
+                  );
+                }
+              });
+
+              FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+                if (onNotificationTapped != null) onNotificationTapped!(jsonEncode(message.data));
+              });
+            }
+          }
+          EOF
+
+          cat << 'EOF' > prepwise_app/lib/services/app_blocker_service.dart
+          import 'package:flutter/services.dart';
+          import 'package:flutter/foundation.dart';
+          import 'app_toast.dart';
+
+          class AppBlockerService {
+            static final AppBlockerService _instance = AppBlockerService._internal();
+            factory AppBlockerService() => _instance;
+            AppBlockerService._internal();
+
+            static const _accessChannel = MethodChannel('com.prepwise/accessibility');
+            static const _overlayChannel = MethodChannel('com.prepwise/overlay');
+
+            bool _isStrictActive = false;
+            List<String> _allowedApps = [];
+
+            bool get isStrictActive => _isStrictActive;
+
+            Future<bool> canDrawOverlays() async {
+              try {
+                return await _overlayChannel.invokeMethod('canDrawOverlays') as bool? ?? false;
+              } catch (_) { return false; }
+            }
+
+            Future<void> requestOverlayPermission() async {
+              try { await _overlayChannel.invokeMethod('requestOverlayPermission'); } catch (_) {}
+            }
+
+            Future<bool> isAccessibilityEnabled() async {
+              try {
+                return await _accessChannel.invokeMethod('isAccessibilityEnabled') as bool? ?? false;
+              } catch (_) { return false; }
+            }
+
+            Future<void> openAccessibilitySettings() async {
+              try { await _accessChannel.invokeMethod('openAccessibilitySettings'); } catch (_) {}
+            }
+
+            Future<void> startStrictTimer(List<String> allowedPackages) async {
+              _isStrictActive = true;
+              _allowedApps = List.from(allowedPackages);
+
+              final bool accessOk = await isAccessibilityEnabled();
+              if (!accessOk) {
+                AppToast.show("Enable PrepWise Focus Guard in Accessibility Settings to block apps.");
+                await openAccessibilitySettings();
+                return;
+              }
+
+              try {
+                final allInstalledRaw = await const MethodChannel('com.prepwise/apps').invokeMethod('getInstalledApps') as String;
+                final List<dynamic> allApps = _parseJsonArray(allInstalledRaw);
+                final Set<String> allowedSet = allowedPackages.toSet();
+                allowedSet.add('com.prepwise.prepwise');
+                allowedSet.add('com.android.systemui');
+
+                final List<String> blockedPackages = allApps
+                    .map((a) => a['packageName']?.toString() ?? '')
+                    .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
+                    .toList();
+
+                await _accessChannel.invokeMethod('setBlockedApps', {'blockedApps': blockedPackages});
+                await _accessChannel.invokeMethod('setBlockingEnabled', {'enabled': true});
+              } catch (e) {
+                debugPrint('[AppBlockerService] Error starting blocker: $e');
+              }
+
+              AppToast.show("Focus Mode Active! Non-whitelisted apps are blocked.");
+            }
+
+            List<dynamic> _parseJsonArray(String raw) {
+              try {
+                final trimmed = raw.trim();
+                if (!trimmed.startsWith('[')) return [];
+                final result = <Map<String, dynamic>>[];
+                final itemPattern = RegExp(r'\{[^}]+\}');
+                for (final match in itemPattern.allMatches(trimmed)) {
+                  final item = match.group(0) ?? '';
+                  final nameMatch = RegExp(r'"name"\s*:\s*"([^"]*)"').firstMatch(item);
+                  final pkgMatch = RegExp(r'"packageName"\s*:\s*"([^"]*)"').firstMatch(item);
+                  if (nameMatch != null && pkgMatch != null) {
+                    result.add({'name': nameMatch.group(1), 'packageName': pkgMatch.group(1)});
+                  }
+                }
+                return result;
+              } catch (_) { return []; }
+            }
+
+            Future<void> stopStrictTimer() async {
+              _isStrictActive = false;
+              try {
+                await _accessChannel.invokeMethod('setBlockingEnabled', {'enabled': false});
+                await _accessChannel.invokeMethod('setBlockedApps', {'blockedApps': <String>[]});
+              } catch (_) {}
+              AppToast.show("Focus session ended. Apps are unlocked.");
+            }
+
+            void onAppExitedToBackground() {
+              if (_isStrictActive) {
+                AppToast.show("Focus timer is running! Stay on PrepWise.");
+              }
+            }
+          }
+          EOF
+
+          cat << 'WEOF' > prepwise_app/lib/widgets/floating_focus_dot.dart
           import 'package:flutter/material.dart';
           import '../services/focus_session_service.dart';
 
@@ -559,7 +936,6 @@ jobs:
                       final bool isVerified = camStatus == 'verified';
                       final Color statusColor = isVerified ? const Color(0xFF10B981) : const Color(0xFFEF4444);
                       final Color glowColor = isVerified ? const Color(0x6610B981) : const Color(0x66EF4444);
-
                       return Positioned(
                         left: _posX,
                         top: _posY,
@@ -598,19 +974,17 @@ jobs:
                 animation: _pulseAnimation,
                 builder: (context, child) {
                   return Container(
-                    width: 32,
-                    height: 32,
-                    alignment: Alignment.center,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Transform.scale(
-                          scale: _pulseAnimation.value,
-                          child: Container(width: 24, height: 24, decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor.withValues(alpha: 0.25))),
-                        ),
-                        Container(width: 14, height: 14, decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor)),
-                      ],
-                    ),
+                    width: 32, height: 32, alignment: Alignment.center,
+                    child: Stack(alignment: Alignment.center, children: [
+                      Transform.scale(
+                        scale: _pulseAnimation.value,
+                        child: Container(width: 24, height: 24, decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor.withValues(alpha: 0.25))),
+                      ),
+                      Container(
+                        width: 14, height: 14,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor, boxShadow: [BoxShadow(color: statusColor, blurRadius: 6)]),
+                      ),
+                    ]),
                   );
                 },
               );
@@ -619,264 +993,175 @@ jobs:
             Widget _buildExpandedCard(bool isVerified, Color statusColor) {
               return SizedBox(
                 width: 260,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(children: [
-                          Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor)),
-                          const SizedBox(width: 8),
-                          const Text("Cam Verification", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                        ]),
-                        GestureDetector(
-                          onTap: () => setState(() => _isExpanded = false),
-                          child: const Icon(Icons.close_rounded, size: 16, color: Colors.white70),
-                        ),
-                      ],
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Row(children: [
+                      Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor)),
+                      const SizedBox(width: 8),
+                      const Text("Cam Verification", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                    ]),
+                    GestureDetector(
+                      onTap: () => setState(() => _isExpanded = false),
+                      child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.white10, shape: BoxShape.circle), child: const Icon(Icons.close_rounded, size: 16, color: Colors.white70)),
                     ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: isVerified ? const Color(0x1A10B981) : const Color(0x1AEF4444),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: isVerified ? const Color(0x3310B981) : const Color(0x33EF4444)),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(isVerified ? Icons.face_rounded : Icons.face_retouching_off_rounded, color: statusColor, size: 24),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              isVerified ? "Your face is under tracking. Keep going!" : "We can't see your face, your focus session timer is paused.",
-                              style: TextStyle(color: isVerified ? const Color(0xFFD1FAE5) : const Color(0xFFFEE2E2), fontSize: 12, fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                        ],
-                      ),
+                  ]),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isVerified ? const Color(0x1A10B981) : const Color(0x1AEF4444),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: isVerified ? const Color(0x3310B981) : const Color(0x33EF4444)),
                     ),
-                    const SizedBox(height: 8),
-                    const Center(child: Text("Tap dot to collapse - Drag anywhere", style: TextStyle(color: Colors.white38, fontSize: 10))),
-                  ],
-                ),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(isVerified ? Icons.face_rounded : Icons.face_retouching_off_rounded, color: statusColor, size: 24),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(
+                        isVerified ? "Your face is under tracking. Keep going!" : "We can't see your face, focus timer is paused.",
+                        style: TextStyle(color: isVerified ? const Color(0xFFD1FAE5) : const Color(0xFFFEE2E2), fontSize: 12, fontWeight: FontWeight.w500, height: 1.3),
+                      )),
+                    ]),
+                  ),
+                  const SizedBox(height: 8),
+                  const Center(child: Text("Tap to collapse  Drag anywhere", style: TextStyle(color: Colors.white38, fontSize: 10))),
+                ]),
               );
             }
           }
-          EOF
+          WEOF
 
-      - name: Write notification_service.dart
-        run: |
-          cat << 'EOF' > prepwise_app/lib/services/notification_service.dart
+          cat << 'EOF' > prepwise_app/lib/bridge/app_bridge_handler.dart
           import 'dart:convert';
-          import 'package:firebase_core/firebase_core.dart';
-          import 'package:firebase_messaging/firebase_messaging.dart';
-          import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+          import 'package:flutter/services.dart';
           import 'package:flutter/foundation.dart';
-          import 'focus_session_service.dart';
+          import 'package:permission_handler/permission_handler.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+          import '../services/app_toast.dart';
+          import '../services/app_blocker_service.dart';
+          import '../services/wakelock_service.dart';
+          import '../services/pdf_download_service.dart';
+          import '../services/notification_service.dart';
+          import '../services/google_auth_service.dart';
+          import '../services/focus_session_service.dart';
 
-          @pragma('vm:entry-point')
-          Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-            await Firebase.initializeApp();
-            debugPrint("Handling background FCM message: ${message.messageId}");
-          }
+          class AppBridgeHandler {
+            final WebViewController webViewController;
+            AppBridgeHandler({required this.webViewController});
 
-          class NotificationService {
-            static final NotificationService _instance = NotificationService._internal();
-            factory NotificationService() => _instance;
-            NotificationService._internal();
-
-            final FirebaseMessaging _fcm = FirebaseMessaging.instance;
-            final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
-
-            String? _fcmToken;
-            String? get fcmToken => _fcmToken;
-
-            Function(String token)? onTokenReceived;
-            Function(String payload)? onNotificationTapped;
-            Function()? onFocusStopActionClicked;
-
-            Future<void> initialize({
-              Function(String token)? onTokenReady,
-              Function(String payload)? onNotificationClick,
-              Function()? onFocusStopAction,
-            }) async {
-              onTokenReceived = onTokenReady;
-              onNotificationTapped = onNotificationClick;
-              onFocusStopActionClicked = onFocusStopAction;
-
+            Future<void> handleMessage(JavaScriptMessage message) async {
               try {
-                await _fcm.requestPermission(alert: true, badge: true, sound: true);
-              } catch (_) {}
+                final Map<String, dynamic> data = jsonDecode(message.message);
+                final String action = data['action'] ?? '';
 
-              const AndroidInitializationSettings androidSettings =
-                  AndroidInitializationSettings('@mipmap/ic_launcher');
-              const InitializationSettings initSettings =
-                  InitializationSettings(android: androidSettings);
+                switch (action) {
+                  case 'nativeGoogleSignIn':
+                    final result = await GoogleAuthService().signIn();
+                    if (result.success && result.idToken != null) {
+                      final idToken = result.idToken!;
+                      final accessToken = result.accessToken ?? '';
+                      await webViewController.runJavaScript("(function(){if(typeof window.onNativeGoogleSignInSuccess==='function'){window.onNativeGoogleSignInSuccess('$idToken','$accessToken');}else{window.__pendingGoogleTokens={idToken:'$idToken',accessToken:'$accessToken'};}})();");
+                    } else {
+                      final err = result.errorMessage ?? 'Google Sign-In failed';
+                      await webViewController.runJavaScript("(function(){if(typeof window.onNativeGoogleSignInError==='function'){window.onNativeGoogleSignInError('$err');}})();");
+                    }
+                    break;
 
-              await _localNotifications.initialize(
-                initSettings,
-                onDidReceiveNotificationResponse: (NotificationResponse response) {
-                  if (response.actionId == 'STOP_FOCUS_SESSION' || response.payload == 'FOCUS_SESSION_STOP_ACTION') {
-                    if (onFocusStopActionClicked != null) onFocusStopActionClicked!();
-                    final focusService = FocusSessionService();
-                    if (focusService.onStopRequested != null) focusService.onStopRequested!();
-                    return;
-                  }
-                  if (response.payload != null && onNotificationTapped != null) {
-                    onNotificationTapped!(response.payload!);
-                  }
-                },
-              );
+                  case 'startFocusNotification':
+                    final String subject = data['subject'] ?? 'General';
+                    final String mode = data['mode'] ?? 'Study';
+                    final int initialSeconds = data['initialSeconds'] ?? 0;
+                    await FocusSessionService().startSession(subject: subject, mode: mode, initialSeconds: initialSeconds, onStopClicked: () => triggerInAppStopConfirmation());
+                    await WakelockService.enable();
+                    HapticFeedback.heavyImpact();
+                    break;
 
-              const AndroidNotificationChannel broadcastChannel = AndroidNotificationChannel(
-                'prepwise_broadcast_channel',
-                'PrepWise Notifications',
-                description: 'Important study updates, broadcasts, and reminders.',
-                importance: Importance.max,
-                playSound: true,
-                enableVibration: true,
-              );
+                  case 'stopFocusNotification':
+                    await FocusSessionService().stopSession();
+                    await WakelockService.disable();
+                    HapticFeedback.mediumImpact();
+                    break;
 
-              await _localNotifications
-                  .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-                  ?.createNotificationChannel(broadcastChannel);
+                  case 'updateCamStatus':
+                    final String status = data['status'] ?? 'verified';
+                    FocusSessionService().updateCamStatus(status);
+                    break;
 
-              await FocusSessionService().initializeNotificationChannel();
+                  case 'downloadPdf':
+                    final String? url = data['url'];
+                    final String? title = data['title'];
+                    if (url != null && url.isNotEmpty) {
+                      await PdfDownloadService.downloadAndOpenPdf(url, customTitle: title);
+                    }
+                    break;
 
-              try {
-                _fcmToken = await _fcm.getToken();
-                if (_fcmToken != null && onTokenReceived != null) {
-                  onTokenReceived!(_fcmToken!);
+                  case 'startStrictTimer':
+                    final List<String> allowed = (data['allowedApps'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
+                    await AppBlockerService().startStrictTimer(allowed);
+                    break;
+
+                  case 'stopStrictTimer':
+                    await AppBlockerService().stopStrictTimer();
+                    break;
+
+                  case 'vibrate':
+                    final String type = data['type'] ?? 'medium';
+                    if (type == 'heavy') HapticFeedback.heavyImpact();
+                    else if (type == 'light') HapticFeedback.lightImpact();
+                    else HapticFeedback.mediumImpact();
+                    break;
+
+                  case 'toast':
+                    final String msg = data['message'] ?? '';
+                    if (msg.isNotEmpty) AppToast.show(msg);
+                    break;
+
+                  case 'requestHardwarePermissions':
+                    await [Permission.camera, Permission.microphone, Permission.notification].request();
+                    break;
+
+                  case 'requestAccessibilityPermission':
+                    await AppBlockerService().openAccessibilitySettings();
+                    break;
+
+                  case 'checkAccessibilityEnabled':
+                    final bool enabled = await AppBlockerService().isAccessibilityEnabled();
+                    await webViewController.runJavaScript("(function(){if(typeof window.onAccessibilityStatus==='function'){window.onAccessibilityStatus($enabled);}})();");
+                    break;
+
+                  case 'getFCMToken':
+                    final token = NotificationService().fcmToken;
+                    if (token != null) injectFCMToken(token);
+                    break;
+
+                  default:
+                    debugPrint("Unknown AppBridge action: $action");
                 }
-              } catch (_) {}
+              } catch (e) {
+                debugPrint("AppBridge error: $e");
+              }
+            }
 
-              _fcm.onTokenRefresh.listen((newToken) {
-                _fcmToken = newToken;
-                if (onTokenReceived != null) onTokenReceived!(newToken);
-              });
+            void triggerInAppStopConfirmation() {
+              webViewController.runJavaScript("(function(){if(typeof window.onNativeRequestStopFocus==='function'){window.onNativeRequestStopFocus();}})();");
+            }
 
-              FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-                RemoteNotification? notification = message.notification;
-                AndroidNotification? android = message.notification?.android;
-                if (notification != null && android != null && !kIsWeb) {
-                  _localNotifications.show(
-                    notification.hashCode,
-                    notification.title,
-                    notification.body,
-                    NotificationDetails(
-                      android: AndroidNotificationDetails(
-                        broadcastChannel.id,
-                        broadcastChannel.name,
-                        channelDescription: broadcastChannel.description,
-                        icon: '@mipmap/ic_launcher',
-                        importance: Importance.max,
-                        priority: Priority.high,
-                        playSound: true,
-                      ),
-                    ),
-                    payload: jsonEncode(message.data),
-                  );
-                }
-              });
+            void injectFCMToken(String token) {
+              webViewController.runJavaScript("(function(){if(typeof window.onNativeFCMToken==='function'){window.onNativeFCMToken('$token');}else{window.__pendingFcmToken='$token';}})();");
+            }
 
-              FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-                if (onNotificationTapped != null) onNotificationTapped!(jsonEncode(message.data));
-              });
+            void handleNotificationClick(String payload) {
+              webViewController.runJavaScript("(function(){if(typeof window.onNotificationDeepLink==='function'){window.onNotificationDeepLink('$payload');}})();");
             }
           }
           EOF
 
-      - name: Write Kotlin MainActivity
-        run: |
-          mkdir -p prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise
-          cat << 'EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/MainActivity.kt
-          package com.prepwise.prepwise
-
-          import android.content.Intent
-          import android.widget.Toast
-          import io.flutter.embedding.android.FlutterActivity
-          import io.flutter.embedding.engine.FlutterEngine
-          import io.flutter.plugin.common.MethodChannel
-          import org.json.JSONArray
-          import org.json.JSONObject
-
-          class MainActivity : FlutterActivity() {
-              private val CHANNEL_APPS = "com.prepwise/apps"
-              private val CHANNEL_TOAST = "com.prepwise/toast"
-
-              override fun onNewIntent(intent: Intent) {
-                  super.onNewIntent(intent)
-                  setIntent(intent)
-              }
-
-              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-                  super.configureFlutterEngine(flutterEngine)
-
-                  // Toast Channel
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST).setMethodCallHandler { call, result ->
-                      if (call.method == "showToast") {
-                          val msg = call.argument<String>("message") ?: ""
-                          Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
-                          result.success(true)
-                      } else {
-                          result.notImplemented()
-                      }
-                  }
-
-                  // Apps Channel
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_APPS).setMethodCallHandler { call, result ->
-                      if (call.method == "getInstalledApps") {
-                          try {
-                              val pm = packageManager
-                              val intent = Intent(Intent.ACTION_MAIN, null)
-                              intent.addCategory(Intent.CATEGORY_LAUNCHER)
-                              val apps = pm.queryIntentActivities(intent, 0)
-                              val jsonArray = JSONArray()
-                              for (app in apps) {
-                                  val obj = JSONObject()
-                                  obj.put("name", app.loadLabel(pm).toString())
-                                  obj.put("packageName", app.activityInfo.packageName)
-                                  jsonArray.put(obj)
-                              }
-                              result.success(jsonArray.toString())
-                          } catch (e: Exception) {
-                              result.error("APPS_ERROR", e.message, null)
-                          }
-                      } else {
-                          result.notImplemented()
-                      }
-                  }
-              }
-          }
-          EOF
-
-      - name: Write Main Dart Code
-        run: |
           cat << 'EOF' > prepwise_app/lib/main.dart
-          import 'dart:convert';
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:firebase_core/firebase_core.dart';
           import 'package:firebase_messaging/firebase_messaging.dart';
-          import 'package:webview_flutter/webview_flutter.dart';
-          import 'package:webview_flutter_android/webview_flutter_android.dart';
-          import 'package:wakelock_plus/wakelock_plus.dart';
-          import 'package:url_launcher/url_launcher.dart';
-          import 'package:permission_handler/permission_handler.dart';
+          import 'screens/webview_screen.dart';
           import 'services/notification_service.dart';
-          import 'services/focus_session_service.dart';
-          import 'services/google_auth_service.dart';
-          import 'services/pdf_download_service.dart';
-          import 'widgets/floating_focus_dot.dart';
-
-          @pragma('vm:entry-point')
-          Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
-            await Firebase.initializeApp();
-            debugPrint('BG FCM: ${message.messageId}');
-          }
 
           void main() async {
             WidgetsFlutterBinding.ensureInitialized();
@@ -889,10 +1174,9 @@ jobs:
             ));
             try {
               await Firebase.initializeApp();
-              FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
-              debugPrint('Firebase initialized OK');
+              FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
             } catch (e) {
-              debugPrint('Firebase init failed: $e');
+              debugPrint("Firebase init error: $e");
             }
             runApp(const PrepWiseApp());
           }
@@ -904,108 +1188,58 @@ jobs:
               return MaterialApp(
                 title: 'PrepWise',
                 debugShowCheckedModeBanner: false,
-                theme: ThemeData(scaffoldBackgroundColor: const Color(0xFF0F172A)),
-                home: const MainWebView(),
+                theme: ThemeData(
+                  useMaterial3: true,
+                  scaffoldBackgroundColor: const Color(0xFF0F172A),
+                  colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0D9488), brightness: Brightness.dark, surface: const Color(0xFF0F172A)),
+                ),
+                home: const WebViewScreen(),
               );
             }
           }
+          EOF
 
-          class MainWebView extends StatefulWidget {
-            const MainWebView({super.key});
+          cat << 'EOF' > prepwise_app/lib/screens/webview_screen.dart
+          import 'package:flutter/material.dart';
+          import 'package:flutter/services.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+          import 'package:webview_flutter_android/webview_flutter_android.dart';
+          import 'package:url_launcher/url_launcher.dart';
+          import '../bridge/app_bridge_handler.dart';
+          import '../services/notification_service.dart';
+          import '../services/app_blocker_service.dart';
+          import '../services/pdf_download_service.dart';
+          import '../services/focus_session_service.dart';
+          import '../widgets/floating_focus_dot.dart';
+          import '../services/app_toast.dart';
+
+          class WebViewScreen extends StatefulWidget {
+            const WebViewScreen({super.key});
             @override
-            State<MainWebView> createState() => _MainWebViewState();
+            State<WebViewScreen> createState() => _WebViewScreenState();
           }
 
-          class _MainWebViewState extends State<MainWebView> {
+          class _WebViewScreenState extends State<WebViewScreen> with WidgetsBindingObserver {
             late final WebViewController _controller;
+            late final AppBridgeHandler _bridgeHandler;
+
             bool _isLoading = true;
-            int _progress = 0;
-            bool _webViewReady = false;
-            String? _pendingFcmToken;
+            double _progress = 0.0;
+            bool _hasError = false;
+            DateTime? _lastBackPressTime;
             static const _appsChannel = MethodChannel('com.prepwise/apps');
+
+            static const String appUrl = "https://study-app-infixify1.vercel.app";
 
             @override
             void initState() {
               super.initState();
-              _requestAllPermissions();
-              _setupWebView();
-              _initFCM();
+              WidgetsBinding.instance.addObserver(this);
+              _initWebView();
+              _initNotifications();
             }
 
-            Future<void> _requestAllPermissions() async {
-              try {
-                await [Permission.notification, Permission.camera, Permission.microphone].request();
-              } catch (e) {
-                debugPrint('Permission error: $e');
-              }
-            }
-
-            Future<void> _initFCM() async {
-              try {
-                await NotificationService().initialize(
-                  onTokenReady: (token) {
-                    if (_webViewReady) {
-                      _injectFcmToken(token);
-                    } else {
-                      _pendingFcmToken = token;
-                    }
-                  },
-                  onNotificationClick: (payload) {
-                    debugPrint('Notification tapped: $payload');
-                  },
-                  onFocusStopAction: () {
-                    _triggerInAppStopConfirmation();
-                  },
-                );
-              } catch (e) {
-                debugPrint('FCM init error: $e');
-              }
-            }
-
-            void _triggerInAppStopConfirmation() {
-              _controller.runJavaScript("""
-                (function() {
-                  if (typeof window.onNativeRequestStopFocus === 'function') {
-                    window.onNativeRequestStopFocus();
-                  } else {
-                    console.log('[NativeBridge] window.onNativeRequestStopFocus not found');
-                  }
-                })();
-              """);
-            }
-
-            Future<void> _injectFcmToken(String token) async {
-              try {
-                await _controller.runJavaScript('''
-                  (function() {
-                    var token = '$token';
-                    try { localStorage.setItem('prepwise_native_fcm_token', token); } catch(e) {}
-                    if (typeof window.onNativeFCMToken === 'function') {
-                      window.onNativeFCMToken(token);
-                    } else {
-                      window.__pendingFcmToken = token;
-                    }
-                  })();
-                ''');
-              } catch (e) {
-                debugPrint('FCM token inject error: $e');
-              }
-            }
-
-            Future<void> _injectInstalledApps() async {
-              try {
-                final String jsonStr = await _appsChannel.invokeMethod('getInstalledApps');
-                final escaped = jsonStr.replaceAll("'", "\\'");
-                await _controller.runJavaScript(
-                  "window.__nativeInstalledApps = JSON.parse('$escaped'); "
-                  "if (window.onInstalledAppsReady) window.onInstalledAppsReady(window.__nativeInstalledApps);",
-                );
-              } catch (e) {
-                debugPrint('InstalledApps error: $e');
-              }
-            }
-
-            void _setupWebView() {
+            void _initWebView() {
               late final PlatformWebViewControllerCreationParams params;
               if (WebViewPlatform.instance is AndroidWebViewPlatform) {
                 params = AndroidWebViewControllerCreationParams();
@@ -1013,173 +1247,137 @@ jobs:
                 params = const PlatformWebViewControllerCreationParams();
               }
 
-              final controller = WebViewController.fromPlatformCreationParams(params);
+              final WebViewController controller = WebViewController.fromPlatformCreationParams(params);
 
               controller
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
                 ..setBackgroundColor(const Color(0xFF0F172A))
                 ..setNavigationDelegate(NavigationDelegate(
-                  onProgress: (p) => setState(() => _progress = p),
-                  onPageStarted: (url) => setState(() => _isLoading = true),
-                  onPageFinished: (url) {
-                    setState(() {
-                      _isLoading = false;
-                      _webViewReady = true;
-                    });
-                    _controller.runJavaScript('''
-                      if (!window.AppBridge) {
-                        window.AppBridge = {
-                          postMessage: function(msg) {
-                            if (window.FlutterBridge) {
-                              window.FlutterBridge.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg));
-                            }
-                          }
-                        };
-                      }
-                    ''');
+                  onProgress: (int progress) => setState(() => _progress = progress / 100.0),
+                  onPageStarted: (String url) => setState(() { _isLoading = true; _hasError = false; }),
+                  onPageFinished: (String url) {
+                    setState(() => _isLoading = false);
+                    controller.runJavaScript("(function(){if(!window.AppBridge){window.AppBridge={postMessage:function(msg){if(window.FlutterBridge){window.FlutterBridge.postMessage(typeof msg==='string'?msg:JSON.stringify(msg));}}}}})();");
+                    final token = NotificationService().fcmToken;
+                    if (token != null) _bridgeHandler.injectFCMToken(token);
                     _injectInstalledApps();
-                    if (_pendingFcmToken != null) {
-                      _injectFcmToken(_pendingFcmToken!);
-                      _pendingFcmToken = null;
-                    }
                   },
-                  onNavigationRequest: (request) {
+                  onWebResourceError: (WebResourceError error) {
+                    if (error.isForMainFrame ?? true) setState(() { _hasError = true; _isLoading = false; });
+                  },
+                  onNavigationRequest: (NavigationRequest request) {
                     final url = request.url;
-                    if (url.startsWith('intent://') ||
-                        url.startsWith('tel:') ||
-                        url.startsWith('mailto:') ||
-                        url.startsWith('whatsapp:') ||
-                        url.startsWith('market:')) {
+                    if (url.startsWith('intent://') || url.startsWith('tel:') || url.startsWith('mailto:') || url.startsWith('whatsapp:') || url.startsWith('market:')) {
                       try { launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
                       return NavigationDecision.prevent;
                     }
-                    if (url.endsWith('.pdf') || url.contains('/pdf/') || url.contains('type=pdf') || url.contains('application/pdf')) {
+                    if (url.toLowerCase().endsWith('.pdf') || url.contains('application/pdf')) {
                       PdfDownloadService.downloadAndOpenPdf(url);
                       return NavigationDecision.prevent;
                     }
                     return NavigationDecision.navigate;
                   },
-                ))
-                ..addJavaScriptChannel('FlutterBridge',
-                  onMessageReceived: (JavaScriptMessage message) async {
-                    try {
-                      final data = jsonDecode(message.message) as Map<String, dynamic>;
-                      final action = data['action'] as String? ?? '';
-
-                      // 1. Native 1-Tap Google Sign-In
-                      if (action == 'nativeGoogleSignIn') {
-                        final res = await GoogleAuthService().signIn();
-                        if (res.success && res.idToken != null) {
-                          final idToken = res.idToken!;
-                          final accessToken = res.accessToken ?? '';
-                          await _controller.runJavaScript("""
-                            (function() {
-                              if (typeof window.onNativeGoogleSignInSuccess === 'function') {
-                                window.onNativeGoogleSignInSuccess('$idToken', '$accessToken');
-                              }
-                            })();
-                          """);
-                        } else {
-                          final err = res.errorMessage ?? 'Google Sign-In failed';
-                          await _controller.runJavaScript("""
-                            (function() {
-                              if (typeof window.onNativeGoogleSignInError === 'function') {
-                                window.onNativeGoogleSignInError('$err');
-                              }
-                            })();
-                          """);
-                        }
-                      }
-                      // 2. Focus Session Live Notification
-                      else if (action == 'startFocusNotification') {
-                        final subject = data['subject'] as String? ?? 'General';
-                        final mode = data['mode'] as String? ?? 'Study';
-                        final initialSeconds = data['initialSeconds'] as int? ?? 0;
-                        await FocusSessionService().startSession(
-                          subject: subject,
-                          mode: mode,
-                          initialSeconds: initialSeconds,
-                          onStopClicked: () => _triggerInAppStopConfirmation(),
-                        );
-                        WakelockPlus.enable();
-                        HapticFeedback.heavyImpact();
-                      } else if (action == 'stopFocusNotification') {
-                        await FocusSessionService().stopSession();
-                        WakelockPlus.disable();
-                        HapticFeedback.mediumImpact();
-                      }
-                      // 3. Cam Face Verification Status
-                      else if (action == 'updateCamStatus') {
-                        final status = data['status'] as String? ?? 'verified';
-                        FocusSessionService().updateCamStatus(status);
-                      }
-                      // 4. Download PDF natively to device Downloads
-                      else if (action == 'downloadPdf') {
-                        final pdfUrl = data['url'] as String? ?? '';
-                        final title = data['title'] as String?;
-                        if (pdfUrl.isNotEmpty) {
-                          await PdfDownloadService.downloadAndOpenPdf(pdfUrl, customTitle: title);
-                        }
-                      }
-                      // 5. Wakelock / Strict Mode
-                      else if (action == 'startStrictTimer') {
-                        WakelockPlus.enable();
-                        HapticFeedback.heavyImpact();
-                      } else if (action == 'stopStrictTimer') {
-                        WakelockPlus.disable();
-                        HapticFeedback.vibrate();
-                      }
-                      // 6. Haptic Feedback
-                      else if (action == 'vibrate') {
-                        final type = data['type'] as String? ?? 'medium';
-                        if (type == 'heavy') HapticFeedback.heavyImpact();
-                        else if (type == 'light') HapticFeedback.lightImpact();
-                        else HapticFeedback.mediumImpact();
-                      }
-                      // 7. Request Camera / Mic Permissions
-                      else if (action == 'requestCamera' || action == 'requestPermissions') {
-                        await [Permission.camera, Permission.microphone, Permission.notification].request();
-                      }
-                      // 8. Refresh Installed Apps
-                      else if (action == 'getInstalledApps') {
-                        await _injectInstalledApps();
-                      }
-                    } catch (e) {
-                      debugPrint('Bridge error: $e');
-                    }
-                  },
-                );
+                ));
 
               if (controller.platform is AndroidWebViewController) {
+                AndroidWebViewController.enableDebugging(false);
                 final androidController = controller.platform as AndroidWebViewController;
                 androidController.setMediaPlaybackRequiresUserGesture(false);
                 androidController.setOnPlatformPermissionRequest((request) => request.grant());
               }
 
-              controller.loadRequest(Uri.parse('https://study-app-infixify1.vercel.app'));
+              _bridgeHandler = AppBridgeHandler(webViewController: controller);
+              controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: _bridgeHandler.handleMessage);
+              controller.loadRequest(Uri.parse(appUrl));
               _controller = controller;
+            }
+
+            Future<void> _injectInstalledApps() async {
+              try {
+                final String jsonStr = await _appsChannel.invokeMethod('getInstalledApps');
+                final escaped = jsonStr.replaceAll("'", "\\'");
+                await _controller.runJavaScript("window.__nativeInstalledApps=JSON.parse('$escaped');if(window.onInstalledAppsReady)window.onInstalledAppsReady(window.__nativeInstalledApps);");
+              } catch (e) {
+                debugPrint('InstalledApps injection error: $e');
+              }
+            }
+
+            void _initNotifications() {
+              NotificationService().initialize(
+                onTokenReady: (token) { if (!_isLoading) _bridgeHandler.injectFCMToken(token); },
+                onNotificationClick: (payload) => _bridgeHandler.handleNotificationClick(payload),
+                onFocusStopAction: () => _bridgeHandler.triggerInAppStopConfirmation(),
+              );
+            }
+
+            @override
+            void didChangeAppLifecycleState(AppLifecycleState state) {
+              if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+                AppBlockerService().onAppExitedToBackground();
+              }
+            }
+
+            @override
+            void dispose() {
+              WidgetsBinding.instance.removeObserver(this);
+              super.dispose();
+            }
+
+            Future<void> _handlePopScope(bool didPop) async {
+              if (didPop) return;
+              if (await _controller.canGoBack()) {
+                await _controller.goBack();
+                return;
+              }
+              final now = DateTime.now();
+              if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+                _lastBackPressTime = now;
+                AppToast.show("Press back again to exit PrepWise");
+                return;
+              }
+              Navigator.of(context).pop();
             }
 
             @override
             Widget build(BuildContext context) {
-              return WillPopScope(
-                onWillPop: () async {
-                  if (await _controller.canGoBack()) { _controller.goBack(); return false; }
-                  return true;
-                },
+              return PopScope(
+                canPop: false,
+                onPopInvokedWithResult: (didPop, result) => _handlePopScope(didPop),
                 child: Scaffold(
                   backgroundColor: const Color(0xFF0F172A),
                   body: SafeArea(
                     child: Stack(children: [
-                      WebViewWidget(controller: _controller),
-                      if (_isLoading)
-                        LinearProgressIndicator(
-                          value: _progress / 100.0,
-                          backgroundColor: const Color(0xFF1E293B),
-                          color: const Color(0xFF0D9488),
-                          minHeight: 3,
+                      RefreshIndicator(
+                        color: const Color(0xFF0D9488),
+                        backgroundColor: const Color(0xFF1E293B),
+                        onRefresh: () async => await _controller.reload(),
+                        child: WebViewWidget(controller: _controller),
+                      ),
+                      if (_isLoading && _progress < 1.0)
+                        Positioned(
+                          top: 0, left: 0, right: 0,
+                          child: LinearProgressIndicator(value: _progress, backgroundColor: Colors.transparent, valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF0D9488)), minHeight: 2.5),
                         ),
-                      // Minimal Floating Status Dot (Green/Red indicator with Tap-to-Preview)
+                      if (_hasError)
+                        Container(
+                          color: const Color(0xFF0F172A),
+                          width: double.infinity, height: double.infinity,
+                          padding: const EdgeInsets.all(24),
+                          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                            const Icon(Icons.wifi_off_rounded, size: 64, color: Color(0xFFF59E0B)),
+                            const SizedBox(height: 16),
+                            const Text("Connection Interrupted", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 8),
+                            const Text("Unable to connect to PrepWise servers. Check your internet connection.", textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+                            const SizedBox(height: 24),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                              onPressed: () { setState(() { _hasError = false; _isLoading = true; }); _controller.loadRequest(Uri.parse(appUrl)); },
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text("Retry Connection", style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                          ]),
+                        ),
                       const FloatingFocusDot(),
                     ]),
                   ),
@@ -1189,7 +1387,7 @@ jobs:
           }
           EOF
 
-      - name: Accept Android Licenses & Ensure SDK 36
+      - name: Accept Android Licenses and Ensure SDK 36
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" || true
