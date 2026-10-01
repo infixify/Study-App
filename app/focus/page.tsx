@@ -13,6 +13,7 @@ declare global {
     onNativeFCMToken?: (token: string) => void;
     __nativeInstalledApps?: { name: string; packageName: string }[];
     onInstalledAppsReady?: (apps: { name: string; packageName: string }[]) => void;
+    onNativeRequestStopFocus?: () => void;
   }
 }
 
@@ -20,12 +21,11 @@ type SubjectType = "Physics" | "Chemistry" | "Mathematics" | "Biology";
 type StudyTaskType = "theory" | "questions" | "revision";
 
 interface AppItem {
-  id: string;       // packageName if native, custom id if manual
+  id: string;
   name: string;
   icon: string;
 }
 
-// Fallback for web browser (no native bridge)
 const WEB_FALLBACK_APPS: AppItem[] = [
   { id: "pdf_reader", name: "PDF Reader", icon: "📄" },
   { id: "calculator", name: "Calculator", icon: "🧮" },
@@ -70,7 +70,6 @@ export default function StudyPage() {
   const [strictMode, setStrictMode] = useState(true);
 
   const [allowedApps, setAllowedApps] = useState<string[]>([]);
-  // allApps starts empty; filled by native bridge or fallback
   const [allApps, setAllApps] = useState<AppItem[]>([]);
   const [appsLoaded, setAppsLoaded] = useState(false);
   const [showAppsModal, setShowAppsModal] = useState(false);
@@ -83,6 +82,9 @@ export default function StudyPage() {
   const [postStreakResult, setPostStreakResult] = useState<{ counted: boolean; newStreak: number } | null>(null);
   const [postQCount, setPostQCount] = useState<number>(0);
   const [saving, setSaving] = useState(false);
+
+  // In-App Confirmation Modal when Stop notification action is tapped
+  const [showEndConfirmModal, setShowEndConfirmModal] = useState(false);
 
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualSub, setManualSub] = useState<SubjectType>("Physics");
@@ -116,16 +118,13 @@ export default function StudyPage() {
       ? ["Physics", "Chemistry", "Biology"]
       : ["Physics", "Chemistry", "Mathematics"];
 
-  // Load apps from native bridge or fallback
   function applyNativeApps(raw: { name: string; packageName: string }[]) {
     const items = raw.map(nativeToAppItem);
-    // Re-apply any custom apps saved locally
     const savedCustom = localStorage.getItem("prepwise_custom_apps");
     let customItems: AppItem[] = [];
     if (savedCustom) {
       try { customItems = JSON.parse(savedCustom); } catch (e) {}
     }
-    // Merge: native list + custom (dedupe by id)
     const merged = [...items];
     for (const c of customItems) {
       if (!merged.find((a) => a.id === c.id)) merged.push(c);
@@ -137,6 +136,13 @@ export default function StudyPage() {
   useEffect(() => {
     if (typeof window !== "undefined" && window.AppBridge) {
       setIsNativeApp(true);
+    }
+
+    // Listen for Force Stop Focus requests from the Android Live Notification
+    if (typeof window !== "undefined") {
+      window.onNativeRequestStopFocus = () => {
+        setShowEndConfirmModal(true);
+      };
     }
 
     async function loadUser() {
@@ -171,17 +177,14 @@ export default function StudyPage() {
       try { setAllowedApps(JSON.parse(savedAllowed)); } catch (e) {}
     }
 
-    // Try native apps immediately (may already be injected by Flutter)
     if (typeof window !== "undefined" && window.__nativeInstalledApps && window.__nativeInstalledApps.length > 0) {
       applyNativeApps(window.__nativeInstalledApps);
     } else {
-      // Register callback for when Flutter injects apps after page load
       if (typeof window !== "undefined") {
         window.onInstalledAppsReady = (apps) => {
           applyNativeApps(apps);
         };
       }
-      // Fallback: if no native bridge after short delay, use web fallback list
       const fallbackTimer = setTimeout(() => {
         if (!appsLoaded) {
           const savedCustom = localStorage.getItem("prepwise_custom_apps");
@@ -298,6 +301,9 @@ export default function StudyPage() {
     function handleVisibilityChange() {
       if (document.hidden && isActive && verifiedMode) {
         setPresencePaused(true);
+        if (typeof window !== "undefined" && window.AppBridge) {
+          try { window.AppBridge.postMessage(JSON.stringify({ action: "updateCamStatus", status: "lost" })); } catch (_) {}
+        }
       }
     }
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -355,9 +361,17 @@ export default function StudyPage() {
     if (detected) {
       missedChecksRef.current = 0;
       setPresencePaused((prev) => (prev ? false : prev));
+      if (typeof window !== "undefined" && window.AppBridge) {
+        try { window.AppBridge.postMessage(JSON.stringify({ action: "updateCamStatus", status: "verified" })); } catch (_) {}
+      }
     } else {
       missedChecksRef.current += 1;
-      if (missedChecksRef.current >= MAX_CONSECUTIVE_MISSES) setPresencePaused(true);
+      if (missedChecksRef.current >= MAX_CONSECUTIVE_MISSES) {
+        setPresencePaused(true);
+        if (typeof window !== "undefined" && window.AppBridge) {
+          try { window.AppBridge.postMessage(JSON.stringify({ action: "updateCamStatus", status: "lost" })); } catch (_) {}
+        }
+      }
     }
 
     setSeconds((s) => {
@@ -421,6 +435,12 @@ export default function StudyPage() {
     if (typeof window !== "undefined" && window.AppBridge) {
       try {
         window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: allowedApps }));
+        window.AppBridge.postMessage(JSON.stringify({
+          action: "startFocusNotification",
+          subject: selectedSub,
+          mode: selectedTask === "questions" ? "Practice" : selectedTask === "theory" ? "Theory" : "Revision",
+          initialSeconds: 0,
+        }));
         window.AppBridge.postMessage(JSON.stringify({ action: "vibrate", type: "light" }));
       } catch (err) {}
     }
@@ -440,6 +460,7 @@ export default function StudyPage() {
     if (typeof window !== "undefined" && window.AppBridge) {
       try {
         window.AppBridge.postMessage(JSON.stringify({ action: "stopStrictTimer" }));
+        window.AppBridge.postMessage(JSON.stringify({ action: "stopFocusNotification" }));
         window.AppBridge.postMessage(JSON.stringify({ action: "vibrate", type: "heavy" }));
       } catch (err) {}
     }
@@ -673,6 +694,41 @@ export default function StudyPage() {
         </div>
       </main>
 
+      {/* Confirmation Modal when Stop notification action is tapped */}
+      {showEndConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="text-center">
+              <span className="text-3xl">🛑</span>
+              <h3 className="text-base font-black text-ink mt-2">End Focus Session?</h3>
+              <p className="text-xs text-slate mt-1">
+                Are you sure you want to end your focus session?
+                {selectedTask === "questions" && " Your question practice logger will open next."}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowEndConfirmModal(false)}
+                className="w-full py-2.5 rounded-xl bg-ink/5 hover:bg-ink/10 text-ink text-xs font-bold transition-all"
+              >
+                Keep Studying
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEndConfirmModal(false);
+                  handleStopSession();
+                }}
+                className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/20 transition-all"
+              >
+                Yes, End Session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Apps Modal */}
       {showAppsModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -690,7 +746,6 @@ export default function StudyPage() {
               <button onClick={() => setShowAppsModal(false)} className="w-7 h-7 rounded-full bg-ink/5 text-xs text-ink/70 flex items-center justify-center font-bold">✕</button>
             </div>
 
-            {/* Search bar — useful when real installed apps list is long */}
             <div className="relative">
               <input
                 type="text"
@@ -711,7 +766,6 @@ export default function StudyPage() {
               )}
             </div>
 
-            {/* Apps grid — scrollable */}
             <div className="overflow-y-auto flex-1 pr-1">
               {!appsLoaded ? (
                 <p className="text-[11px] text-slate text-center py-6">Loading your apps…</p>
@@ -740,7 +794,6 @@ export default function StudyPage() {
               )}
             </div>
 
-            {/* Add custom app */}
             <div className="pt-2 border-t border-ink/8">
               <label className="text-[10px] font-bold text-slate block mb-1">
                 + Allow Another App (e.g. Physics Wallah, Chrome, Notion)
