@@ -27,36 +27,28 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generate Flutter Wrapper & Build APK
+      - name: Create Flutter App
         run: |
           flutter create --org com.prepwise --project-name prepwise prepwise_app
           cd prepwise_app
           flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler
-          
-          python3 -c "
-          with open('android/app/src/main/AndroidManifest.xml') as f:
-              c = f.read()
-          perms = '''    <uses-permission android:name=\"android.permission.INTERNET\"/>
-              <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>
-              <uses-permission android:name=\"android.permission.WAKE_LOCK\"/>
-              <uses-permission android:name=\"android.permission.VIBRATE\"/>
-              <uses-permission android:name=\"android.permission.CAMERA\"/>
-              <uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>
-              <uses-permission android:name=\"android.permission.MODIFY_AUDIO_SETTINGS\"/>
-              <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>
-              <uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" />
-              <uses-feature android:name=\"android.hardware.camera.autofocus\" android:required=\"false\" />
-              <uses-feature android:name=\"android.hardware.microphone\" android:required=\"false\" />
-          '''
-          c = c.replace('<application', perms + '    <application')
-          with open('android/app/src/main/AndroidManifest.xml', 'w') as f:
-              f.write(c)
-          "
-          
-          sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g' android/app/build.gradle || true
-          sed -i 's/minSdk = flutter.minSdk/minSdk = 21/g' android/app/build.gradle || true
-          
-          cat << 'DART_CODE' > lib/main.dart
+          echo "" >> pubspec.yaml
+          echo "dependency_overrides:" >> pubspec.yaml
+          echo "  permission_handler_android: 12.0.13" >> pubspec.yaml
+          flutter pub get
+
+      - name: Configure Android Manifest and SDK
+        run: |
+          cd prepwise_app
+          python3 -c "import base64; perms = '''    <uses-permission android:name=\"android.permission.INTERNET\"/>\n    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>\n    <uses-permission android:name=\"android.permission.WAKE_LOCK\"/>\n    <uses-permission android:name=\"android.permission.VIBRATE\"/>\n    <uses-permission android:name=\"android.permission.CAMERA\"/>\n    <uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>\n    <uses-permission android:name=\"android.permission.MODIFY_AUDIO_SETTINGS\"/>\n    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>\n    <uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" />\n    <uses-feature android:name=\"android.hardware.camera.autofocus\" android:required=\"false\" />\n    <uses-feature android:name=\"android.hardware.microphone\" android:required=\"false\" />\n    <application'''; p = 'android/app/src/main/AndroidManifest.xml'; open(p, 'w').write(open(p).read().replace('<application', perms))"
+          find android -name "build.gradle*" -exec sed -i "s/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g" {} + || true
+          find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdkVersion/minSdk = 21/g" {} + || true
+          find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdk/minSdk = 21/g" {} + || true
+
+      - name: Write Main Code
+        run: |
+          cd prepwise_app
+          cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:webview_flutter/webview_flutter.dart';
@@ -232,8 +224,11 @@ jobs:
               );
             }
           }
-          DART_CODE
+          EOF
 
+      - name: Build Release APK
+        run: |
+          cd prepwise_app
           flutter build apk --release
 
       - name: Upload Release APK
