@@ -50,7 +50,27 @@ jobs:
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          echo "$GOOGLE_SERVICES_JSON" > prepwise_app/android/app/google-services.json
+          python3 - << 'PYEOF'
+          import os, sys, json
+
+          raw_json = os.environ.get("GOOGLE_SERVICES_JSON", "").strip()
+          if not raw_json:
+              print("::error::GitHub Secret GOOGLE_SERVICES_JSON is empty or missing! Please add it in Repo Settings -> Secrets -> Actions.")
+              sys.exit(1)
+
+          try:
+              parsed = json.loads(raw_json)
+              print("google-services.json is valid JSON!")
+          except Exception as e:
+              print(f"::error::GOOGLE_SERVICES_JSON is not valid JSON! Error: {e}")
+              sys.exit(1)
+
+          target_path = "prepwise_app/android/app/google-services.json"
+          os.makedirs(os.path.dirname(target_path), exist_ok=True)
+          with open(target_path, "w", encoding="utf-8") as f:
+              json.dump(parsed, f, indent=2)
+          print(f"Successfully saved valid {target_path} ({os.path.getsize(target_path)} bytes)")
+          PYEOF
 
       - name: Configure Android Manifest and SDK
         run: |
