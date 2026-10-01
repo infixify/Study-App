@@ -1344,7 +1344,6 @@ jobs:
 
             Future<void> triggerNativeGoogleSignIn() async {
               try {
-                AppToast.show("Opening 1-Tap Google Sign-In...");
                 final result = await GoogleAuthService().signIn();
                 if (result.success && result.idToken != null) {
                   final idToken = result.idToken!;
@@ -1359,12 +1358,9 @@ jobs:
                     "}"
                     "})();"
                   );
-                } else if (!result.success && result.errorMessage != null && !result.errorMessage!.contains('cancelled')) {
-                  final err = result.errorMessage!;
-                  AppToast.show("Google Sign-In: $err");
-                  await webViewController.runJavaScript(
-                    "(function(){if(typeof window.onNativeGoogleSignInError==='function'){window.onNativeGoogleSignInError('$err');}})();"
-                  );
+                } else {
+                  // Native 1-Tap was cancelled or unavailable. Fallback seamlessly to web login.
+                  debugPrint("[GoogleAuth] Native Sign-In unavailable (${result.errorMessage}), web sign-in active.");
                 }
               } catch (e) {
                 debugPrint("triggerNativeGoogleSignIn error: $e");
@@ -1514,6 +1510,7 @@ jobs:
               controller
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
                 ..setBackgroundColor(const Color(0xFF0F172A))
+                ..setUserAgent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36")
                 ..setNavigationDelegate(NavigationDelegate(
                   onProgress: (int progress) => setState(() => _progress = progress / 100.0),
                   onPageStarted: (String url) => setState(() { _isLoading = true; _hasError = false; }),
@@ -1530,27 +1527,6 @@ jobs:
                             }
                           };
                         }
-                        // Intercept Google Sign In button clicks on the web page to trigger native 1-Tap bottom sheet
-                        if(!window.__googleClickInterceptAttached){
-                          window.__googleClickInterceptAttached = true;
-                          document.addEventListener('click', function(e) {
-                            var target = e.target;
-                            while(target && target !== document.body) {
-                              if(target.tagName === 'BUTTON' || target.tagName === 'A' || target.getAttribute('role') === 'button') {
-                                var txt = (target.innerText || target.textContent || '').toLowerCase();
-                                if(txt.includes('google') || txt.includes('continue with google') || txt.includes('sign in with google')) {
-                                  if(window.AppBridge) {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    window.AppBridge.postMessage(JSON.stringify({action: 'nativeGoogleSignIn'}));
-                                    return;
-                                  }
-                                }
-                              }
-                              target = target.parentElement;
-                            }
-                          }, true);
-                        }
                       })();
                     """);
                     final token = NotificationService().fcmToken;
@@ -1563,21 +1539,13 @@ jobs:
                   onNavigationRequest: (NavigationRequest request) {
                     final url = request.url;
 
-                    // 1. Intercept Google OAuth / Supabase Google redirects to trigger Native 1-Tap bottom sheet
-                    if (url.contains('accounts.google.com') ||
-                        url.contains('/auth/v1/authorize?provider=google') ||
-                        url.contains('provider=google')) {
-                      _bridgeHandler.triggerNativeGoogleSignIn();
-                      return NavigationDecision.prevent;
-                    }
-
-                    // 2. Intercept non-http protocols
+                    // 1. Intercept non-http protocols
                     if (url.startsWith('intent://') || url.startsWith('tel:') || url.startsWith('mailto:') || url.startsWith('whatsapp:') || url.startsWith('market:')) {
                       try { launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
                       return NavigationDecision.prevent;
                     }
 
-                    // 3. Intercept NCERT and other PDF downloads
+                    // 2. Intercept NCERT and other PDF downloads
                     if (url.toLowerCase().endsWith('.pdf') ||
                         url.contains('application/pdf') ||
                         url.contains('ncert.nic.in/textbook/pdf')) {
@@ -1585,6 +1553,7 @@ jobs:
                       return NavigationDecision.prevent;
                     }
 
+                    // Allow all normal web navigation including Google OAuth (accounts.google.com) and Supabase
                     return NavigationDecision.navigate;
                   },
                 ));
