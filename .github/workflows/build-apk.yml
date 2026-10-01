@@ -10,6 +10,7 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -32,27 +33,40 @@ jobs:
           flutter create --org com.prepwise --project-name prepwise prepwise_app
           cd prepwise_app
 
-          # 2. Add dependencies
-          flutter pub add webview_flutter wakelock_plus url_launcher
+          # 2. Add dependencies including permission_handler & webview_flutter_android
+          flutter pub add webview_flutter webview_flutter_android wakelock_plus url_launcher permission_handler
 
-          # 3. Add Android permissions
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>' android/app/src/main/AndroidManifest.xml
+          # 3. Add Android permissions (Camera, Microphone, Notifications, Wakelock)
+          sed -i '/<application/i \
+    <uses-permission android:name="android.permission.INTERNET"/>\n\
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n\
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n\
+    <uses-permission android:name="android.permission.VIBRATE"/>\n\
+    <uses-permission android:name="android.permission.CAMERA"/>\n\
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n\
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>\n\
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n\
+    <uses-feature android:name="android.hardware.camera" android:required="false" />\n\
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />\n\
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />' android/app/src/main/AndroidManifest.xml
 
           # 4. Set minSdk to 21
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g' android/app/build.gradle || true
           sed -i 's/minSdk = flutter.minSdk/minSdk = 21/g' android/app/build.gradle || true
 
-          # 5. Write Flutter Entrypoint
+          # 5. Write main.dart with Native Permissions & WebRTC grant
           cat << 'DART' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:webview_flutter/webview_flutter.dart';
+          import 'package:webview_flutter_android/webview_flutter_android.dart';
           import 'package:wakelock_plus/wakelock_plus.dart';
           import 'package:url_launcher/url_launcher.dart';
+          import 'package:permission_handler/permission_handler.dart';
 
-          void main() {
+          void main() async {
             WidgetsFlutterBinding.ensureInitialized();
-            SystemChrome.setPreferredOrientations([
+            await SystemChrome.setPreferredOrientations([
               DeviceOrientation.portraitUp,
               DeviceOrientation.portraitDown,
             ]);
@@ -90,7 +104,35 @@ jobs:
             @override
             void initState() {
               super.initState();
-              _controller = WebViewController()
+              _requestAllPermissions();
+              _setupWebView();
+            }
+
+            // App start par Notification, Camera & Mic permissions maangna
+            Future<void> _requestAllPermissions() async {
+              try {
+                await [
+                  Permission.notification,
+                  Permission.camera,
+                  Permission.microphone,
+                ].request();
+              } catch (e) {
+                debugPrint("Permission error: $e");
+              }
+            }
+
+            void _setupWebView() {
+              late final PlatformWebViewControllerCreationParams params;
+              if (WebViewPlatform.instance is AndroidWebViewPlatform) {
+                params = AndroidWebViewControllerCreationParams();
+              } else {
+                params = const PlatformWebViewControllerCreationParams();
+              }
+
+              final WebViewController controller =
+                  WebViewController.fromPlatformCreationParams(params);
+
+              controller
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
                 ..setBackgroundColor(const Color(0xFF0F172A))
                 ..setNavigationDelegate(
@@ -112,8 +154,15 @@ jobs:
                       ''');
                     },
                     onNavigationRequest: (request) {
-                      if (request.url.endsWith('.pdf')) {
-                        launchUrl(Uri.parse(request.url), mode: LaunchMode.externalApplication);
+                      final url = request.url;
+                      if (url.startsWith('intent://') || url.startsWith('tel:') || url.startsWith('mailto:')) {
+                        try {
+                          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                        } catch (_) {}
+                        return NavigationDecision.prevent;
+                      }
+                      if (url.endsWith('.pdf')) {
+                        launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                         return NavigationDecision.prevent;
                       }
                       return NavigationDecision.navigate;
@@ -122,7 +171,7 @@ jobs:
                 )
                 ..addJavaScriptChannel(
                   'FlutterBridge',
-                  onMessageReceived: (JavaScriptMessage message) {
+                  onMessageReceived: (JavaScriptMessage message) async {
                     try {
                       if (message.message.contains('startStrictTimer')) {
                         WakelockPlus.enable();
@@ -132,13 +181,26 @@ jobs:
                         HapticFeedback.vibrate();
                       } else if (message.message.contains('vibrate')) {
                         HapticFeedback.mediumImpact();
+                      } else if (message.message.contains('requestCamera') || message.message.contains('requestPermissions')) {
+                        await [Permission.camera, Permission.microphone].request();
                       }
                     } catch (e) {
-                      debugPrint('Bridge error: \$e');
+                      debugPrint('Bridge error: $e');
                     }
                   },
-                )
-                ..loadRequest(Uri.parse('https://study-app-infixify1.vercel.app'));
+                );
+
+              // Android WebView ke andar Camera/Mic stream ko allow karna
+              if (controller.platform is AndroidWebViewController) {
+                final androidController = controller.platform as AndroidWebViewController;
+                androidController.setMediaPlaybackRequiresUserGesture(false);
+                androidController.setOnPlatformPermissionRequest((request) {
+                  request.grant();
+                });
+              }
+
+              controller.loadRequest(Uri.parse('https://study-app-infixify1.vercel.app'));
+              _controller = controller;
             }
 
             @override
