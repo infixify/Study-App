@@ -40,7 +40,35 @@ jobs:
       - name: Configure Android Manifest and SDK
         run: |
           cd prepwise_app
-          python3 -c "import base64; perms = '''    <uses-permission android:name=\"android.permission.INTERNET\"/>\n    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>\n    <uses-permission android:name=\"android.permission.WAKE_LOCK\"/>\n    <uses-permission android:name=\"android.permission.VIBRATE\"/>\n    <uses-permission android:name=\"android.permission.CAMERA\"/>\n    <uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>\n    <uses-permission android:name=\"android.permission.MODIFY_AUDIO_SETTINGS\"/>\n    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>\n    <uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" />\n    <uses-feature android:name=\"android.hardware.camera.autofocus\" android:required=\"false\" />\n    <uses-feature android:name=\"android.hardware.microphone\" android:required=\"false\" />\n    <application'''; p = 'android/app/src/main/AndroidManifest.xml'; open(p, 'w').write(open(p).read().replace('<application', perms))"
+          cat << 'PY_SCRIPT' > update_manifest.py
+          import xml.etree.ElementTree as ET
+
+          manifest_path = "android/app/src/main/AndroidManifest.xml"
+          with open(manifest_path, "r", encoding="utf-8") as f:
+              content = f.read()
+
+          permissions = """
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+              <uses-permission android:name="android.permission.WAKE_LOCK"/>
+              <uses-permission android:name="android.permission.VIBRATE"/>
+              <uses-permission android:name="android.permission.CAMERA"/>
+              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+              <uses-feature android:name="android.hardware.camera" android:required="false" />
+              <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+              <uses-feature android:name="android.hardware.microphone" android:required="false" />
+          """
+
+          content = content.replace("<application", permissions + "    <application", 1)
+          ET.fromstring(content)
+
+          with open(manifest_path, "w", encoding="utf-8") as f:
+              f.write(content)
+          print("Manifest updated successfully!")
+          PY_SCRIPT
+          python3 update_manifest.py
           find android -name "build.gradle*" -exec sed -i "s/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g" {} + || true
           find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdkVersion/minSdk = 21/g" {} + || true
           find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdk/minSdk = 21/g" {} + || true
