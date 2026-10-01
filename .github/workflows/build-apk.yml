@@ -54,7 +54,6 @@ jobs:
       - name: Configure Android Manifest and SDK
         run: |
           cd prepwise_app
-
           cat << 'PY_SCRIPT' > update_manifest.py
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           with open(manifest_path, "r", encoding="utf-8") as f:
@@ -93,36 +92,29 @@ jobs:
           print("Manifest updated successfully!")
           PY_SCRIPT
           python3 update_manifest.py
-
           find android -name "build.gradle*" -exec sed -i "s/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g" {} + || true
           find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdkVersion/minSdk = 21/g" {} + || true
           find android -name "build.gradle*" -exec sed -i "s/minSdk = flutter.minSdk/minSdk = 21/g" {} + || true
 
-            - name: Add google-services Gradle plugin
+      - name: Add google-services Gradle plugin
         run: |
           cd prepwise_app
-
           SETTINGS_KTS="android/settings.gradle.kts"
-          APP_KTS="android/app/build.gradle.kts"
           SETTINGS_GROOVY="android/settings.gradle"
+          APP_KTS="android/app/build.gradle.kts"
           APP_GROOVY="android/app/build.gradle"
 
           if [ -f "$SETTINGS_KTS" ]; then
             python3 - << 'PYEOF'
-          import re
-
           path = "android/settings.gradle.kts"
           with open(path, "r") as f:
               content = f.read()
-
           plugin_line = '    id("com.google.gms.google-services") version "4.4.1" apply false'
-
           if "com.google.gms.google-services" not in content:
               if "plugins {" in content:
                   content = content.replace("plugins {", "plugins {\n" + plugin_line, 1)
               else:
                   content = 'plugins {\n' + plugin_line + '\n}\n' + content
-
           with open(path, "w") as f:
               f.write(content)
           print("settings.gradle.kts updated")
@@ -132,15 +124,12 @@ jobs:
           path = "android/app/build.gradle.kts"
           with open(path, "r") as f:
               content = f.read()
-
           plugin_line = '    id("com.google.gms.google-services")'
-
           if "com.google.gms.google-services" not in content:
               if "plugins {" in content:
                   content = content.replace("plugins {", "plugins {\n" + plugin_line, 1)
               else:
                   content = 'plugins {\n' + plugin_line + '\n}\n' + content
-
           with open(path, "w") as f:
               f.write(content)
           print("app/build.gradle.kts updated")
@@ -151,13 +140,10 @@ jobs:
           path = "android/settings.gradle"
           with open(path, "r") as f:
               content = f.read()
-
           plugin_line = "    id 'com.google.gms.google-services' version '4.4.1' apply false"
-
           if "com.google.gms.google-services" not in content:
               if "plugins {" in content:
                   content = content.replace("plugins {", "plugins {\n" + plugin_line, 1)
-
           with open(path, "w") as f:
               f.write(content)
           print("settings.gradle updated")
@@ -167,9 +153,9 @@ jobs:
             echo "apply plugin: 'com.google.gms.google-services'" >> "$APP_GROOVY"
           fi
 
-          echo "=== settings.gradle.kts (first 30 lines) ==="
+          echo "=== settings.gradle.kts first 30 lines ==="
           head -30 android/settings.gradle.kts 2>/dev/null || head -30 android/settings.gradle 2>/dev/null
-          echo "=== app/build.gradle.kts (first 20 lines) ==="
+          echo "=== app/build.gradle.kts first 20 lines ==="
           head -20 android/app/build.gradle.kts 2>/dev/null || true
 
       - name: Write notification_service.dart
@@ -369,15 +355,13 @@ jobs:
               systemNavigationBarColor: Color(0xFF0F172A),
               systemNavigationBarIconBrightness: Brightness.light,
             ));
-
             try {
               await Firebase.initializeApp();
               FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
               debugPrint('Firebase initialized OK');
             } catch (e) {
-              debugPrint('Firebase init failed (no google-services.json?): $e');
+              debugPrint('Firebase init failed: $e');
             }
-
             runApp(const PrepWiseApp());
           }
 
