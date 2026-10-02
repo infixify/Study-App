@@ -1,7 +1,7 @@
 // app/onboarding/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import StepRail from "@/components/onboarding/StepRail";
 import StepLogin from "@/components/onboarding/StepLogin";
@@ -32,6 +32,7 @@ export default function OnboardingPage() {
     studyMode: null,
     batchOrBranch: null,
   });
+  const pendingTokenPollerRef = useRef<any>(null);
 
   async function goToStep2IfNotOnboarded(userId: string, name: string) {
     const { data: userRow } = await supabase
@@ -49,31 +50,55 @@ export default function OnboardingPage() {
     setStep((s) => (s === 1 ? 2 : s));
   }
 
+  async function handleNativeGoogleTokens(idToken: string, accessToken: string) {
+    try {
+      const { data: authData, error } = await supabase.auth.signInWithIdToken({
+        provider: "google",
+        token: idToken,
+        access_token: accessToken || undefined,
+      });
+
+      if (!error && authData?.user) {
+        const name =
+          authData.user.user_metadata?.full_name ||
+          authData.user.user_metadata?.name ||
+          authData.user.email ||
+          "there";
+        await goToStep2IfNotOnboarded(authData.user.id, name);
+      } else {
+        console.error("[NativeAuth] signInWithIdToken error:", error);
+      }
+    } catch (err) {
+      console.error("[NativeAuth] Sign-in error:", err);
+    }
+  }
+
   useEffect(() => {
-    // 1-Tap Native Google Sign-In Listener from Android Flutter Bridge
+    // 1. Register native Google Sign-In callback
     if (typeof window !== "undefined") {
       (window as any).onNativeGoogleSignInSuccess = async (idToken: string, accessToken: string) => {
-        try {
-          const { data: authData, error } = await supabase.auth.signInWithIdToken({
-            provider: "google",
-            token: idToken,
-            access_token: accessToken || undefined,
-          });
-
-          if (!error && authData?.user) {
-            const name =
-              authData.user.user_metadata?.full_name ||
-              authData.user.user_metadata?.name ||
-              authData.user.email ||
-              "there";
-            await goToStep2IfNotOnboarded(authData.user.id, name);
-          }
-        } catch (err) {
-          console.error("[NativeAuth] Sign-in error:", err);
+        // Clear the pending poller — callback came through properly
+        if (pendingTokenPollerRef.current) {
+          clearInterval(pendingTokenPollerRef.current);
+          pendingTokenPollerRef.current = null;
         }
+        await handleNativeGoogleTokens(idToken, accessToken);
       };
+
+      // 2. Poll for __pendingGoogleTokens every 500ms (safety net if callback fires before listener registers)
+      pendingTokenPollerRef.current = setInterval(() => {
+        const pending = (window as any).__pendingGoogleTokens;
+        if (pending?.idToken) {
+          // Clear pending so we don't process twice
+          (window as any).__pendingGoogleTokens = null;
+          clearInterval(pendingTokenPollerRef.current);
+          pendingTokenPollerRef.current = null;
+          handleNativeGoogleTokens(pending.idToken, pending.accessToken ?? "");
+        }
+      }, 500);
     }
 
+    // 3. Check existing session
     async function checkSession() {
       const { data: sessionData } = await supabase.auth.getUser();
       if (sessionData?.user) {
@@ -88,6 +113,7 @@ export default function OnboardingPage() {
     }
     checkSession();
 
+    // 4. Auth state change listener (web OAuth redirect fallback)
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         const name =
@@ -99,7 +125,15 @@ export default function OnboardingPage() {
       }
     });
 
-    return () => listener.subscription.unsubscribe();
+    return () => {
+      listener.subscription.unsubscribe();
+      if (pendingTokenPollerRef.current) {
+        clearInterval(pendingTokenPollerRef.current);
+      }
+      if (typeof window !== "undefined") {
+        (window as any).onNativeGoogleSignInSuccess = undefined;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
