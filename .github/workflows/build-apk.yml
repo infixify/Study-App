@@ -350,16 +350,17 @@ jobs:
           package com.prepwise.prepwise
 
           import android.app.AppOpsManager
-          import android.app.usage.UsageEvents
-          import android.app.usage.UsageStatsManager
           import android.content.Context
           import android.content.Intent
+          import android.content.IntentFilter
           import android.net.Uri
           import android.os.Build
+          import android.os.Bundle
           import android.os.Handler
           import android.os.Looper
           import android.os.Process
           import android.provider.Settings
+          import android.view.WindowManager
           import android.widget.Toast
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
@@ -368,11 +369,17 @@ jobs:
           import org.json.JSONObject
 
           class MainActivity : FlutterActivity() {
-              private val CHANNEL_APPS         = "com.prepwise/apps"
-              private val CHANNEL_TOAST        = "com.prepwise/toast"
-              private val CHANNEL_OVERLAY      = "com.prepwise/overlay"
-              private val CHANNEL_BLOCKER      = "com.prepwise/accessibility"
-              private val CHANNEL_FOCUS_SVC    = "com.prepwise/focusblocker"
+              companion object {
+                  const val CHANNEL_APPS      = "com.prepwise/apps"
+                  const val CHANNEL_TOAST     = "com.prepwise/toast"
+                  const val CHANNEL_OVERLAY   = "com.prepwise/overlay"
+                  const val CHANNEL_BLOCKER   = "com.prepwise/accessibility"
+                  const val CHANNEL_FOCUS_SVC = "com.prepwise/focusblocker"
+                  const val CHANNEL_MAIN      = "com.prepwise/mainactivity"
+
+                  @Volatile var isAppForeground: Boolean = false
+                  @Volatile var isAppAlive: Boolean = false
+              }
 
               private var flutterEngineRef: FlutterEngine? = null
 
@@ -381,11 +388,40 @@ jobs:
                   override fun onReceive(context: Context, intent: Intent) {
                       if (intent.action == "com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST") {
                           flutterEngineRef?.let { engine ->
-                              io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "com.prepwise/mainactivity")
+                              MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL_MAIN)
                                   .invokeMethod("triggerDirectStopFocusInWeb", null)
                           }
                       }
                   }
+              }
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  isAppAlive = true
+                  // Hardware acceleration for ultra-smooth scrolling and transitions
+                  window.setFlags(
+                      WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                      WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+                  )
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  isAppForeground = true
+              }
+
+              override fun onPause() {
+                  super.onPause()
+                  isAppForeground = false
+              }
+
+              override fun onDestroy() {
+                  isAppAlive = false
+                  isAppForeground = false
+                  try {
+                      unregisterReceiver(stopFocusReceiver)
+                  } catch (_: Exception) {}
+                  super.onDestroy()
               }
 
               override fun onNewIntent(intent: Intent) {
@@ -398,151 +434,154 @@ jobs:
                   flutterEngineRef = flutterEngine
 
                   // Register broadcast receiver for focus stop relay
-                  val filter = android.content.IntentFilter("com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST")
+                  val filter = IntentFilter("com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST")
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                      registerReceiver(stopFocusReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+                      registerReceiver(stopFocusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
                   } else {
                       registerReceiver(stopFocusReceiver, filter)
                   }
 
-                  // -- MainActivity Channel (relay bridge events to Dart) ---------------------
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.prepwise/mainactivity")
-                      .setMethodCallHandler { _, _ -> } // Dart calls us; we call Dart - no incoming calls needed here
+                  // MainActivity Channel
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_MAIN)
+                      .setMethodCallHandler { _, _ -> }
 
-                  // -- Toast Channel ----------------------------------------------------------
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST)
-                      .setMethodCallHandler { call, result ->
-                          if (call.method == "showToast") {
-                              Toast.makeText(applicationContext, call.argument<String>("message") ?: "", Toast.LENGTH_SHORT).show()
+                  // Toast Channel
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST).setMethodCallHandler { call, result ->
+                      if (call.method == "showToast") {
+                          val msg = call.argument<String>("message") ?: ""
+                          Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+                          result.success(true)
+                      } else {
+                          result.notImplemented()
+                      }
+                  }
+
+                  // Apps Channel
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_APPS).setMethodCallHandler { call, result ->
+                      if (call.method == "getInstalledApps") {
+                          try {
+                              val pm = packageManager
+                              val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
+                              val apps = pm.queryIntentActivities(intent, 0)
+                              val arr = JSONArray()
+                              for (app in apps) {
+                                  arr.put(JSONObject().apply {
+                                      put("name", app.loadLabel(pm).toString())
+                                      put("packageName", app.activityInfo.packageName)
+                                  })
+                              }
+                              result.success(arr.toString())
+                          } catch (e: Exception) {
+                              result.error("APPS_ERROR", e.message, null)
+                          }
+                      } else {
+                          result.notImplemented()
+                      }
+                  }
+
+                  // Overlay Permission Channel
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_OVERLAY).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "canDrawOverlays" -> {
+                              val canDraw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true
+                              result.success(canDraw)
+                          }
+                          "requestOverlayPermission" -> {
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                                  Toast.makeText(applicationContext, "Please allow 'Display over other apps' to enable Face Verification", Toast.LENGTH_LONG).show()
+                                  val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                                  startActivity(intent)
+                              }
                               result.success(true)
-                          } else result.notImplemented()
+                          }
+                          else -> result.notImplemented()
                       }
+                  }
 
-                  // -- Installed Apps Channel -------------------------------------------------
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_APPS)
-                      .setMethodCallHandler { call, result ->
-                          if (call.method == "getInstalledApps") {
+                  // Accessibility / Usage Access Channel
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_BLOCKER).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "isAccessibilityEnabled", "hasUsagePermission" -> result.success(hasUsageStatsPermission())
+                          "openAccessibilitySettings", "openUsageSettings" -> {
                               try {
-                                  val pm = packageManager
-                                  val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
-                                  val apps = pm.queryIntentActivities(intent, 0)
-                                  val arr = JSONArray()
-                                  for (app in apps) {
-                                      arr.put(JSONObject().apply {
-                                          put("name", app.loadLabel(pm).toString())
-                                          put("packageName", app.activityInfo.packageName)
-                                      })
-                                  }
-                                  result.success(arr.toString())
-                              } catch (e: Exception) { result.error("APPS_ERROR", e.message, null) }
-                          } else result.notImplemented()
-                      }
-
-                  // -- Overlay Permission Channel ---------------------------------------------
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_OVERLAY)
-                      .setMethodCallHandler { call, result ->
-                          when (call.method) {
-                              "canDrawOverlays" ->
-                                  result.success(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true)
-                              "requestOverlayPermission" -> {
-                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                                      Toast.makeText(applicationContext, "Please allow 'Display over other apps' to enable Face Verification", Toast.LENGTH_LONG).show()
-                                      startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-                                  }
+                                  startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
                                   result.success(true)
+                              } catch (e: Exception) {
+                                  result.error("SETTINGS_ERROR", e.message, null)
                               }
-                              else -> result.notImplemented()
                           }
+                          "setBlockedApps", "setBlockingEnabled" -> result.success(true)
+                          else -> result.notImplemented()
                       }
+                  }
 
-                  // -- Usage Stats / Accessibility Channel -----------------------------------
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_BLOCKER)
-                      .setMethodCallHandler { call, result ->
-                          when (call.method) {
-                              "isAccessibilityEnabled", "hasUsagePermission" ->
-                                  result.success(hasUsageStatsPermission())
-                              "openAccessibilitySettings", "openUsageSettings" -> {
-                                  try {
-                                      startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                                      result.success(true)
-                                  } catch (e: Exception) { result.error("SETTINGS_ERROR", e.message, null) }
+                  // FocusBlockerService Channel
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_FOCUS_SVC).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "startFocusBlocker" -> {
+                              val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
+                              val subject = call.argument<String>("subject") ?: "General"
+                              val mode = call.argument<String>("mode") ?: "Study"
+                              val camEnabled = call.argument<Boolean>("camEnabled") ?: false
+                              val blockerEnabled = call.argument<Boolean>("blockerEnabled") ?: false
+                              val intent = Intent(this, FocusBlockerService::class.java).apply {
+                                  action = FocusBlockerService.ACTION_START
+                                  putStringArrayListExtra(FocusBlockerService.EXTRA_BLOCKED_APPS, ArrayList(blocked))
+                                  putExtra(FocusBlockerService.EXTRA_SUBJECT, subject)
+                                  putExtra(FocusBlockerService.EXTRA_MODE, mode)
+                                  putExtra(FocusBlockerService.EXTRA_CAM_ENABLED, camEnabled)
+                                  putExtra(FocusBlockerService.EXTRA_BLOCKER_ENABLED, blockerEnabled)
                               }
-                              // Legacy in-process blocker calls - kept for compatibility, no-op now
-                              "setBlockedApps", "setBlockingEnabled" -> result.success(true)
-                              else -> result.notImplemented()
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                  startForegroundService(intent)
+                              } else {
+                                  startService(intent)
+                              }
+                              result.success(true)
                           }
-                      }
-
-                  // -- FocusBlockerService Channel --------------------------------------------
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_FOCUS_SVC)
-                      .setMethodCallHandler { call, result ->
-                          when (call.method) {
-                              "startFocusBlocker" -> {
-                                  val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
-                                  val subject = call.argument<String>("subject") ?: "General"
-                                  val mode    = call.argument<String>("mode")    ?: "Study"
-                                  val camEnabled = call.argument<Boolean>("camEnabled") ?: false
-                                  val blockerEnabled = call.argument<Boolean>("blockerEnabled") ?: false
-                                  val intent  = Intent(this, FocusBlockerService::class.java).apply {
-                                      action = FocusBlockerService.ACTION_START
-                                      putStringArrayListExtra(FocusBlockerService.EXTRA_BLOCKED_APPS, ArrayList(blocked))
-                                      putExtra(FocusBlockerService.EXTRA_SUBJECT, subject)
-                                      putExtra(FocusBlockerService.EXTRA_MODE, mode)
-                                      putExtra(FocusBlockerService.EXTRA_CAM_ENABLED, camEnabled)
-                                      putExtra(FocusBlockerService.EXTRA_BLOCKER_ENABLED, blockerEnabled)
-                                  }
-                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                                      startForegroundService(intent)
-                                  else
-                                      startService(intent)
-                                  result.success(true)
-                              }
-                              "stopFocusBlocker" -> {
-                                  startService(Intent(this, FocusBlockerService::class.java).apply {
-                                      action = FocusBlockerService.ACTION_STOP
-                                  })
-                                  result.success(true)
-                              }
-                              "updateBlockedApps" -> {
-                                  val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
-                                  startService(Intent(this, FocusBlockerService::class.java).apply {
-                                      action = FocusBlockerService.ACTION_UPDATE_BLOCKED
-                                      putStringArrayListExtra(FocusBlockerService.EXTRA_BLOCKED_APPS, ArrayList(blocked))
-                                  })
-                                  result.success(true)
-                              }
-                              "setCamStatus" -> {
-                                  // Pause/resume Kotlin timer based on cam status from web
-                                  val status = call.argument<String>("status") ?: "verified"
-                                  startService(Intent(this, FocusBlockerService::class.java).apply {
-                                      action = FocusBlockerService.ACTION_SET_CAM_STATUS
-                                      putExtra(FocusBlockerService.EXTRA_CAM_STATUS, status)
-                                  })
-                                  result.success(true)
-                              }
-                              "getElapsedSeconds" -> {
-                                  // Return current elapsed seconds from Kotlin service for sync
-                                  result.success(FocusBlockerService.currentElapsedSeconds)
-                              }
-                              else -> result.notImplemented()
+                          "stopFocusBlocker" -> {
+                              startService(Intent(this, FocusBlockerService::class.java).apply {
+                                  action = FocusBlockerService.ACTION_STOP
+                              })
+                              result.success(true)
                           }
+                          "updateBlockedApps" -> {
+                              val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
+                              startService(Intent(this, FocusBlockerService::class.java).apply {
+                                  action = FocusBlockerService.ACTION_UPDATE_BLOCKED
+                                  putStringArrayListExtra(FocusBlockerService.EXTRA_BLOCKED_APPS, ArrayList(blocked))
+                              })
+                              result.success(true)
+                          }
+                          "setCamStatus" -> {
+                              val status = call.argument<String>("status") ?: "verified"
+                              startService(Intent(this, FocusBlockerService::class.java).apply {
+                                  action = FocusBlockerService.ACTION_SET_CAM_STATUS
+                                  putExtra(FocusBlockerService.EXTRA_CAM_STATUS, status)
+                              })
+                              result.success(true)
+                          }
+                          "getElapsedSeconds" -> {
+                              result.success(FocusBlockerService.currentElapsedSeconds)
+                          }
+                          else -> result.notImplemented()
                       }
+                  }
               }
 
               private fun hasUsageStatsPermission(): Boolean {
                   return try {
                       val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-                      val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                      val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                           appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
-                      else
+                      } else {
+                          @Suppress("DEPRECATION")
                           appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
+                      }
                       mode == AppOpsManager.MODE_ALLOWED
-                  } catch (e: Exception) { false }
-              }
-
-              override fun onDestroy() {
-                  try { unregisterReceiver(stopFocusReceiver) } catch (_: Exception) {}
-                  super.onDestroy()
+                  } catch (_: Exception) {
+                      false
+                  }
               }
           }
           KT_MAIN_EOF
@@ -703,8 +742,11 @@ jobs:
                           }
                       }
                       ACTION_STOP_REQUEST -> {
-                          // Point 11: Notification stop button -> directly signal WebApp to stop & log without confirmation
-                          sendStopRequestToWebApp()
+                          if (MainActivity.isAppForeground) {
+                              sendStopRequestToWebApp()
+                          } else {
+                              directBackgroundStopAndLog()
+                          }
                       }
                       ACTION_STOP -> {
                           handler.removeCallbacks(tickRunnable)
@@ -750,9 +792,9 @@ jobs:
                   val foreground = getForegroundPackage() ?: return
 
                   if (foreground == packageName) {
-                      // User is in PrepWise - remove blocking overlay, hide dot (Flutter dot takes over)
+                      // User is in PrepWise - remove blocking overlay, keep single unified native dot visible
                       if (overlayView != null) removeOverlay()
-                      if (camEnabled) hideDotView()
+                      if (camEnabled && canDrawOverlay()) showDotView()
                       return
                   }
 
@@ -1006,7 +1048,13 @@ jobs:
                           cornerRadius = 10 * density
                       }
                       typeface = android.graphics.Typeface.DEFAULT_BOLD
-                      setOnClickListener { sendStopRequestToWebApp() }
+                      setOnClickListener {
+                          if (MainActivity.isAppForeground) {
+                              sendStopRequestToWebApp()
+                          } else {
+                              directBackgroundStopAndLog()
+                          }
+                      }
                   }
                   expandedCard.addView(stopBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
@@ -1260,21 +1308,47 @@ jobs:
               }
 
               // -- Stop Request -> Web App ------------------------------------------------
-              // When user taps "Stop Focus Mode" in notification, we do not kill the service
-              // immediately - instead we signal the web app to run the full stop+log flow.
-              // The web app calls stopFocusNotification which then sends ACTION_STOP.
+              // When user taps Stop while app is foreground, signal the web app via broadcast.
               private fun sendStopRequestToWebApp() {
-                  // Try to signal via broadcast to MainActivity which relays to WebView bridge
                   val intent = Intent("com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST")
                   intent.setPackage(packageName)
                   sendBroadcast(intent)
+              }
 
-                  // Also bring PrepWise to foreground so user sees the log popup
-                  val launch = packageManager.getLaunchIntentForPackage(packageName)
-                  if (launch != null) {
-                      launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                      startActivity(launch)
+              // Task 3: When user taps Stop while app is killed, dead, or background:
+              // Directly stop service & notification, save session to SharedPreferences, and show toast.
+              // NEVER launch MainActivity or redirect!
+              private fun directBackgroundStopAndLog() {
+                  handler.removeCallbacks(tickRunnable)
+                  removeOverlay()
+                  removeFloatingDot()
+                  val elapsed = currentElapsedSeconds
+
+                  try {
+                      val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                      prefs.edit()
+                          .putBoolean("has_pending_session", true)
+                          .putInt("pending_session_seconds", elapsed)
+                          .putString("pending_session_subject", subject)
+                          .putString("pending_session_mode", mode)
+                          .putLong("pending_session_timestamp", System.currentTimeMillis())
+                          .apply()
+                  } catch (_: Exception) {}
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                      stopForeground(STOP_FOREGROUND_REMOVE)
+                  } else {
+                      @Suppress("DEPRECATION") stopForeground(true)
                   }
+
+                  val mins = elapsed / 60
+                  val secs = elapsed % 60
+                  val timeLabel = if (mins > 0) "${mins}m ${secs}s" else "${secs}s"
+                  Toast.makeText(applicationContext, "Study session stopped & saved ($timeLabel logged)!", Toast.LENGTH_LONG).show()
+
+                  currentElapsedSeconds = 0
+                  startTimestampMs = 0L
+                  stopSelf()
               }
 
               override fun onDestroy() {
@@ -2512,7 +2586,7 @@ jobs:
                 ..setNavigationDelegate(NavigationDelegate(
                   onProgress: (int progress) => setState(() => _progress = progress / 100.0),
                   onPageStarted: (String url) => setState(() { _isLoading = true; _hasError = false; }),
-                  onPageFinished: (String url) {
+                  onPageFinished: (String url) async {
                     setState(() => _isLoading = false);
                     controller.runJavaScript("""
                       (function(){
@@ -2525,11 +2599,110 @@ jobs:
                             }
                           };
                         }
+
+                        // Hardware-accelerated smooth scrolling & responsive touch styles
+                        if(!document.getElementById('prepwise-perf-styles')) {
+                          var style = document.createElement('style');
+                          style.id = 'prepwise-perf-styles';
+                          style.innerHTML = `
+                            html, body {
+                              -webkit-overflow-scrolling: touch !important;
+                              overscroll-behavior-y: contain !important;
+                            }
+                            * {
+                              -webkit-tap-highlight-color: transparent !important;
+                            }
+                            /* Task 2: Hide streak card on Focus page */
+                            [data-streak-card],
+                            .streak-card,
+                            div:has(> * > span:contains('streak')) {
+                              display: none !important;
+                            }
+                          `;
+                          document.head.appendChild(style);
+                        }
+
+                        // Task 2: Dynamic DOM observer to hide streak box on Focus page
+                        function hideFocusStreakBox() {
+                          if (window.location.pathname.includes('/focus') || document.body.innerText.includes('Focus Mode')) {
+                            document.querySelectorAll('div').forEach(function(el) {
+                              var txt = (el.innerText || el.textContent || '').trim();
+                              if (txt.includes('streak') && (txt.includes('Keep it going') || txt.includes('min today'))) {
+                                el.style.display = 'none';
+                              }
+                            });
+                          }
+                        }
+                        hideFocusStreakBox();
+                        if(!window.__prepwiseStreakObserver) {
+                          window.__prepwiseStreakObserver = new MutationObserver(hideFocusStreakBox);
+                          window.__prepwiseStreakObserver.observe(document.body, { childList: true, subtree: true });
+                        }
+
+                        // Intercept Google Sign In button clicks on the web page to trigger native 1-Tap bottom sheet
+                        if(!window.__googleClickInterceptAttached){
+                          window.__googleClickInterceptAttached = true;
+                          document.addEventListener('click', function(e) {
+                            var target = e.target;
+                            while(target && target !== document.body) {
+                              if(target.tagName === 'BUTTON' || target.tagName === 'A' || target.getAttribute('role') === 'button') {
+                                var txt = (target.innerText || target.textContent || '').toLowerCase();
+                                if(txt.includes('google') || txt.includes('continue with google') || txt.includes('sign in with google')) {
+                                  if(window.AppBridge) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    window.AppBridge.postMessage(JSON.stringify({action: 'nativeGoogleSignIn'}));
+                                    return;
+                                  }
+                                }
+                              }
+                              target = target.parentElement;
+                            }
+                          }, true);
+                        }
                       })();
                     """);
                     final token = NotificationService().fcmToken;
                     if (token != null) _bridgeHandler.injectFCMToken(token);
                     _injectInstalledApps();
+
+                    // Task 3: Check if a session was stopped & saved directly while in background or dead
+                    try {
+                      final prefs = await SharedPreferences.getInstance();
+                      final hasPending = prefs.getBool('has_pending_session') ?? false;
+                      if (hasPending) {
+                        final int secs = prefs.getInt('pending_session_seconds') ?? 0;
+                        final String subj = prefs.getString('pending_session_subject') ?? 'General';
+                        final String mode = prefs.getString('pending_session_mode') ?? 'Study';
+                        final int ts = prefs.getInt('pending_session_timestamp') ?? DateTime.now().millisecondsSinceEpoch;
+
+                        await prefs.remove('has_pending_session');
+                        await prefs.remove('pending_session_seconds');
+                        await prefs.remove('pending_session_subject');
+                        await prefs.remove('pending_session_mode');
+                        await prefs.remove('pending_session_timestamp');
+
+                        controller.runJavaScript("""
+                          (function(){
+                            if(typeof window.onNativeSavePendingSession === 'function'){
+                              window.onNativeSavePendingSession({
+                                subject: '$subj',
+                                mode: '$mode',
+                                seconds: $secs,
+                                timestamp: $ts
+                              });
+                            } else if (typeof window.onDirectLoggedSession === 'function') {
+                              window.onDirectLoggedSession({
+                                subject: '$subj',
+                                mode: '$mode',
+                                seconds: $secs,
+                                timestamp: $ts
+                              });
+                            }
+                          })();
+                        """);
+                      }
+                    } catch (_) {}
 
                     final focus = FocusSessionService();
                     if (focus.isSessionActive) {
@@ -2697,7 +2870,6 @@ jobs:
                             ),
                           ]),
                         ),
-                      const FloatingFocusDot(),
                     ]),
                   ),
                 ),
