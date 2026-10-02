@@ -2088,21 +2088,23 @@ jobs:
                   final idToken = result.idToken!;
                   final accessToken = result.accessToken ?? '';
                   AppToast.show("Signed in as ${result.email ?? 'Google account'}!");
-                  // Use JSON.parse to safely handle any special chars in tokens
-                  final payload = jsonEncode({'idToken': idToken, 'accessToken': accessToken});
+                  // Encode tokens as base64 to avoid ALL JS string escape issues (JWT has +/= chars)
+                  final idTokenB64 = base64Encode(utf8.encode(idToken));
+                  final accessTokenB64 = base64Encode(utf8.encode(accessToken));
                   await webViewController.runJavaScript(
                     "(function(){"
-                    "var p=JSON.parse('${payload.replaceAll("'", "\\'")}');"
+                    "var id=atob('$idTokenB64');"
+                    "var ac=atob('$accessTokenB64');"
+                    "window.__pendingGoogleTokens={idToken:id,accessToken:ac};"
                     "if(typeof window.onNativeGoogleSignInSuccess==='function'){"
-                    "  window.onNativeGoogleSignInSuccess(p.idToken,p.accessToken);"
-                    "}else{"
-                    "  window.__pendingGoogleTokens=p;"
+                    "  window.onNativeGoogleSignInSuccess(id,ac);"
                     "}"
                     "})();"
                   );
                 } else {
-                  // Native 1-Tap was cancelled or unavailable. Fallback seamlessly to web login.
-                  debugPrint("[GoogleAuth] Native Sign-In unavailable (${result.errorMessage}), web sign-in active.");
+                  // Native Sign-In cancelled or unavailable
+                  debugPrint("[GoogleAuth] Native Sign-In unavailable (${result.errorMessage})");
+                  AppToast.show("Sign-in cancelled. Please try again.");
                 }
               } catch (e) {
                 debugPrint("triggerNativeGoogleSignIn error: $e");
