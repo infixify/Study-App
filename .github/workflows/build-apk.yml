@@ -100,7 +100,6 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
               <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
               <uses-feature android:name="android.hardware.camera" android:required="false" />
               <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
               <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -1702,8 +1701,8 @@ jobs:
 
               final bool accessOk = await isAccessibilityEnabled();
               if (!accessOk) {
-                AppToast.show("Enable 'Usage Access' for PrepWise so it can block distracting apps.");
-                await openAccessibilitySettings();
+                AppToast.show("Tip: Grant 'Usage Access' in Settings for full app blocking.");
+                // Don't force open settings — user can continue without it
               }
 
               try {
