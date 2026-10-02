@@ -382,7 +382,7 @@ jobs:
                       if (intent.action == "com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST") {
                           flutterEngineRef?.let { engine ->
                               io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "com.prepwise/mainactivity")
-                                  .invokeMethod("triggerStopFocusInWeb", null)
+                                  .invokeMethod("triggerDirectStopFocusInWeb", null)
                           }
                       }
                   }
@@ -445,8 +445,10 @@ jobs:
                               "canDrawOverlays" ->
                                   result.success(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true)
                               "requestOverlayPermission" -> {
-                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this))
+                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                                      Toast.makeText(applicationContext, "Please allow 'Display over other apps' to enable Face Verification", Toast.LENGTH_LONG).show()
                                       startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                                  }
                                   result.success(true)
                               }
                               else -> result.notImplemented()
@@ -479,11 +481,15 @@ jobs:
                                   val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
                                   val subject = call.argument<String>("subject") ?: "General"
                                   val mode    = call.argument<String>("mode")    ?: "Study"
+                                  val camEnabled = call.argument<Boolean>("camEnabled") ?: false
+                                  val blockerEnabled = call.argument<Boolean>("blockerEnabled") ?: false
                                   val intent  = Intent(this, FocusBlockerService::class.java).apply {
                                       action = FocusBlockerService.ACTION_START
                                       putStringArrayListExtra(FocusBlockerService.EXTRA_BLOCKED_APPS, ArrayList(blocked))
                                       putExtra(FocusBlockerService.EXTRA_SUBJECT, subject)
                                       putExtra(FocusBlockerService.EXTRA_MODE, mode)
+                                      putExtra(FocusBlockerService.EXTRA_CAM_ENABLED, camEnabled)
+                                      putExtra(FocusBlockerService.EXTRA_BLOCKER_ENABLED, blockerEnabled)
                                   }
                                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                                       startForegroundService(intent)
@@ -579,6 +585,8 @@ jobs:
                   const val EXTRA_SUBJECT           = "subject"
                   const val EXTRA_MODE              = "mode"
                   const val EXTRA_CAM_STATUS        = "cam_status"
+                  const val EXTRA_CAM_ENABLED       = "cam_enabled"
+                  const val EXTRA_BLOCKER_ENABLED   = "blocker_enabled"
                   const val NOTIF_ID                = 9901
                   const val CHANNEL_ID              = "prepwise_focus_blocker"
 
@@ -590,8 +598,15 @@ jobs:
               private var blockedApps: List<String> = emptyList()
               private var subject = "General"
               private var mode = "Study"
-              // camPaused = true means cam lost - timer freezes (but service keeps running)
+              private var camEnabled = false
+              private var blockerEnabled = false
               private var camPaused = false
+
+              // Epoch timestamp-based stopwatch (eliminates drift & 2x speed bug)
+              private var startTimestampMs: Long = 0L
+              private var pausedDurationMs: Long = 0L
+              private var pauseStartMs: Long = 0L
+              private var lastReportedSecond: Int = -1
 
               // Blocking overlay state
               private var windowManager: WindowManager? = null
@@ -599,22 +614,31 @@ jobs:
               private var lastBlockedPkg: String? = null
               private val overlayDismissHandler = Handler(Looper.getMainLooper())
 
-              // Persistent floating dot overlay (shown on all apps while focus is active)
+              // Persistent floating dot overlay (strictly only shown when camEnabled is true)
               private var dotView: View? = null
               private var dotParams: WindowManager.LayoutParams? = null
               private var camVerified = true
 
-              // Poll every 500ms - tick timer only when cam not paused
-              private var tickCount = 0
               private val tickRunnable = object : Runnable {
                   override fun run() {
-                      tickCount++
-                      if (!camPaused) {
-                          currentElapsedSeconds++
-                          if (currentElapsedSeconds % 2 == 0) updateNotification() // update notif every 2s
-                          if (tickCount % 2 == 0) updateDotTimer() // update dot timer every 1s
+                      if (startTimestampMs > 0) {
+                          val now = System.currentTimeMillis()
+                          val elapsedMs = if (camPaused) {
+                              (pauseStartMs - startTimestampMs - pausedDurationMs)
+                          } else {
+                              (now - startTimestampMs - pausedDurationMs)
+                          }
+                          val secs = Math.max(0, (elapsedMs / 1000).toInt())
+                          currentElapsedSeconds = secs
+                          if (secs != lastReportedSecond) {
+                              lastReportedSecond = secs
+                              updateNotification()
+                              if (camEnabled) updateDotTimer()
+                          }
                       }
-                      checkAndBlock()
+                      if (blockerEnabled) {
+                          checkAndBlock()
+                      }
                       handler.postDelayed(this, 500)
                   }
               }
@@ -627,16 +651,17 @@ jobs:
                   createNotificationChannel()
               }
 
-              // -- Survive swipe-from-recents kill -----------------------------------------
+              // -- Survive swipe-from-recents kill (Option 2) --------------------------------
               override fun onTaskRemoved(rootIntent: Intent?) {
                   super.onTaskRemoved(rootIntent)
-                  // If session is active (timer was running), restart the service immediately
                   if (currentElapsedSeconds > 0) {
                       val restartIntent = Intent(applicationContext, FocusBlockerService::class.java).apply {
                           action = ACTION_START
                           putStringArrayListExtra(EXTRA_BLOCKED_APPS, ArrayList(blockedApps))
                           putExtra(EXTRA_SUBJECT, subject)
                           putExtra(EXTRA_MODE, mode)
+                          putExtra(EXTRA_CAM_ENABLED, camEnabled)
+                          putExtra(EXTRA_BLOCKER_ENABLED, blockerEnabled)
                       }
                       val pi = android.app.PendingIntent.getService(
                           applicationContext, 1, restartIntent,
@@ -655,24 +680,37 @@ jobs:
                           blockedApps = apps.toList()
                           subject = intent.getStringExtra(EXTRA_SUBJECT) ?: "General"
                           mode = intent.getStringExtra(EXTRA_MODE) ?: "Study"
+                          camEnabled = intent.getBooleanExtra(EXTRA_CAM_ENABLED, false)
+                          blockerEnabled = intent.getBooleanExtra(EXTRA_BLOCKER_ENABLED, false)
+
+                          startTimestampMs = System.currentTimeMillis()
+                          pausedDurationMs = 0L
+                          pauseStartMs = 0L
+                          lastReportedSecond = -1
                           currentElapsedSeconds = 0
                           camPaused = false
                           camVerified = true
+
                           startForeground(NOTIF_ID, buildNotification())
                           handler.removeCallbacks(tickRunnable)
                           handler.post(tickRunnable)
-                          if (canDrawOverlay()) showFloatingDot()
+
+                          // Point 5: ONLY show floating dot if camera verification toggle is ON!
+                          if (camEnabled && canDrawOverlay()) {
+                              showFloatingDot()
+                          } else {
+                              removeFloatingDot()
+                          }
                       }
                       ACTION_STOP_REQUEST -> {
-                          // Triggered by notification "Stop Focus Mode" button.
-                          // Signal the web app to do the full stop+log flow via JS bridge.
-                          // The web app will then call stopFocusNotification -> ACTION_STOP.
+                          // Point 11: Notification stop button -> directly signal WebApp to stop & log without confirmation
                           sendStopRequestToWebApp()
                       }
                       ACTION_STOP -> {
                           handler.removeCallbacks(tickRunnable)
                           removeOverlay()
                           removeFloatingDot()
+                          startTimestampMs = 0L
                           currentElapsedSeconds = 0
                           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                               stopForeground(STOP_FOREGROUND_REMOVE)
@@ -687,9 +725,18 @@ jobs:
                       }
                       ACTION_SET_CAM_STATUS -> {
                           val status = intent.getStringExtra(EXTRA_CAM_STATUS) ?: "verified"
+                          val wasPaused = camPaused
                           camPaused = status != "verified"
                           camVerified = !camPaused
-                          updateFloatingDotColor()
+
+                          val now = System.currentTimeMillis()
+                          if (!wasPaused && camPaused) {
+                              pauseStartMs = now
+                          } else if (wasPaused && !camPaused) {
+                              pausedDurationMs += (now - pauseStartMs)
+                          }
+
+                          if (camEnabled) updateFloatingDotColor()
                           updateNotification()
                       }
                   }
@@ -699,24 +746,24 @@ jobs:
               // -- Core blocking logic -----------------------------------------------------
 
               private fun checkAndBlock() {
-                  if (!hasUsagePermission()) return
+                  if (!blockerEnabled || !hasUsagePermission()) return
                   val foreground = getForegroundPackage() ?: return
 
                   if (foreground == packageName) {
                       // User is in PrepWise - remove blocking overlay, hide dot (Flutter dot takes over)
                       if (overlayView != null) removeOverlay()
-                      hideDotView()
+                      if (camEnabled) hideDotView()
                       return
                   }
 
                   if (foreground == "com.android.systemui" || foreground == "com.android.launcher" ||
                       foreground.startsWith("com.google.android.inputmethod")) {
-                      showDotView() // show dot on launcher/sysui too
+                      if (camEnabled) showDotView() // show dot on launcher/sysui too
                       return
                   }
 
                   if (blockedApps.contains(foreground)) {
-                      hideDotView() // blocking overlay covers everything - dot not needed
+                      if (camEnabled) hideDotView() // blocking overlay covers everything - dot not needed
                       if (canDrawOverlay()) {
                           showBlockingOverlay(foreground)
                       } else {
@@ -725,7 +772,7 @@ jobs:
                   } else {
                       // Allowed app - show dot as reminder
                       if (overlayView != null) removeOverlay()
-                      showDotView()
+                      if (camEnabled) showDotView()
                   }
               }
 
@@ -1154,7 +1201,31 @@ jobs:
                   val m = (e % 3600) / 60
                   val s = e % 60
                   val time = if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
-                  val statusText = if (camPaused) "Paused - come back into camera view" else "Distracting apps are blocked. Tap to open PrepWise."
+
+                  // Exact 4-State Notification Specification
+                  val (title, text, buttonLabel) = when {
+                      !camEnabled && !blockerEnabled -> Triple(
+                          "Focus: $subject | $mode  $time",
+                          "Live study timer running. Tap to open PrepWise.",
+                          "Stop Timer"
+                      )
+                      camEnabled && !blockerEnabled -> Triple(
+                          "Focus: $subject | $mode  $time",
+                          if (camPaused) "Face not detected • Timer paused" else "Face under detection • Timer running",
+                          "Stop Timer"
+                      )
+                      !camEnabled && blockerEnabled -> Triple(
+                          "Focus: $subject | $mode  $time",
+                          "App blocking is enabled. Tap to open PrepWise.",
+                          "Stop Focus Mode"
+                      )
+                      else -> Triple(
+                          "Focus: $subject | $mode  $time",
+                          (if (camPaused) "Face not detected" else "Face under detection") + " • App blocking is ON",
+                          "Stop Session"
+                      )
+                  }
+
                   val openIntent = Intent(this, MainActivity::class.java).apply {
                       flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                   }
@@ -1163,13 +1234,13 @@ jobs:
                   val stopPi = PendingIntent.getService(this, 1, stopReqIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                   return NotificationCompat.Builder(this, CHANNEL_ID)
                       .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-                      .setContentTitle("Focus: $subject | $mode  $time")
-                      .setContentText(statusText)
+                      .setContentTitle(title)
+                      .setContentText(text)
                       .setContentIntent(pi)
                       .setOngoing(true)
                       .setOnlyAlertOnce(true)
                       .setPriority(NotificationCompat.PRIORITY_LOW)
-                      .addAction(android.R.drawable.ic_delete, "Stop Focus Mode", stopPi)
+                      .addAction(android.R.drawable.ic_delete, buttonLabel, stopPi)
                       .build()
               }
 
@@ -1392,6 +1463,8 @@ jobs:
             FocusSessionService._internal();
 
             bool _isSessionActive = false;
+            bool _camEnabled = false;
+            bool _blockerEnabled = false;
             String _subject = 'General';
             String _mode = 'Study';
             String _camStatus = 'verified';
@@ -1402,6 +1475,8 @@ jobs:
             Timer? _resumeTickerTimer;
 
             bool get isSessionActive => _isSessionActive;
+            bool get camEnabled => _camEnabled;
+            bool get blockerEnabled => _blockerEnabled;
             bool get isPaused => _isPaused;
             String get subject => _subject;
             String get mode => _mode;
@@ -1412,6 +1487,7 @@ jobs:
             final ValueNotifier<String> camStatusNotifier = ValueNotifier<String>('verified');
             final ValueNotifier<int> elapsedNotifier = ValueNotifier<int>(0);
             final ValueNotifier<bool> activeNotifier = ValueNotifier<bool>(false);
+            final ValueNotifier<bool> camEnabledNotifier = ValueNotifier<bool>(false);
             final ValueNotifier<bool> pausedNotifier = ValueNotifier<bool>(false);
 
             // Callback triggered when stop is requested from notification (via Kotlin -> bridge)
@@ -1422,10 +1498,14 @@ jobs:
             void startSession({
               required String subject,
               required String mode,
+              bool camEnabled = false,
+              bool blockerEnabled = false,
               int initialSeconds = 0,
               Function()? onStopClicked,
             }) {
               _isSessionActive = true;
+              _camEnabled = camEnabled;
+              _blockerEnabled = blockerEnabled;
               _isPaused = false;
               _subject = subject.isNotEmpty ? subject : 'General';
               _mode = mode.isNotEmpty ? mode : 'Study';
@@ -1434,6 +1514,7 @@ jobs:
               onStopRequested = onStopClicked;
 
               activeNotifier.value = true;
+              camEnabledNotifier.value = camEnabled;
               pausedNotifier.value = false;
               camStatusNotifier.value = 'verified';
               elapsedNotifier.value = _elapsedSeconds;
@@ -1448,7 +1529,7 @@ jobs:
                 elapsedNotifier.value = _elapsedSeconds;
               });
 
-              debugPrint("[FocusSessionService] UI session started: $_subject ($_mode) from ${_elapsedSeconds}s");
+              debugPrint("[FocusSessionService] UI session started: $_subject ($_mode), cam: $camEnabled, blocker: $blockerEnabled");
             }
 
             /// Sync elapsed time from Kotlin service (called by bridge on resume/sync events).
@@ -1493,10 +1574,13 @@ jobs:
             /// Stop session - clears all UI state.
             void stopSession() {
               _isSessionActive = false;
+              _camEnabled = false;
+              _blockerEnabled = false;
               _isPaused = false;
               _resumeTickerTimer?.cancel();
               _resumeTickerTimer = null;
               activeNotifier.value = false;
+              camEnabledNotifier.value = false;
               pausedNotifier.value = false;
               elapsedNotifier.value = 0;
               _elapsedSeconds = 0;
@@ -1522,21 +1606,35 @@ jobs:
               try {
                 final safeTitle = (customTitle != null && customTitle.trim().isNotEmpty)
                     ? customTitle.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_\-\. ]'), '_')
-                    : "NCERT_Resource_${DateTime.now().millisecondsSinceEpoch}";
+                    : "Study_Resource_${DateTime.now().millisecondsSinceEpoch}";
+
+                final displayTitle = (customTitle != null && customTitle.trim().isNotEmpty)
+                    ? customTitle.trim()
+                    : "Document";
 
                 final filename = safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : "$safeTitle.pdf";
 
-                AppToast.show("Loading NCERT: $filename...");
+                AppToast.show("Downloading $displayTitle...");
 
-                final uri = Uri.parse(url);
+                // Transform Google Drive viewer link to direct download link if applicable
+                String directUrl = url;
+                if (url.contains('drive.google.com')) {
+                  final driveRegex = RegExp(r'/d/([a-zA-Z0-9_-]+)');
+                  final match = driveRegex.firstMatch(url);
+                  if (match != null) {
+                    final fileId = match.group(1);
+                    directUrl = "https://drive.google.com/uc?export=download&id=$fileId";
+                  }
+                }
 
-                // Browser User-Agent and referer headers so ncert.nic.in allows download
+                final uri = Uri.parse(directUrl);
+
+                // Browser User-Agent and referer headers
                 final response = await http.get(
                   uri,
                   headers: {
                     'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
                     'Accept': 'application/pdf,application/octet-stream,*/*',
-                    'Referer': 'https://ncert.nic.in/',
                   },
                 ).timeout(const Duration(seconds: 30));
 
@@ -1544,16 +1642,16 @@ jobs:
                   throw Exception("Server returned HTTP ${response.statusCode}");
                 }
 
-                // Safe storage path that works on all Android versions (10, 11, 12, 13, 14, 15)
+                // Safe storage path that works on all Android versions
                 Directory? targetDir;
                 try {
                   final extDir = await getExternalStorageDirectory();
                   if (extDir != null) {
-                    final ncertFolder = Directory("${extDir.path}/NCERT");
-                    if (!await ncertFolder.exists()) {
-                      await ncertFolder.create(recursive: true);
+                    final resourceFolder = Directory("${extDir.path}/Resources");
+                    if (!await resourceFolder.exists()) {
+                      await resourceFolder.create(recursive: true);
                     }
-                    targetDir = ncertFolder;
+                    targetDir = resourceFolder;
                   }
                 } catch (_) {}
 
@@ -1562,23 +1660,23 @@ jobs:
                 final file = File("${targetDir.path}/$filename");
                 await file.writeAsBytes(response.bodyBytes);
 
-                AppToast.show("Opening NCERT Textbook...");
+                AppToast.show("Opening $displayTitle...");
 
                 // Open directly in native Android PDF viewer using OpenFilex
                 final result = await OpenFilex.open(file.path);
                 debugPrint("[PdfDownloadService] OpenFilex result: ${result.type} - ${result.message}");
 
                 if (result.type != ResultType.done) {
-                  // Fallback: launch external viewer directly if OpenFilex could not open
                   await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                 }
               } catch (e) {
                 debugPrint("[PdfDownloadService] Download error: $e");
-                AppToast.show("Opening NCERT in browser...");
+                final displayTitle = (customTitle != null && customTitle.trim().isNotEmpty) ? customTitle.trim() : "Document";
+                AppToast.show("Opening $displayTitle in external viewer...");
                 try {
                   await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                 } catch (err) {
-                  AppToast.show("Could not open NCERT: $e");
+                  AppToast.show("Could not open $displayTitle: $e");
                 }
               }
             }
@@ -1787,13 +1885,19 @@ jobs:
 
             /// Starts the Android ForegroundService blocker.
             /// [allowedPackages] = packages user has whitelisted (PrepWise itself always allowed).
-            Future<void> startStrictTimer(List<String> allowedPackages, {String subject = 'General', String mode = 'Study'}) async {
+            Future<void> startStrictTimer(List<String> allowedPackages, {
+              String subject = 'General',
+              String mode = 'Study',
+              bool camEnabled = false,
+              bool blockerEnabled = false,
+            }) async {
               _isStrictActive = true;
 
-              final bool accessOk = await isAccessibilityEnabled();
-              if (!accessOk) {
-                AppToast.show("Tip: Grant 'Usage Access' in Settings for full app blocking.");
-                // Don't force open settings - user can continue without it
+              if (blockerEnabled) {
+                final bool accessOk = await isAccessibilityEnabled();
+                if (!accessOk) {
+                  AppToast.show("Tip: Grant 'Usage Access' in Settings for full app blocking.");
+                }
               }
 
               try {
@@ -1806,18 +1910,22 @@ jobs:
                 allowedSet.add('com.android.launcher');
                 allowedSet.add('com.android.launcher3');
 
-                final List<String> blockedPackages = allApps
+                final List<String> blockedPackages = blockerEnabled ? allApps
                     .map((a) => a['packageName']?.toString() ?? '')
                     .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
-                    .toList();
+                    .toList() : <String>[];
 
                 // Start the ForegroundService - it survives app minimize/close
                 await _serviceChannel.invokeMethod('startFocusBlocker', {
                   'blockedApps': blockedPackages,
                   'subject': subject,
                   'mode': mode,
+                  'camEnabled': camEnabled,
+                  'blockerEnabled': blockerEnabled,
                 });
-                AppToast.show("Focus Mode Active! Distracting apps will be blocked.");
+                if (blockerEnabled) {
+                  AppToast.show("Focus Mode Active! Distracting apps will be blocked.");
+                }
               } catch (e) {
                 debugPrint('[AppBlockerService] Error starting blocker service: $e');
               }
@@ -1915,38 +2023,44 @@ jobs:
                 valueListenable: focusService.activeNotifier,
                 builder: (context, isActive, _) {
                   if (!isActive) return const SizedBox.shrink();
-                  return ValueListenableBuilder<String>(
-                    valueListenable: focusService.camStatusNotifier,
-                    builder: (context, camStatus, _) {
-                      final bool isVerified = camStatus == 'verified';
-                      final Color statusColor = isVerified ? const Color(0xFF10B981) : const Color(0xFFEF4444);
-                      final Color glowColor = isVerified ? const Color(0x6610B981) : const Color(0x66EF4444);
-                      return Positioned(
-                        left: _posX,
-                        top: _posY,
-                        child: GestureDetector(
-                          onPanUpdate: (details) {
-                            setState(() {
-                              _posX = (_posX + details.delta.dx).clamp(10.0, MediaQuery.of(context).size.width - (_isExpanded ? 280.0 : 50.0));
-                              _posY = (_posY + details.delta.dy).clamp(40.0, MediaQuery.of(context).size.height - (_isExpanded ? 200.0 : 80.0));
-                            });
-                          },
-                          onTap: () => setState(() => _isExpanded = !_isExpanded),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 250),
-                              padding: _isExpanded ? const EdgeInsets.all(14) : const EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: _isExpanded ? const Color(0xF01E293B) : const Color(0xEE0F172A),
-                                borderRadius: BorderRadius.circular(_isExpanded ? 18 : 24),
-                                border: Border.all(color: statusColor.withValues(alpha: 0.8), width: _isExpanded ? 1.5 : 2.0),
-                                boxShadow: [BoxShadow(color: glowColor, blurRadius: _isExpanded ? 16 : 10, spreadRadius: _isExpanded ? 2 : 1)],
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: focusService.camEnabledNotifier,
+                    builder: (context, isCamEnabled, _) {
+                      if (!isCamEnabled) return const SizedBox.shrink();
+                      return ValueListenableBuilder<String>(
+                        valueListenable: focusService.camStatusNotifier,
+                        builder: (context, camStatus, _) {
+                          final bool isVerified = camStatus == 'verified';
+                          final Color statusColor = isVerified ? const Color(0xFF10B981) : const Color(0xFFEF4444);
+                          final Color glowColor = isVerified ? const Color(0x6610B981) : const Color(0x66EF4444);
+                          return Positioned(
+                            left: _posX,
+                            top: _posY,
+                            child: GestureDetector(
+                              onPanUpdate: (details) {
+                                setState(() {
+                                  _posX = (_posX + details.delta.dx).clamp(10.0, MediaQuery.of(context).size.width - (_isExpanded ? 280.0 : 50.0));
+                                  _posY = (_posY + details.delta.dy).clamp(40.0, MediaQuery.of(context).size.height - (_isExpanded ? 200.0 : 80.0));
+                                });
+                              },
+                              onTap: () => setState(() => _isExpanded = !_isExpanded),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 250),
+                                  padding: _isExpanded ? const EdgeInsets.all(14) : const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: _isExpanded ? const Color(0xF01E293B) : const Color(0xEE0F172A),
+                                    borderRadius: BorderRadius.circular(_isExpanded ? 18 : 24),
+                                    border: Border.all(color: statusColor.withValues(alpha: 0.8), width: _isExpanded ? 1.5 : 2.0),
+                                    boxShadow: [BoxShadow(color: glowColor, blurRadius: _isExpanded ? 16 : 10, spreadRadius: _isExpanded ? 2 : 1)],
+                                  ),
+                                  child: _isExpanded ? _buildExpandedCard(isVerified, statusColor) : _buildCompactDot(statusColor),
+                                ),
                               ),
-                              child: _isExpanded ? _buildExpandedCard(isVerified, statusColor) : _buildCompactDot(statusColor),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       );
                     },
                   );
@@ -2035,8 +2149,8 @@ jobs:
               // Listen for MainActivity relay - "Stop Focus Mode" notification button
               const MethodChannel('com.prepwise/mainactivity')
                   .setMethodCallHandler((call) async {
-                if (call.method == 'triggerStopFocusInWeb') {
-                  triggerInAppStopConfirmation();
+                if (call.method == 'triggerDirectStopFocusInWeb' || call.method == 'triggerStopFocusInWeb') {
+                  triggerInAppStopDirect();
                 }
                 return null;
               });
@@ -2053,26 +2167,31 @@ jobs:
                     break;
 
                   case 'startFocusNotification':
-                    // Request camera permission if starting Focus Mode
-                    try {
-                      final camGranted = await Permission.camera.isGranted;
-                      if (!camGranted) {
-                        await Permission.camera.request();
-                      }
-                    } catch (_) {}
-
                     final String subject = data['subject'] ?? 'General';
                     final String mode = data['mode'] ?? 'Study';
                     final int initialSeconds = data['initialSeconds'] ?? 0;
+                    final bool camEnabled = data['camEnabled'] == true;
+                    final bool blockerEnabled = data['blockerEnabled'] == true;
                     final List<String> allowedApps = (data['allowedApps'] as List<dynamic>?)
                         ?.map((e) => e.toString()).toList() ?? [];
 
-                    // 1. Update Flutter UI state only (no notification - Kotlin owns that)
+                    if (camEnabled) {
+                      try {
+                        final camGranted = await Permission.camera.isGranted;
+                        if (!camGranted) {
+                          await Permission.camera.request();
+                        }
+                      } catch (_) {}
+                    }
+
+                    // 1. Update Flutter UI state only
                     FocusSessionService().startSession(
                       subject: subject,
                       mode: mode,
+                      camEnabled: camEnabled,
+                      blockerEnabled: blockerEnabled,
                       initialSeconds: initialSeconds,
-                      onStopClicked: () => triggerInAppStopConfirmation(),
+                      onStopClicked: () => triggerInAppStopDirect(),
                     );
 
                     // 2. Start Kotlin ForegroundService - owns the notification + blocking + timer
@@ -2080,6 +2199,8 @@ jobs:
                       allowedApps,
                       subject: subject,
                       mode: mode,
+                      camEnabled: camEnabled,
+                      blockerEnabled: blockerEnabled,
                     );
 
                     await WakelockService.enable();
@@ -2120,7 +2241,6 @@ jobs:
                   case 'startStrictTimer':
                     final List<String> allowed = (data['allowedApps'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
                     if (AppBlockerService().isStrictActive) {
-                      // Session already running - just update the allowed list
                       await AppBlockerService().updateBlockedApps(allowed);
                     } else {
                       await AppBlockerService().startStrictTimer(allowed);
@@ -2149,6 +2269,23 @@ jobs:
 
                   case 'requestHardwarePermissions':
                     await [Permission.camera, Permission.microphone, Permission.notification].request();
+                    break;
+
+                  case 'requestOverlayPermission':
+                    AppToast.show("Please allow 'Display over other apps' to enable Face Verification");
+                    await AppBlockerService().requestOverlayPermission();
+                    break;
+
+                  case 'checkOverlayPermission':
+                    final bool granted = await AppBlockerService().canDrawOverlays();
+                    await webViewController.runJavaScript("""
+                      (function(){
+                        if(typeof window.onOverlayPermissionResult === 'function') {
+                          window.onOverlayPermissionResult($granted);
+                        }
+                        window.postMessage(JSON.stringify({ type: 'overlayPermissionResult', granted: $granted }), '*');
+                      })();
+                    """);
                     break;
 
                   case 'requestAccessibilityPermission':
@@ -2216,8 +2353,20 @@ jobs:
               }
             }
 
+            void triggerInAppStopDirect() {
+              webViewController.runJavaScript("""
+                (function(){
+                  if (typeof window.onNativeDirectStopFocus === 'function') {
+                    window.onNativeDirectStopFocus();
+                  } else if (typeof window.onNativeRequestStopFocus === 'function') {
+                    window.onNativeRequestStopFocus();
+                  }
+                })();
+              """);
+            }
+
             void triggerInAppStopConfirmation() {
-              webViewController.runJavaScript("(function(){if(typeof window.onNativeRequestStopFocus==='function'){window.onNativeRequestStopFocus();}})();");
+              triggerInAppStopDirect();
             }
 
             void injectFCMToken(String token) {
@@ -2381,6 +2530,23 @@ jobs:
                     final token = NotificationService().fcmToken;
                     if (token != null) _bridgeHandler.injectFCMToken(token);
                     _injectInstalledApps();
+
+                    final focus = FocusSessionService();
+                    if (focus.isSessionActive) {
+                      controller.runJavaScript("""
+                        (function(){
+                          if(typeof window.onNativeRestoreActiveSession === 'function'){
+                            window.onNativeRestoreActiveSession({
+                              subject: '${focus.subject}',
+                              mode: '${focus.mode}',
+                              elapsedSeconds: ${focus.elapsedSeconds},
+                              camEnabled: ${focus.camEnabled},
+                              blockerEnabled: ${focus.blockerEnabled}
+                            });
+                          }
+                        })();
+                      """);
+                    }
                   },
                   onWebResourceError: (WebResourceError error) {
                     if (error.isForMainFrame ?? true) setState(() { _hasError = true; _isLoading = false; });
