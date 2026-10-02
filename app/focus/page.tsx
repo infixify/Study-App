@@ -1,4 +1,3 @@
-// app/focus/page.tsx
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -14,8 +13,17 @@ declare global {
     __nativeInstalledApps?: { name: string; packageName: string }[];
     onInstalledAppsReady?: (apps: { name: string; packageName: string }[]) => void;
     onNativeRequestStopFocus?: () => void;
+    onNativeDirectStopFocus?: () => void;
     onNativeFocusTimerSync?: (seconds: number) => void;
+    onNativeRestoreActiveSession?: (sess: {
+      subject: string;
+      mode: string;
+      elapsedSeconds: number;
+      camEnabled: boolean;
+      blockerEnabled: boolean;
+    }) => void;
     onAccessibilityStatus?: (granted: boolean) => void;
+    onOverlayPermissionResult?: (granted: boolean) => void;
   }
 }
 
@@ -45,9 +53,8 @@ function nativeToAppItem(n: { name: string; packageName: string }): AppItem {
 
 const SYNC_INTERVAL_SECONDS = 60;
 const FACE_API_MODEL_URL = "https://justadudewhohacks.github.io/face-api.js/models";
-// FIXED: 2s interval instead of 15s — rapid detection
 const PRESENCE_CHECK_INTERVAL_SECONDS = 2;
-const MAX_CONSECUTIVE_MISSES = 3; // 3 × 2s = 6 seconds to pause
+const MAX_CONSECUTIVE_MISSES = 3;
 const PRESENCE_LOG_INTERVAL_SECONDS = 60;
 const LIVENESS_CHALLENGE_INTERVAL_SECONDS = 1200;
 const LIVENESS_CHALLENGE_WINDOW_SECONDS = 20;
@@ -75,17 +82,11 @@ export default function StudyPage() {
   const [allApps, setAllApps] = useState<AppItem[]>([]);
   const [appsLoaded, setAppsLoaded] = useState(false);
   const [showAppsModal, setShowAppsModal] = useState(false);
-  const [customAppName, setCustomAppName] = useState("");
   const [isNativeApp, setIsNativeApp] = useState(false);
   const [appsSearch, setAppsSearch] = useState("");
 
-  const [showPostModal, setShowPostModal] = useState(false);
-  const [savedDuration, setSavedDuration] = useState(0);
   const [postStreakResult, setPostStreakResult] = useState<{ counted: boolean; newStreak: number } | null>(null);
-  const [postQCount, setPostQCount] = useState<number>(0);
   const [saving, setSaving] = useState(false);
-
-  const [showEndConfirmModal, setShowEndConfirmModal] = useState(false);
 
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualSub, setManualSub] = useState<SubjectType>("Physics");
@@ -97,7 +98,7 @@ export default function StudyPage() {
   );
   const [manualError, setManualError] = useState<string | null>(null);
 
-  // ── Toggle states (persisted in localStorage) ──────────────────────────────
+  // Toggle states
   const [faceVerificationEnabled, setFaceVerificationEnabled] = useState(false);
   const [appBlockerEnabled, setAppBlockerEnabled] = useState(false);
 
@@ -107,7 +108,6 @@ export default function StudyPage() {
   const [showUsageSteps, setShowUsageSteps] = useState(false);
 
   // Camera / face-api state
-  const [verifiedMode, setVerifiedMode] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [presencePaused, setPresencePaused] = useState(false);
@@ -129,49 +129,28 @@ export default function StudyPage() {
       ? ["Physics", "Chemistry", "Biology"]
       : ["Physics", "Chemistry", "Mathematics"];
 
-  // Derived: session is "verified" if both toggles are on and permissions granted
   const isVerifiedSession = faceVerificationEnabled && appBlockerEnabled && overlayGranted && usageGranted;
 
   function applyNativeApps(raw: { name: string; packageName: string }[]) {
     const items = raw.map(nativeToAppItem);
-    const savedCustom = localStorage.getItem("prepwise_custom_apps");
-    let customItems: AppItem[] = [];
-    if (savedCustom) {
-      try { customItems = JSON.parse(savedCustom); } catch (e) {}
-    }
-    const merged = [...items];
-    for (const c of customItems) {
-      if (!merged.find((a) => a.id === c.id)) merged.push(c);
-    }
-    setAllApps(merged);
+    setAllApps(items);
     setAppsLoaded(true);
   }
 
-  // ── Check permissions on mount and when returning from settings ─────────────
   async function checkOverlayPermission(): Promise<boolean> {
     if (!isNativeApp) return false;
-    try {
-      const result = await new Promise<boolean>((resolve) => {
-        const ch = (window as any).FlutterBridge;
-        if (!ch) { resolve(false); return; }
-        const handler = (evt: MessageEvent) => {
-          try {
-            const d = JSON.parse(evt.data);
-            if (d.type === "overlayPermissionResult") {
-              window.removeEventListener("message", handler);
-              resolve(d.granted);
-            }
-          } catch (_) {}
-        };
-        window.addEventListener("message", handler);
+    return new Promise<boolean>((resolve) => {
+      const prev = window.onOverlayPermissionResult;
+      window.onOverlayPermissionResult = (granted: boolean) => {
+        window.onOverlayPermissionResult = prev;
+        setOverlayGranted(granted);
+        resolve(granted);
+      };
+      try {
         window.AppBridge!.postMessage(JSON.stringify({ action: "checkOverlayPermission" }));
-        setTimeout(() => { window.removeEventListener("message", handler); resolve(false); }, 3000);
-      });
-      setOverlayGranted(result);
-      return result;
-    } catch (_) {
-      return false;
-    }
+      } catch (_) { resolve(false); }
+      setTimeout(() => { window.onOverlayPermissionResult = prev; resolve(false); }, 3000);
+    });
   }
 
   async function checkUsagePermission(): Promise<boolean> {
@@ -190,17 +169,70 @@ export default function StudyPage() {
     });
   }
 
+  // 1. Direct Stop without popup
+  const handleDirectStopAndSave = async () => {
+    if (typeof window !== "undefined" && window.AppBridge) {
+      try {
+        window.AppBridge.postMessage(JSON.stringify({ action: "stopStrictTimer" }));
+        window.AppBridge.postMessage(JSON.stringify({ action: "stopFocusNotification" }));
+        window.AppBridge.postMessage(JSON.stringify({ action: "vibrate", type: "heavy" }));
+      } catch (err) {}
+    }
+
+    const duration = seconds;
+    setIsActive(false);
+    if (faceVerificationEnabled) cleanupVerifiedMode();
+
+    if (!userId || !startTime) {
+      setSeconds(0);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await flushDiffToDailyLogs(duration);
+      const endedAt = new Date();
+      const streakResult = await saveFocusSession(userId, startTime, endedAt);
+      if (streakResult.countedForStreak) {
+        setCurrentStreak(streakResult.newStreak);
+        setPostStreakResult({ counted: true, newStreak: streakResult.newStreak });
+      } else {
+        setPostStreakResult({ counted: false, newStreak: currentStreak });
+      }
+    } catch (_) {}
+
+    setSaving(false);
+    setSeconds(0);
+    lastSyncedSecondsRef.current = 0;
+  };
+
   useEffect(() => {
     if (typeof window !== "undefined" && window.AppBridge) {
       setIsNativeApp(true);
     }
 
     if (typeof window !== "undefined") {
+      // Direct stop action from Notification
+      window.onNativeDirectStopFocus = () => {
+        handleDirectStopAndSave();
+      };
       window.onNativeRequestStopFocus = () => {
-        setShowEndConfirmModal(true);
+        handleDirectStopAndSave();
       };
       window.onNativeFocusTimerSync = (secs: number) => {
         setSeconds(secs);
+      };
+      // Option 2 Restore
+      window.onNativeRestoreActiveSession = (sess) => {
+        if (sess && sess.elapsedSeconds > 0) {
+          setIsActive(true);
+          setSelectedSub((sess.subject as SubjectType) || "Physics");
+          setSelectedTask((sess.mode === "Practice" ? "questions" : sess.mode === "Theory" ? "theory" : "revision") as StudyTaskType);
+          setSeconds(sess.elapsedSeconds);
+          setFaceVerificationEnabled(sess.camEnabled);
+          setAppBlockerEnabled(sess.blockerEnabled);
+          setStartTime(new Date(Date.now() - sess.elapsedSeconds * 1000));
+        }
       };
     }
 
@@ -223,9 +255,6 @@ export default function StudyPage() {
 
       if (profile?.target_exam) {
         setTargetExam(profile.target_exam);
-        if (profile.target_exam === "NEET" && selectedSub === "Mathematics") {
-          setSelectedSub("Biology");
-        }
       }
 
       try {
@@ -245,22 +274,14 @@ export default function StudyPage() {
       applyNativeApps(window.__nativeInstalledApps);
     } else {
       if (typeof window !== "undefined") {
-        window.onInstalledAppsReady = (apps) => {
-          applyNativeApps(apps);
-        };
+        window.onInstalledAppsReady = (apps) => applyNativeApps(apps);
       }
-      const fallbackTimer = setTimeout(() => {
+      setTimeout(() => {
         if (!appsLoaded) {
-          const savedCustom = localStorage.getItem("prepwise_custom_apps");
-          let customItems: AppItem[] = [];
-          if (savedCustom) {
-            try { customItems = JSON.parse(savedCustom); } catch (e) {}
-          }
-          setAllApps([...WEB_FALLBACK_APPS, ...customItems]);
+          setAllApps(WEB_FALLBACK_APPS);
           setAppsLoaded(true);
         }
       }, 2000);
-      return () => clearTimeout(fallbackTimer);
     }
   }, []);
 
@@ -270,6 +291,7 @@ export default function StudyPage() {
     checkUsagePermission();
   }, [isNativeApp]);
 
+  // Point 1: Cam toggle with overlay redirect & toast
   async function handleFaceToggle() {
     const next = !faceVerificationEnabled;
     if (next) {
@@ -287,7 +309,6 @@ export default function StudyPage() {
               clearInterval(poll);
               if (g) {
                 setFaceVerificationEnabled(true);
-                setVerifiedMode(true);
                 localStorage.setItem("prepwise_face_toggle", "true");
               }
             }
@@ -296,11 +317,9 @@ export default function StudyPage() {
         }
       }
       setFaceVerificationEnabled(true);
-      setVerifiedMode(true);
       localStorage.setItem("prepwise_face_toggle", "true");
     } else {
       setFaceVerificationEnabled(false);
-      setVerifiedMode(false);
       localStorage.setItem("prepwise_face_toggle", "false");
     }
   }
@@ -343,50 +362,31 @@ export default function StudyPage() {
     setAllowedApps(updated);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
 
-    if (isActive && typeof window !== "undefined" && window.AppBridge) {
+    if (isActive && appBlockerEnabled && typeof window !== "undefined" && window.AppBridge) {
       try {
         window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: updated }));
       } catch (err) {}
     }
   };
 
-  const handleAddCustomApp = () => {
-    const trimmed = customAppName.trim();
-    if (!trimmed) return;
-    const newId = `custom_${trimmed.toLowerCase().replace(/\s+/g, "_")}_${Date.now()}`;
-    const newApp: AppItem = { id: newId, name: trimmed, icon: "📱" };
-
-    const updatedApps = [...allApps, newApp];
-    setAllApps(updatedApps);
-
-    const updatedAllowed = [...allowedApps, newId];
-    setAllowedApps(updatedAllowed);
-    localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updatedAllowed));
-
-    const customOnly = updatedApps.filter((a) => !WEB_FALLBACK_APPS.some((d) => d.id === a.id) && !window.__nativeInstalledApps?.find((n) => n.packageName === a.id));
-    localStorage.setItem("prepwise_custom_apps", JSON.stringify(customOnly));
-
-    setCustomAppName("");
-  };
-
   const handleBlockAll = () => {
     setAllowedApps([]);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify([]));
-    if (isActive && typeof window !== "undefined" && window.AppBridge) {
+    if (isActive && appBlockerEnabled && typeof window !== "undefined" && window.AppBridge) {
       try {
         window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: [] }));
       } catch (err) {}
     }
   };
 
-  async function flushDiffToDailyLogs(currentSeconds: number, dateOverride?: string) {
+  async function flushDiffToDailyLogs(currentSeconds: number) {
     if (!userId) return;
     const diffSeconds = currentSeconds - lastSyncedSecondsRef.current;
     if (diffSeconds <= 0) return;
     const diffMinutes = Math.round(diffSeconds / 60);
     if (diffMinutes <= 0) return;
 
-    const today = dateOverride ?? new Date().toISOString().split("T")[0];
+    const today = new Date().toISOString().split("T")[0];
     const { data: dailyRow } = await supabase
       .from("daily_logs")
       .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes")
@@ -429,24 +429,6 @@ export default function StudyPage() {
     return () => clearInterval(syncIntervalRef.current);
   }, [isActive, userId, selectedTask]);
 
-  useEffect(() => {
-    function handleVisibilityChange() {
-      if (document.hidden && isActive && verifiedMode) {
-        if (typeof window !== "undefined" && window.AppBridge) {
-          // Native: Kotlin timer keeps running
-        } else {
-          setPresencePaused(true);
-        }
-      } else if (!document.hidden && isActive && verifiedMode && presencePaused) {
-        if (typeof window === "undefined" || !window.AppBridge) {
-          setPresencePaused(false);
-        }
-      }
-    }
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [isActive, verifiedMode, presencePaused]);
-
   async function loadFaceModels() {
     if (faceapiRef.current) return faceapiRef.current;
     setModelsLoading(true);
@@ -474,7 +456,7 @@ export default function StudyPage() {
       setCameraError(null);
       return true;
     } catch (e: any) {
-      setCameraError("Camera permission denied. Please allow camera access in app settings for Face Verification.");
+      setCameraError("Camera permission required for Face Verification.");
       return false;
     }
   }
@@ -520,40 +502,6 @@ export default function StudyPage() {
         });
       }
     }
-
-    setSeconds((s) => {
-      if (s - lastPresenceLogSecondsRef.current >= PRESENCE_LOG_INTERVAL_SECONDS) {
-        lastPresenceLogSecondsRef.current = s;
-        if (userId && sessionIdRef.current) {
-          supabase.from("focus_presence_checks").insert({ user_id: userId, session_id: sessionIdRef.current, face_detected: detected, liveness_confirmed: false });
-        }
-      }
-      return s;
-    });
-  }
-
-  function triggerLivenessChallenge() {
-    setLivenessPromptOpen(true);
-    setLivenessSecondsLeft(LIVENESS_CHALLENGE_WINDOW_SECONDS);
-    livenessCountdownRef.current = setInterval(() => {
-      setLivenessSecondsLeft((s) => {
-        if (s <= 1) {
-          clearInterval(livenessCountdownRef.current);
-          setLivenessPromptOpen(false);
-          setPresencePaused(true);
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-  }
-
-  function handleConfirmLiveness() {
-    clearInterval(livenessCountdownRef.current);
-    setLivenessPromptOpen(false);
-    if (userId && sessionIdRef.current) {
-      supabase.from("focus_presence_checks").insert({ user_id: userId, session_id: sessionIdRef.current, face_detected: true, liveness_confirmed: true });
-    }
   }
 
   function cleanupVerifiedMode() {
@@ -574,21 +522,19 @@ export default function StudyPage() {
       await loadFaceModels();
       missedChecksRef.current = 0;
       lastPresenceLogSecondsRef.current = 0;
-      sessionIdRef.current = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+      sessionIdRef.current = `${Date.now()}`;
       presenceIntervalRef.current = setInterval(runPresenceCheck, PRESENCE_CHECK_INTERVAL_SECONDS * 1000);
-      livenessIntervalRef.current = setInterval(triggerLivenessChallenge, LIVENESS_CHALLENGE_INTERVAL_SECONDS * 1000);
     }
 
     if (typeof window !== "undefined" && window.AppBridge) {
       try {
-        if (appBlockerEnabled) {
-          window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: allowedApps }));
-        }
         window.AppBridge.postMessage(JSON.stringify({
           action: "startFocusNotification",
           subject: selectedSub,
           mode: selectedTask === "questions" ? "Practice" : selectedTask === "theory" ? "Theory" : "Revision",
           initialSeconds: 0,
+          camEnabled: faceVerificationEnabled,
+          blockerEnabled: appBlockerEnabled,
           allowedApps: appBlockerEnabled ? allowedApps : [],
         }));
         window.AppBridge.postMessage(JSON.stringify({ action: "vibrate", type: "light" }));
@@ -602,58 +548,6 @@ export default function StudyPage() {
     setIsActive(true);
     setPresencePaused(false);
     setPostStreakResult(null);
-    setStreakWasReset(false);
-    setPostQCount(0);
-  };
-
-  const handleStopSession = () => {
-    if (typeof window !== "undefined" && window.AppBridge) {
-      try {
-        window.AppBridge.postMessage(JSON.stringify({ action: "stopStrictTimer" }));
-        window.AppBridge.postMessage(JSON.stringify({ action: "stopFocusNotification" }));
-        window.AppBridge.postMessage(JSON.stringify({ action: "vibrate", type: "heavy" }));
-      } catch (err) {}
-    }
-    setIsActive(false);
-    setSavedDuration(seconds);
-    setShowPostModal(true);
-    if (faceVerificationEnabled) cleanupVerifiedMode();
-  };
-
-  const handleFinishAndSave = async () => {
-    if (!userId || !startTime) return;
-    setSaving(true);
-    try {
-      await flushDiffToDailyLogs(savedDuration);
-      const endedAt = new Date();
-      const streakResult = await saveFocusSession(userId, startTime, endedAt);
-      if (streakResult.countedForStreak) {
-        setCurrentStreak(streakResult.newStreak);
-        setPostStreakResult({ counted: true, newStreak: streakResult.newStreak });
-      } else {
-        setPostStreakResult({ counted: false, newStreak: currentStreak });
-      }
-
-      if (selectedTask === "questions" && postQCount > 0) {
-        const today = new Date().toISOString().split("T")[0];
-        const { data: subjectRow } = await supabase.from("subjects").select("id").eq("name", selectedSub).eq("target_exam", targetExam).limit(1).maybeSingle();
-        if (subjectRow?.id) {
-          const { data: existing } = await supabase.from("question_logs").select("id, question_count").eq("user_id", userId).eq("subject_id", subjectRow.id).eq("log_date", today).maybeSingle();
-          if (existing) {
-            await supabase.from("question_logs").update({ question_count: existing.question_count + postQCount }).eq("id", existing.id);
-          } else {
-            await supabase.from("question_logs").insert({ user_id: userId, subject_id: subjectRow.id, question_count: postQCount, log_date: today });
-          }
-        }
-      }
-
-      setSaving(false);
-      setShowPostModal(false);
-      setSeconds(0);
-      lastSyncedSecondsRef.current = 0;
-    } catch (err) {
-      setSaving(false);
-    }
   };
 
   const handleSaveManualEntry = async () => {
@@ -673,20 +567,7 @@ export default function StudyPage() {
       );
 
       const today = new Date().toISOString().split("T")[0];
-      if (manualTask === "questions" && manualQs > 0 && manualDate === today) {
-        const { data: subjectRow } = await supabase.from("subjects").select("id").eq("name", manualSub).eq("target_exam", targetExam).limit(1).maybeSingle();
-        if (subjectRow?.id) {
-          const { data: existing } = await supabase.from("question_logs").select("id, question_count").eq("user_id", userId).eq("subject_id", subjectRow.id).eq("log_date", today).maybeSingle();
-          if (existing) {
-            await supabase.from("question_logs").update({ question_count: existing.question_count + manualQs }).eq("id", existing.id);
-          } else {
-            await supabase.from("question_logs").insert({ user_id: userId, subject_id: subjectRow.id, question_count: manualQs, log_date: today });
-          }
-        }
-      }
-
-      const meetsStreakThreshold = newMins * 60 >= MIN_STREAK_SECONDS;
-      if (manualDate === today && meetsStreakThreshold) {
+      if (manualDate === today && newMins * 60 >= MIN_STREAK_SECONDS) {
         const syntheticEnd = new Date();
         const syntheticStart = new Date(syntheticEnd.getTime() - manualMinutes * 60 * 1000);
         const streakResult = await saveFocusSession(userId, syntheticStart, syntheticEnd);
@@ -727,7 +608,6 @@ export default function StudyPage() {
       <video ref={videoRef} muted playsInline className="hidden" />
 
       <main className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-5">
-
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -766,12 +646,12 @@ export default function StudyPage() {
           </div>
         )}
 
-        {postStreakResult && !showPostModal && (
+        {postStreakResult && (
           <div className="rounded-ticket border border-teal/20 bg-teal/10 px-4 py-3 flex items-center gap-3">
             <span className="text-xl">{postStreakResult.counted ? "🔥" : "⏱️"}</span>
             <div>
               <p className="text-xs font-bold text-ink">
-                {postStreakResult.counted ? `Streak updated: ${postStreakResult.newStreak} day${postStreakResult.newStreak !== 1 ? "s" : ""}!` : "Session saved — too short to count for streak (min 2 min)"}
+                {postStreakResult.counted ? `Streak updated: ${postStreakResult.newStreak} day${postStreakResult.newStreak !== 1 ? "s" : ""}!` : "Session saved & logged ✓ (min 2 min for streak count)"}
               </p>
             </div>
           </div>
@@ -794,7 +674,7 @@ export default function StudyPage() {
           </div>
         )}
 
-        {/* ── Main Timer Card ───────────────────────────────────────────────── */}
+        {/* Main Timer Card */}
         <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
           <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2 flex items-center gap-1.5">
             {isActive && faceVerificationEnabled && (
@@ -814,24 +694,22 @@ export default function StudyPage() {
             </button>
           ) : (
             <button
-              onClick={handleStopSession}
+              disabled={saving}
+              onClick={handleDirectStopAndSave}
               className="mt-4 px-8 py-3.5 bg-rose-600 text-white font-bold text-sm rounded-2xl shadow-md shadow-rose-600/20 hover:bg-rose-700 transition-all"
             >
-              ■ Stop & Log Session
+              {saving ? "Saving..." : "■ Stop & Log Session"}
             </button>
           )}
         </div>
 
-        {/* ── Two Feature Toggles ───────────────────────────────────────────── */}
+        {/* Feature Toggles */}
         <div className="bg-white rounded-ticket border border-ink/10 shadow-xs overflow-hidden">
-
-          {/* Leaderboard note */}
           <div className="bg-marigold/10 border-b border-marigold/20 px-4 py-2.5 flex items-start gap-2">
             <span className="text-sm mt-0.5">🏆</span>
             <p className="text-[10px] text-ink/70 leading-relaxed">
-              <span className="font-bold text-ink">Leaderboard entries</span> are only counted when{" "}
-              <span className="font-bold text-marigold">both toggles are ON</span> during your session.
-              Study data is always saved to your personal stats regardless.
+              <span className="font-bold text-ink">Leaderboard entries</span> are counted when{" "}
+              <span className="font-bold text-marigold">both toggles are ON</span>. Study data is always saved regardless.
             </p>
           </div>
 
@@ -848,7 +726,7 @@ export default function StudyPage() {
                     {faceVerificationEnabled
                       ? overlayGranted
                         ? "✓ Active — timer pauses if you leave"
-                        : "⏳ Waiting for overlay permission..."
+                        : "⏳ Please allow 'Display over other apps'..."
                       : "Camera confirms you're present. Nothing recorded or uploaded."}
                   </p>
                 </div>
@@ -859,13 +737,6 @@ export default function StudyPage() {
                 disabled={isActive}
               />
             </div>
-            {faceVerificationEnabled && !overlayGranted && (
-              <div className="mt-2.5 ml-12 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                <p className="text-[10px] text-amber-800 font-medium">
-                  📋 Overlay permission required. Redirecting to Settings... Grant it and come back — toggle will turn on automatically.
-                </p>
-              </div>
-            )}
           </div>
 
           {/* App Blocker Toggle */}
@@ -880,7 +751,7 @@ export default function StudyPage() {
                   <p className="text-[10px] text-slate mt-0.5 leading-relaxed">
                     {appBlockerEnabled
                       ? usageGranted
-                        ? `✓ Active — ${allowedApps.length === 0 ? "all apps blocked" : `${allowedApps.length} app${allowedApps.length > 1 ? "s" : ""} allowed`}`
+                        ? `✓ Active — ${allowedApps.length === 0 ? "all apps blocked" : `${allowedApps.length} app allowed`}`
                         : "⏳ Waiting for Usage Access..."
                       : "Blocks distracting apps during study. Needs Usage Access."}
                   </p>
@@ -893,29 +764,22 @@ export default function StudyPage() {
               />
             </div>
 
-            {/* Allowed apps chip strip & Add Allowed Apps button */}
             {appBlockerEnabled && usageGranted && (
               <div className="mt-3 ml-12">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-[10px] text-slate font-medium">
-                      {allowedApps.length === 0 ? "🔒 All apps blocked" : `${allowedApps.length} app(s) allowed`}
-                    </p>
-                    <span className="px-1.5 py-0.5 bg-teal/10 text-teal text-[9px] font-bold rounded-md border border-teal/20">
-                      {allowedApps.length} Allowed
-                    </span>
-                  </div>
+                  <p className="text-[10px] text-slate font-medium">
+                    {allowedApps.length === 0 ? "🔒 All apps blocked" : `${allowedApps.length} app(s) allowed`}
+                  </p>
                   <button
                     type="button"
                     onClick={() => { setShowAppsModal(true); setAppsSearch(""); }}
-                    className="text-[11px] font-bold text-teal bg-teal/10 hover:bg-teal/20 px-2.5 py-1 rounded-lg border border-teal/20 transition-all flex items-center gap-1 shadow-2xs active:scale-95"
+                    className="text-[11px] font-bold text-teal bg-teal/10 hover:bg-teal/20 px-2.5 py-1 rounded-lg border border-teal/20 transition-all flex items-center gap-1 shadow-2xs"
                   >
                     <span>⚙️</span>
-                    <span>Add Allowed Apps</span>
+                    <span>Manage Allowed Apps</span>
                   </button>
                 </div>
 
-                {/* Whitelisted App Chips with 1-tap removal */}
                 {allowedApps.length > 0 && (
                   <div className="flex flex-wrap gap-1 pt-0.5">
                     {allowedApps.map((id) => {
@@ -923,11 +787,7 @@ export default function StudyPage() {
                       return (
                         <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[10px] font-bold">
                           <span>{app.icon} {app.name}</span>
-                          <button
-                            type="button"
-                            onClick={() => toggleAppAllowed(id)}
-                            className="hover:text-rose-500 ml-0.5 font-bold"
-                          >
+                          <button type="button" onClick={() => toggleAppAllowed(id)} className="hover:text-rose-500 ml-0.5 font-bold">
                             ✕
                           </button>
                         </span>
@@ -939,96 +799,19 @@ export default function StudyPage() {
             )}
           </div>
         </div>
-
       </main>
 
-      {/* ── Usage Access Steps Modal ──────────────────────────────────────────── */}
-      {showUsageSteps && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4 animate-in fade-in slide-in-from-bottom-5">
-            <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <h3 className="text-sm font-bold text-ink flex items-center gap-2">
-                🛡️ Enable App Blocker
-              </h3>
-              <button onClick={() => setShowUsageSteps(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60 flex items-center justify-center">✕</button>
-            </div>
-            <p className="text-[11px] text-slate leading-relaxed">
-              App Blocker needs <span className="font-bold text-ink">Usage Access</span> permission to detect which apps you open and block them during study. This is a special Android permission.
-            </p>
-            <div className="space-y-2.5">
-              {[
-                { num: "1", text: 'Tap "Open Settings" below' },
-                { num: "2", text: 'Find "PrepWise" in the list' },
-                { num: "3", text: 'Toggle it ON' },
-                { num: "4", text: 'Come back and tap "Done, I granted it"' },
-              ].map((step) => (
-                <div key={step.num} className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-teal text-white text-[11px] font-black flex items-center justify-center shrink-0 mt-0.5">{step.num}</span>
-                  <p className="text-xs text-ink leading-relaxed">{step.text}</p>
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => {
-                try { window.AppBridge!.postMessage(JSON.stringify({ action: "requestUsagePermission" })); } catch (_) {}
-              }}
-              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20"
-            >
-              Open Settings →
-            </button>
-            <button
-              onClick={handleUsagePermissionGranted}
-              className="w-full py-2.5 rounded-xl bg-ink/8 text-ink font-bold text-xs"
-            >
-              ✓ Done, I granted it
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── End Confirm Modal ─────────────────────────────────────────────────── */}
-      {showEndConfirmModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4 animate-in fade-in zoom-in-95">
-            <div className="text-center">
-              <span className="text-3xl">🛑</span>
-              <h3 className="text-base font-black text-ink mt-2">End Focus Session?</h3>
-              <p className="text-xs text-slate mt-1">
-                Are you sure you want to end your focus session?
-                {selectedTask === "questions" && " Your question practice logger will open next."}
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowEndConfirmModal(false)}
-                className="w-full py-2.5 rounded-xl bg-ink/5 hover:bg-ink/10 text-ink text-xs font-bold transition-all"
-              >
-                Keep Studying
-              </button>
-              <button
-                type="button"
-                onClick={() => { setShowEndConfirmModal(false); handleStopSession(); }}
-                className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/20 transition-all"
-              >
-                Yes, End Session
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Select Allowed Apps Modal ─────────────────────────────────────────── */}
+      {/* Allowed Apps Modal (Point 4: Clean list, + Add App removed) */}
       {showAppsModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 max-h-[85vh] flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-5">
+          <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 max-h-[85vh] flex flex-col gap-3">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
               <div>
                 <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
                   <span>🛡️</span> Select Allowed Apps
                 </h3>
                 <p className="text-[10px] text-slate mt-0.5">
-                  Select Allowed Apps to keep unlocked during study. All other apps stay blocked.
+                  Keep select apps unlocked. All other apps stay blocked.
                   {isNativeApp && <span className="ml-1 text-teal font-bold">• {allApps.length} installed</span>}
                 </p>
               </div>
@@ -1047,7 +830,7 @@ export default function StudyPage() {
             </div>
 
             <div className="flex items-center justify-between gap-2">
-              <p className="text-[11px] text-slate font-medium">Tap an app to Whitelist or Block:</p>
+              <p className="text-[11px] text-slate font-medium">Tap app to Whitelist/Block:</p>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -1070,7 +853,7 @@ export default function StudyPage() {
 
             <div className="overflow-y-auto flex-1 pr-1">
               {!appsLoaded ? (
-                <p className="text-[11px] text-slate text-center py-6">Loading your apps…</p>
+                <p className="text-[11px] text-slate text-center py-6">Loading apps…</p>
               ) : filteredApps.length === 0 ? (
                 <p className="text-[11px] text-slate text-center py-6">No apps found</p>
               ) : (
@@ -1096,25 +879,6 @@ export default function StudyPage() {
               )}
             </div>
 
-            <div className="pt-2 border-t border-ink/8">
-              <label className="text-[10px] font-bold text-slate block mb-1">
-                + Allow Another App (e.g. Physics Wallah, Chrome, Notion)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={customAppName}
-                  onChange={(e) => setCustomAppName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddCustomApp()}
-                  placeholder="App name..."
-                  className="flex-1 px-3 py-2 text-xs rounded-xl border border-ink/15 focus:border-teal outline-none"
-                />
-                <button type="button" onClick={handleAddCustomApp} disabled={!customAppName.trim()} className="px-3 py-2 bg-teal text-white rounded-xl text-xs font-bold disabled:opacity-40">
-                  Add
-                </button>
-              </div>
-            </div>
-
             <button type="button" onClick={() => setShowAppsModal(false)} className="w-full py-3 rounded-xl bg-ink text-white font-bold text-xs shadow-md">
               Save Allowed Apps ({allowedApps.length} Allowed)
             </button>
@@ -1122,7 +886,7 @@ export default function StudyPage() {
         </div>
       )}
 
-      {/* ── Pre-Session Modal ─────────────────────────────────────────────────── */}
+      {/* Pre-Session Modal */}
       {showPreModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
@@ -1153,11 +917,10 @@ export default function StudyPage() {
               </div>
             </div>
 
-            {/* Status summary in pre-modal */}
             <div className={`rounded-xl px-3 py-2.5 border text-[10px] leading-relaxed ${isVerifiedSession ? "bg-teal/8 border-teal/25 text-teal" : "bg-ink/5 border-ink/10 text-slate"}`}>
               {isVerifiedSession
-                ? "✅ Verified session — this will count on the Leaderboard!"
-                : `⚠️ ${!faceVerificationEnabled && !appBlockerEnabled ? "Both toggles off" : !faceVerificationEnabled ? "Face Verification off" : "App Blocker off"} — session won't count on Leaderboard. Your study data is still saved.`}
+                ? "✅ Verified session — counts for Leaderboard!"
+                : `ℹ️ ${!faceVerificationEnabled && !appBlockerEnabled ? "Both toggles off" : !faceVerificationEnabled ? "Face Verification off" : "App Blocker off"}. Study data is saved to your personal stats.`}
             </div>
 
             <button
@@ -1171,31 +934,7 @@ export default function StudyPage() {
         </div>
       )}
 
-      {/* ── Post-Session Modal ────────────────────────────────────────────────── */}
-      {showPostModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
-            <h3 className="text-base font-black text-ink text-center">Session Finished! 🎉</h3>
-            <p className="text-xs text-slate text-center">Studied {selectedSub} ({selectedTask}) for {Math.round(savedDuration / 60)} mins.</p>
-            {savedDuration >= MIN_STREAK_SECONDS && (
-              <p className="text-[11px] text-teal font-bold text-center">🔥 This session counts for your streak!</p>
-            )}
-            {selectedTask === "questions" && (
-              <div>
-                <label className="text-[11px] font-bold text-slate block mb-1 text-center">✍️ How many questions did you solve?</label>
-                <input type="number" min={0} value={postQCount} onChange={(e) => setPostQCount(Math.max(0, parseInt(e.target.value) || 0))}
-                  className="w-full p-2.5 text-center text-sm font-bold rounded-xl border border-ink/15 focus:border-teal outline-none" placeholder="0" />
-                <p className="text-[10px] text-slate text-center mt-1">Will be added to your {selectedSub} question counter</p>
-              </div>
-            )}
-            <button disabled={saving} onClick={handleFinishAndSave} className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs">
-              {saving ? "Saving..." : "✓ Save & Log Session"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Manual Offline Modal ──────────────────────────────────────────────── */}
+      {/* Manual Offline Modal */}
       {showManualModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3">
@@ -1233,7 +972,7 @@ export default function StudyPage() {
                   className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15" />
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate block mb-1">{manualTask === "questions" ? "Questions Solved" : "Questions (optional)"}</label>
+                <label className="text-[11px] font-bold text-slate block mb-1">Questions</label>
                 <input type="number" min={0} value={manualQs} onChange={(e) => setManualQs(parseInt(e.target.value) || 0)}
                   className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15" />
               </div>
@@ -1242,9 +981,6 @@ export default function StudyPage() {
               <label className="text-[11px] font-bold text-slate block mb-1">Date</label>
               <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="w-full p-2 text-xs rounded-lg border border-ink/15" />
             </div>
-            {manualDate !== new Date().toISOString().split("T")[0] && (
-              <p className="text-[10px] text-slate bg-ink/5 rounded-lg px-3 py-2">ℹ️ Past-date entries update study hours but not your streak (streak is today-only).</p>
-            )}
             <button disabled={saving} onClick={handleSaveManualEntry} className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs">
               {saving ? "Saving..." : "Add to Daily Study Hours"}
             </button>
@@ -1252,18 +988,35 @@ export default function StudyPage() {
         </div>
       )}
 
-      {/* ── Liveness Challenge ────────────────────────────────────────────────── */}
-      {livenessPromptOpen && (
-        <div className="fixed bottom-24 left-0 right-0 z-50 px-4">
-          <div className="max-w-sm mx-auto bg-ink text-white rounded-2xl shadow-2xl p-4 flex items-center gap-3">
-            <span className="text-xl">👋</span>
-            <div className="flex-1">
-              <p className="text-xs font-bold">Still there?</p>
-              <p className="text-[10px] text-white/70">Tap to confirm — {livenessSecondsLeft}s left</p>
+      {/* Usage Access Modal */}
+      {showUsageSteps && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-ink/8">
+              <h3 className="text-sm font-bold text-ink flex items-center gap-2">
+                🛡️ Enable App Blocker
+              </h3>
+              <button onClick={() => setShowUsageSteps(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60 flex items-center justify-center">✕</button>
             </div>
-            <button onClick={handleConfirmLiveness} className="px-3 py-2 rounded-xl bg-teal text-white text-xs font-bold shrink-0">
-              I'm here
-            </button>
+            <p className="text-[11px] text-slate leading-relaxed">
+              App Blocker needs <span className="font-bold text-ink">Usage Access</span> permission to detect which apps you open and block them during study.
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => {
+                  try { window.AppBridge!.postMessage(JSON.stringify({ action: "requestUsagePermission" })); } catch (_) {}
+                }}
+                className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20"
+              >
+                Open Settings →
+              </button>
+              <button
+                onClick={handleUsagePermissionGranted}
+                className="w-full py-2.5 rounded-xl bg-ink/8 text-ink font-bold text-xs"
+              >
+                ✓ Done, I granted it
+              </button>
+            </div>
           </div>
         </div>
       )}
