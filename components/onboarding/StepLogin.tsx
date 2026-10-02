@@ -1,7 +1,14 @@
+// components/onboarding/StepLogin.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+
+declare global {
+  interface Window {
+    AppBridge?: { postMessage: (message: string) => void };
+  }
+}
 
 interface StepLoginProps {
   onSignedIn: (name: string) => void;
@@ -9,22 +16,43 @@ interface StepLoginProps {
 
 export default function StepLogin({ onSignedIn }: StepLoginProps) {
   const [loading, setLoading] = useState(false);
+  const [isNativeApp, setIsNativeApp] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.AppBridge) {
+      setIsNativeApp(true);
+    }
+  }, []);
 
   async function handleSignIn() {
     setLoading(true);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/onboarding`,
-      },
-    });
-    if (error) {
-      console.error("Google sign-in failed:", error.message);
-      setLoading(false);
+
+    if (isNativeApp && window.AppBridge) {
+      // Native Android app — trigger account picker popup
+      // Result handled by window.onNativeGoogleSignInSuccess in onboarding/page.tsx
+      try {
+        window.AppBridge.postMessage(JSON.stringify({ action: "nativeGoogleSignIn" }));
+        // Reset loading after 30s timeout (user cancelled or error)
+        setTimeout(() => setLoading(false), 30000);
+      } catch (err) {
+        console.error("Native Google Sign-In failed:", err);
+        setLoading(false);
+      }
+    } else {
+      // Web browser fallback — standard OAuth redirect
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/onboarding`,
+        },
+      });
+      if (error) {
+        console.error("Google sign-in failed:", error.message);
+        setLoading(false);
+      }
+      // On success browser redirects to Google then back to /onboarding
+      // onSignedIn is NOT called here — parent page picks up session on mount
     }
-    // On success the browser redirects to Google, then back to /onboarding.
-    // onSignedIn is NOT called here — the parent page picks up the session
-    // on mount after the redirect (see app/onboarding/page.tsx).
   }
 
   return (
@@ -43,7 +71,7 @@ export default function StepLogin({ onSignedIn }: StepLoginProps) {
         className="flex items-center justify-center gap-3 border border-ink/15 bg-white rounded-ticket py-3.5 font-medium text-ink hover:border-ink/30 transition-colors disabled:opacity-60"
       >
         {loading ? (
-          <span>Redirecting to Google…</span>
+          <span>{isNativeApp ? "Opening Google…" : "Redirecting to Google…"}</span>
         ) : (
           <>
             <GoogleIcon />
