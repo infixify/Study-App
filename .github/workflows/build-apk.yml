@@ -757,7 +757,7 @@ jobs:
 
               private fun showDotView() {
                   dotView?.let { if (it.visibility != View.VISIBLE) it.visibility = View.VISIBLE }
-                      ?: if (canDrawOverlay()) showFloatingDot()
+                      ?: run { if (canDrawOverlay()) showFloatingDot() }
               }
 
               private fun hideDotView() {
