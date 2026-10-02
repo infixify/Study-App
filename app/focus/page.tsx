@@ -15,6 +15,7 @@ declare global {
     onInstalledAppsReady?: (apps: { name: string; packageName: string }[]) => void;
     onNativeRequestStopFocus?: () => void;
     onNativeFocusTimerSync?: (seconds: number) => void;
+    onAccessibilityStatus?: (granted: boolean) => void;
   }
 }
 
@@ -44,8 +45,9 @@ function nativeToAppItem(n: { name: string; packageName: string }): AppItem {
 
 const SYNC_INTERVAL_SECONDS = 60;
 const FACE_API_MODEL_URL = "https://justadudewhohacks.github.io/face-api.js/models";
-const PRESENCE_CHECK_INTERVAL_SECONDS = 15;
-const MAX_CONSECUTIVE_MISSES = 3;
+// FIXED: 2s interval instead of 15s — rapid detection
+const PRESENCE_CHECK_INTERVAL_SECONDS = 2;
+const MAX_CONSECUTIVE_MISSES = 3; // 3 × 2s = 6 seconds to pause
 const PRESENCE_LOG_INTERVAL_SECONDS = 60;
 const LIVENESS_CHALLENGE_INTERVAL_SECONDS = 1200;
 const LIVENESS_CHALLENGE_WINDOW_SECONDS = 20;
@@ -68,7 +70,6 @@ export default function StudyPage() {
   const [showPreModal, setShowPreModal] = useState(false);
   const [selectedSub, setSelectedSub] = useState<SubjectType>("Physics");
   const [selectedTask, setSelectedTask] = useState<StudyTaskType>("questions");
-  const [strictMode, setStrictMode] = useState(true);
 
   const [allowedApps, setAllowedApps] = useState<string[]>([]);
   const [allApps, setAllApps] = useState<AppItem[]>([]);
@@ -84,7 +85,6 @@ export default function StudyPage() {
   const [postQCount, setPostQCount] = useState<number>(0);
   const [saving, setSaving] = useState(false);
 
-  // In-App Confirmation Modal when Stop notification action is tapped
   const [showEndConfirmModal, setShowEndConfirmModal] = useState(false);
 
   const [showManualModal, setShowManualModal] = useState(false);
@@ -97,6 +97,16 @@ export default function StudyPage() {
   );
   const [manualError, setManualError] = useState<string | null>(null);
 
+  // ── Toggle states (persisted in localStorage) ──────────────────────────────
+  const [faceVerificationEnabled, setFaceVerificationEnabled] = useState(false);
+  const [appBlockerEnabled, setAppBlockerEnabled] = useState(false);
+
+  // Permission states
+  const [overlayGranted, setOverlayGranted] = useState(false);
+  const [usageGranted, setUsageGranted] = useState(false);
+  const [showUsageSteps, setShowUsageSteps] = useState(false);
+
+  // Camera / face-api state
   const [verifiedMode, setVerifiedMode] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -119,6 +129,9 @@ export default function StudyPage() {
       ? ["Physics", "Chemistry", "Biology"]
       : ["Physics", "Chemistry", "Mathematics"];
 
+  // Derived: session is "verified" if both toggles are on and permissions granted
+  const isVerifiedSession = faceVerificationEnabled && appBlockerEnabled && overlayGranted && usageGranted;
+
   function applyNativeApps(raw: { name: string; packageName: string }[]) {
     const items = raw.map(nativeToAppItem);
     const savedCustom = localStorage.getItem("prepwise_custom_apps");
@@ -134,24 +147,69 @@ export default function StudyPage() {
     setAppsLoaded(true);
   }
 
+  // ── Check permissions on mount and when returning from settings ─────────────
+  async function checkOverlayPermission(): Promise<boolean> {
+    if (!isNativeApp) return false;
+    try {
+      const result = await new Promise<boolean>((resolve) => {
+        const ch = (window as any).FlutterBridge;
+        if (!ch) { resolve(false); return; }
+        // Use AppBridge postMessage pattern
+        const handler = (evt: MessageEvent) => {
+          try {
+            const d = JSON.parse(evt.data);
+            if (d.type === "overlayPermissionResult") {
+              window.removeEventListener("message", handler);
+              resolve(d.granted);
+            }
+          } catch (_) {}
+        };
+        window.addEventListener("message", handler);
+        window.AppBridge!.postMessage(JSON.stringify({ action: "checkOverlayPermission" }));
+        setTimeout(() => { window.removeEventListener("message", handler); resolve(false); }, 3000);
+      });
+      setOverlayGranted(result);
+      return result;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function checkUsagePermission(): Promise<boolean> {
+    if (!isNativeApp) return false;
+    return new Promise<boolean>((resolve) => {
+      const prev = window.onAccessibilityStatus;
+      window.onAccessibilityStatus = (granted: boolean) => {
+        window.onAccessibilityStatus = prev;
+        setUsageGranted(granted);
+        resolve(granted);
+      };
+      try {
+        window.AppBridge!.postMessage(JSON.stringify({ action: "checkUsagePermission" }));
+      } catch (_) { resolve(false); }
+      setTimeout(() => { window.onAccessibilityStatus = prev; resolve(false); }, 3000);
+    });
+  }
+
   useEffect(() => {
     if (typeof window !== "undefined" && window.AppBridge) {
       setIsNativeApp(true);
     }
 
-    // Listen for Force Stop Focus requests from the Android Live Notification
     if (typeof window !== "undefined") {
       window.onNativeRequestStopFocus = () => {
-        // Called when user taps "Stop Focus Mode" notification button.
-        // Show the end-session confirmation modal (user is already on the focus page).
         setShowEndConfirmModal(true);
       };
-
-      // Sync timer from Kotlin service on app resume (Kotlin is source of truth for elapsed time)
-      window.onNativeFocusTimerSync = (seconds: number) => {
-        setSeconds(seconds);
+      window.onNativeFocusTimerSync = (secs: number) => {
+        setSeconds(secs);
       };
     }
+
+    // Restore toggle preferences
+    const savedFace = localStorage.getItem("prepwise_face_toggle");
+    const savedBlocker = localStorage.getItem("prepwise_blocker_toggle");
+    if (savedFace === "true") setFaceVerificationEnabled(true);
+    if (savedBlocker === "true") setAppBlockerEnabled(true);
 
     async function loadUser() {
       const { data: authData } = await supabase.auth.getUser();
@@ -207,6 +265,84 @@ export default function StudyPage() {
       return () => clearTimeout(fallbackTimer);
     }
   }, []);
+
+  // ── Sync permission state whenever isNativeApp becomes true ─────────────────
+  useEffect(() => {
+    if (!isNativeApp) return;
+    checkOverlayPermission();
+    checkUsagePermission();
+  }, [isNativeApp]);
+
+  // ── Face Verification toggle handler ────────────────────────────────────────
+  async function handleFaceToggle() {
+    const next = !faceVerificationEnabled;
+    if (next) {
+      // Turning ON — check/request overlay permission
+      if (isNativeApp) {
+        const granted = await checkOverlayPermission();
+        if (!granted) {
+          // Auto redirect to overlay settings
+          try {
+            window.AppBridge!.postMessage(JSON.stringify({ action: "requestOverlayPermission" }));
+          } catch (_) {}
+          // Poll for grant after user returns (check every 1s for 30s)
+          let tries = 0;
+          const poll = setInterval(async () => {
+            tries++;
+            const g = await checkOverlayPermission();
+            if (g || tries > 30) {
+              clearInterval(poll);
+              if (g) {
+                setFaceVerificationEnabled(true);
+                setVerifiedMode(true);
+                localStorage.setItem("prepwise_face_toggle", "true");
+              }
+            }
+          }, 1000);
+          return; // don't enable yet — wait for permission
+        }
+      }
+      setFaceVerificationEnabled(true);
+      setVerifiedMode(true);
+      localStorage.setItem("prepwise_face_toggle", "true");
+    } else {
+      // Turning OFF
+      setFaceVerificationEnabled(false);
+      setVerifiedMode(false);
+      localStorage.setItem("prepwise_face_toggle", "false");
+    }
+  }
+
+  // ── App Blocker toggle handler ───────────────────────────────────────────────
+  async function handleAppBlockerToggle() {
+    const next = !appBlockerEnabled;
+    if (next) {
+      if (isNativeApp) {
+        const granted = await checkUsagePermission();
+        if (!granted) {
+          // Show steps modal — don't force open settings automatically
+          setShowUsageSteps(true);
+          return;
+        }
+      }
+      setAppBlockerEnabled(true);
+      localStorage.setItem("prepwise_blocker_toggle", "true");
+    } else {
+      setAppBlockerEnabled(false);
+      localStorage.setItem("prepwise_blocker_toggle", "false");
+    }
+  }
+
+  // Called from usage steps modal after user grants permission
+  async function handleUsagePermissionGranted() {
+    const granted = await checkUsagePermission();
+    if (granted) {
+      setShowUsageSteps(false);
+      setAppBlockerEnabled(true);
+      localStorage.setItem("prepwise_blocker_toggle", "true");
+    }
+    // if still not granted, keep modal open — user hasn't done it yet
+  }
 
   const filteredApps = appsSearch.trim()
     ? allApps.filter((a) => a.name.toLowerCase().includes(appsSearch.toLowerCase()))
@@ -307,20 +443,13 @@ export default function StudyPage() {
 
   useEffect(() => {
     function handleVisibilityChange() {
-      // When native app: Kotlin FocusBlockerService owns the timer — it keeps running in background.
-      // We only pause the WEB timer here; native timer is unaffected.
-      // Camera tracking (face-api.js) cannot run in background anyway, but timer still counts via Kotlin.
       if (document.hidden && isActive && verifiedMode) {
         if (typeof window !== "undefined" && window.AppBridge) {
-          // Native: don't send cam "lost" just because screen changed — Kotlin timer keeps running.
-          // The Kotlin service only pauses if setCamStatus("lost") is explicitly sent by face detection.
-          // Do nothing here — cam status is controlled by face detection results only.
+          // Native: Kotlin timer keeps running — don't send cam lost on tab change
         } else {
-          // Web-only fallback: pause timer if tab hidden (no Kotlin background service)
           setPresencePaused(true);
         }
       } else if (!document.hidden && isActive && verifiedMode && presencePaused) {
-        // Web-only: resume when tab becomes visible again
         if (typeof window === "undefined" || !window.AppBridge) {
           setPresencePaused(false);
         }
@@ -357,7 +486,7 @@ export default function StudyPage() {
       setCameraError(null);
       return true;
     } catch (e: any) {
-      setCameraError("Camera permission denied. Please allow camera access in app settings for Verified Mode.");
+      setCameraError("Camera permission denied. Please allow camera access in app settings for Face Verification.");
       return false;
     }
   }
@@ -374,23 +503,37 @@ export default function StudyPage() {
     if (!faceapi || !videoRef.current || videoRef.current.readyState < 2) return;
     let detected = false;
     try {
-      const result = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 }));
+      // FIXED: inputSize 128 (faster), scoreThreshold 0.4 (more sensitive)
+      const result = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 128, scoreThreshold: 0.4 }));
       detected = !!result;
     } catch (e) { detected = false; }
 
     if (detected) {
       missedChecksRef.current = 0;
-      setPresencePaused((prev) => (prev ? false : prev));
-      if (typeof window !== "undefined" && window.AppBridge) {
-        try { window.AppBridge.postMessage(JSON.stringify({ action: "updateCamStatus", status: "verified" })); } catch (_) {}
-      }
+      // Only send "verified" if previously was lost — avoid spamming
+      setPresencePaused((prev) => {
+        if (prev) {
+          // Was paused, now resuming — notify Kotlin instantly
+          if (typeof window !== "undefined" && window.AppBridge) {
+            try { window.AppBridge.postMessage(JSON.stringify({ action: "updateCamStatus", status: "verified" })); } catch (_) {}
+          }
+          return false;
+        }
+        return prev;
+      });
     } else {
       missedChecksRef.current += 1;
       if (missedChecksRef.current >= MAX_CONSECUTIVE_MISSES) {
-        setPresencePaused(true);
-        if (typeof window !== "undefined" && window.AppBridge) {
-          try { window.AppBridge.postMessage(JSON.stringify({ action: "updateCamStatus", status: "lost" })); } catch (_) {}
-        }
+        setPresencePaused((prev) => {
+          if (!prev) {
+            // Just lost — notify Kotlin instantly
+            if (typeof window !== "undefined" && window.AppBridge) {
+              try { window.AppBridge.postMessage(JSON.stringify({ action: "updateCamStatus", status: "lost" })); } catch (_) {}
+            }
+            return true;
+          }
+          return prev;
+        });
       }
     }
 
@@ -440,7 +583,8 @@ export default function StudyPage() {
   }
 
   const handleStartSession = async () => {
-    if (verifiedMode) {
+    // Face Verification setup
+    if (faceVerificationEnabled) {
       setCameraError(null);
       const camOk = await startCamera();
       if (!camOk) return;
@@ -448,18 +592,23 @@ export default function StudyPage() {
       missedChecksRef.current = 0;
       lastPresenceLogSecondsRef.current = 0;
       sessionIdRef.current = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+      // FIXED: 2s interval for rapid detection
       presenceIntervalRef.current = setInterval(runPresenceCheck, PRESENCE_CHECK_INTERVAL_SECONDS * 1000);
       livenessIntervalRef.current = setInterval(triggerLivenessChallenge, LIVENESS_CHALLENGE_INTERVAL_SECONDS * 1000);
     }
 
     if (typeof window !== "undefined" && window.AppBridge) {
       try {
-        window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: allowedApps }));
+        // App blocker — only if enabled
+        if (appBlockerEnabled) {
+          window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: allowedApps }));
+        }
         window.AppBridge.postMessage(JSON.stringify({
           action: "startFocusNotification",
           subject: selectedSub,
           mode: selectedTask === "questions" ? "Practice" : selectedTask === "theory" ? "Theory" : "Revision",
           initialSeconds: 0,
+          allowedApps: appBlockerEnabled ? allowedApps : [],
         }));
         window.AppBridge.postMessage(JSON.stringify({ action: "vibrate", type: "light" }));
       } catch (err) {}
@@ -487,7 +636,7 @@ export default function StudyPage() {
     setIsActive(false);
     setSavedDuration(seconds);
     setShowPostModal(true);
-    if (verifiedMode) cleanupVerifiedMode();
+    if (faceVerificationEnabled) cleanupVerifiedMode();
   };
 
   const handleFinishAndSave = async () => {
@@ -578,12 +727,28 @@ export default function StudyPage() {
     return `${hrs > 0 ? hrs + ":" : ""}${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
+  // ── Toggle component ─────────────────────────────────────────────────────────
+  function ToggleSwitch({ on, onToggle, disabled }: { on: boolean; onToggle: () => void; disabled?: boolean }) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={disabled}
+        className={`shrink-0 w-11 h-6 rounded-full flex items-center px-0.5 transition-all duration-200 ${on ? "bg-teal justify-end" : "bg-ink/15 justify-start"} ${disabled ? "opacity-40" : ""}`}
+      >
+        <span className="w-5 h-5 rounded-full bg-white shadow-xs" />
+      </button>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-paper pb-28">
       <AppHeader />
       <video ref={videoRef} muted playsInline className="hidden" />
 
       <main className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-5">
+
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
@@ -606,6 +771,7 @@ export default function StudyPage() {
           </button>
         </div>
 
+        {/* Streak banner */}
         {(currentStreak > 0 || streakWasReset) && (
           <div className={`rounded-ticket border px-4 py-3 flex items-center gap-3 ${streakWasReset ? "bg-coral/10 border-coral/20" : "bg-marigold/10 border-marigold/20"}`}>
             <span className="text-xl">{streakWasReset ? "💔" : "🔥"}</span>
@@ -631,12 +797,13 @@ export default function StudyPage() {
           </div>
         )}
 
+        {/* Presence paused banner */}
         {isActive && presencePaused && (
           <div className="rounded-ticket border border-coral/30 bg-coral/10 px-4 py-3 flex items-center gap-3">
             <span className="text-xl">⏸️</span>
             <div>
               <p className="text-xs font-bold text-ink">Paused — we can't see you</p>
-              <p className="text-[10px] text-slate">Come back into camera view (or tap back into the app) to resume your timer.</p>
+              <p className="text-[10px] text-slate">Come back into camera view to resume your timer.</p>
             </div>
           </div>
         )}
@@ -647,11 +814,11 @@ export default function StudyPage() {
           </div>
         )}
 
-        {/* Main Timer Card */}
+        {/* ── Main Timer Card ───────────────────────────────────────────────── */}
         <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
           <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            {isActive && verifiedMode && (
-              <span className={`inline-block w-2 h-2 rounded-full ${presencePaused ? "bg-coral" : "bg-teal"}`} />
+            {isActive && faceVerificationEnabled && (
+              <span className={`inline-block w-2 h-2 rounded-full ${presencePaused ? "bg-coral animate-pulse" : "bg-teal"}`} />
             )}
             {isActive ? `🔥 Studying ${selectedSub} (${selectedTask})` : "Ready to focus?"}
           </div>
@@ -659,62 +826,175 @@ export default function StudyPage() {
             {formatTimer(seconds)}
           </div>
           {!isActive ? (
-            <button onClick={() => setShowPreModal(true)} className="mt-4 px-8 py-3.5 bg-teal text-white font-bold text-sm rounded-2xl shadow-md shadow-teal/20 hover:bg-teal/90 transition-all">
-              ▶ Start Focus Session
+            <button
+              onClick={() => setShowPreModal(true)}
+              className="mt-4 px-8 py-3.5 bg-teal text-white font-bold text-sm rounded-2xl shadow-md shadow-teal/20 hover:bg-teal/90 transition-all"
+            >
+              ▶ Start Study Timer
             </button>
           ) : (
-            <button onClick={handleStopSession} className="mt-4 px-8 py-3.5 bg-rose-600 text-white font-bold text-sm rounded-2xl shadow-md shadow-rose-600/20 hover:bg-rose-700 transition-all">
+            <button
+              onClick={handleStopSession}
+              className="mt-4 px-8 py-3.5 bg-rose-600 text-white font-bold text-sm rounded-2xl shadow-md shadow-rose-600/20 hover:bg-rose-700 transition-all"
+            >
               ■ Stop & Log Session
             </button>
           )}
         </div>
 
-        {/* App Blocker Card */}
-        <div className="bg-white rounded-ticket border border-ink/10 p-5 shadow-xs">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <span className="text-xl">🛡️</span>
-              <div>
-                <h3 className="text-xs font-bold text-ink">Strict Focus App Blocker</h3>
-                <p className="text-[11px] text-slate mt-0.5">
-                  {allowedApps.length === 0
-                    ? "All apps blocked by default (Full strict mode)"
-                    : `${allowedApps.length} app${allowedApps.length > 1 ? "s" : ""} allowed during session`}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => { setShowAppsModal(true); setAppsSearch(""); }}
-              className="px-3.5 py-2 rounded-xl bg-teal/10 hover:bg-teal/20 text-teal text-xs font-bold border border-teal/25 transition-all flex items-center gap-1.5 shrink-0 shadow-2xs"
-            >
-              <span>⚙️</span>
-              <span>{allowedApps.length === 0 ? "Select Apps" : "Edit Apps"}</span>
-            </button>
+        {/* ── Two Feature Toggles ───────────────────────────────────────────── */}
+        <div className="bg-white rounded-ticket border border-ink/10 shadow-xs overflow-hidden">
+
+          {/* Leaderboard note */}
+          <div className="bg-marigold/10 border-b border-marigold/20 px-4 py-2.5 flex items-start gap-2">
+            <span className="text-sm mt-0.5">🏆</span>
+            <p className="text-[10px] text-ink/70 leading-relaxed">
+              <span className="font-bold text-ink">Leaderboard entries</span> are only counted when{" "}
+              <span className="font-bold text-marigold">both toggles are ON</span> during your session.
+              Study data is always saved to your personal stats regardless.
+            </p>
           </div>
 
-          {allowedApps.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-ink/5">
-              {allowedApps.map((id) => {
-                const app = allApps.find((a) => a.id === id) || { name: id, icon: "📱" };
-                return (
-                  <span key={id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[11px] font-bold">
-                    <span>{app.icon}</span>
-                    <span>{app.name}</span>
-                    <button type="button" onClick={() => toggleAppAllowed(id)} className="ml-0.5 text-slate/70 hover:text-ink text-[12px]" title="Remove">✕</button>
-                  </span>
-                );
-              })}
+          {/* Face Verification Toggle */}
+          <div className="px-4 py-4 border-b border-ink/6">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${faceVerificationEnabled ? "bg-teal/15" : "bg-ink/5"}`}>
+                  <span className="text-lg">🎥</span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-ink">Face Verification</p>
+                  <p className="text-[10px] text-slate mt-0.5 leading-relaxed">
+                    {faceVerificationEnabled
+                      ? overlayGranted
+                        ? "✓ Active — timer pauses if you leave"
+                        : "⏳ Waiting for overlay permission..."
+                      : "Camera confirms you're present. Nothing recorded or uploaded."}
+                  </p>
+                </div>
+              </div>
+              <ToggleSwitch
+                on={faceVerificationEnabled && overlayGranted}
+                onToggle={handleFaceToggle}
+                disabled={isActive}
+              />
             </div>
-          ) : (
-            <div className="mt-2.5 pt-2.5 border-t border-ink/5">
-              <span className="text-[10px] text-slate">🔒 0 apps allowed • Social media, games & browsers are completely locked</span>
+            {faceVerificationEnabled && !overlayGranted && (
+              <div className="mt-2.5 ml-12 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                <p className="text-[10px] text-amber-800 font-medium">
+                  📋 Overlay permission required. Redirecting to Settings... Grant it and come back — toggle will turn on automatically.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* App Blocker Toggle */}
+          <div className="px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${appBlockerEnabled ? "bg-rose-50" : "bg-ink/5"}`}>
+                  <span className="text-lg">🛡️</span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-ink">App Blocker</p>
+                  <p className="text-[10px] text-slate mt-0.5 leading-relaxed">
+                    {appBlockerEnabled
+                      ? usageGranted
+                        ? `✓ Active — ${allowedApps.length === 0 ? "all apps blocked" : `${allowedApps.length} app${allowedApps.length > 1 ? "s" : ""} allowed`}`
+                        : "⏳ Waiting for Usage Access..."
+                      : "Blocks distracting apps during study. Needs Usage Access."}
+                  </p>
+                </div>
+              </div>
+              <ToggleSwitch
+                on={appBlockerEnabled && usageGranted}
+                onToggle={handleAppBlockerToggle}
+                disabled={isActive}
+              />
             </div>
-          )}
+
+            {/* Allowed apps chip strip */}
+            {appBlockerEnabled && usageGranted && (
+              <div className="mt-3 ml-12">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] text-slate">
+                    {allowedApps.length === 0 ? "🔒 All apps blocked" : `${allowedApps.length} app${allowedApps.length > 1 ? "s" : ""} allowed during session`}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setShowAppsModal(true); setAppsSearch(""); }}
+                    className="text-[10px] font-bold text-teal bg-teal/10 px-2.5 py-1 rounded-lg border border-teal/20"
+                  >
+                    ⚙️ {allowedApps.length === 0 ? "Select Apps" : "Edit"}
+                  </button>
+                </div>
+                {allowedApps.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {allowedApps.slice(0, 4).map((id) => {
+                      const app = allApps.find((a) => a.id === id) || { name: id, icon: "📱" };
+                      return (
+                        <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[10px] font-bold">
+                          {app.icon} {app.name}
+                        </span>
+                      );
+                    })}
+                    {allowedApps.length > 4 && (
+                      <span className="text-[10px] text-slate px-1">+{allowedApps.length - 4} more</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
+
       </main>
 
-      {/* Confirmation Modal when Stop notification action is tapped */}
+      {/* ── Usage Access Steps Modal ──────────────────────────────────────────── */}
+      {showUsageSteps && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4 animate-in fade-in slide-in-from-bottom-5">
+            <div className="flex items-center justify-between pb-2 border-b border-ink/8">
+              <h3 className="text-sm font-bold text-ink flex items-center gap-2">
+                🛡️ Enable App Blocker
+              </h3>
+              <button onClick={() => setShowUsageSteps(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60 flex items-center justify-center">✕</button>
+            </div>
+            <p className="text-[11px] text-slate leading-relaxed">
+              App Blocker needs <span className="font-bold text-ink">Usage Access</span> permission to detect which apps you open and block them during study. This is a special Android permission.
+            </p>
+            <div className="space-y-2.5">
+              {[
+                { num: "1", text: 'Tap "Open Settings" below' },
+                { num: "2", text: 'Find "PrepWise" in the list' },
+                { num: "3", text: 'Toggle it ON' },
+                { num: "4", text: 'Come back and tap "Done, I granted it"' },
+              ].map((step) => (
+                <div key={step.num} className="flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-full bg-teal text-white text-[11px] font-black flex items-center justify-center shrink-0 mt-0.5">{step.num}</span>
+                  <p className="text-xs text-ink leading-relaxed">{step.text}</p>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => {
+                try { window.AppBridge!.postMessage(JSON.stringify({ action: "requestUsagePermission" })); } catch (_) {}
+              }}
+              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20"
+            >
+              Open Settings →
+            </button>
+            <button
+              onClick={handleUsagePermissionGranted}
+              className="w-full py-2.5 rounded-xl bg-ink/8 text-ink font-bold text-xs"
+            >
+              ✓ Done, I granted it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── End Confirm Modal ─────────────────────────────────────────────────── */}
       {showEndConfirmModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4 animate-in fade-in zoom-in-95">
@@ -736,10 +1016,7 @@ export default function StudyPage() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setShowEndConfirmModal(false);
-                  handleStopSession();
-                }}
+                onClick={() => { setShowEndConfirmModal(false); handleStopSession(); }}
                 className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/20 transition-all"
               >
                 Yes, End Session
@@ -749,7 +1026,7 @@ export default function StudyPage() {
         </div>
       )}
 
-      {/* Apps Modal */}
+      {/* ── Apps Modal ────────────────────────────────────────────────────────── */}
       {showAppsModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 max-h-[85vh] flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-5">
@@ -840,7 +1117,7 @@ export default function StudyPage() {
         </div>
       )}
 
-      {/* Pre-Session Modal */}
+      {/* ── Pre-Session Modal ─────────────────────────────────────────────────── */}
       {showPreModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
@@ -871,26 +1148,25 @@ export default function StudyPage() {
               </div>
             </div>
 
-            <button type="button" onClick={() => setVerifiedMode((v) => !v)}
-              className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${verifiedMode ? "bg-teal/10 border-teal/40" : "bg-paper/60 border-ink/10"}`}>
-              <div>
-                <p className="text-xs font-bold text-ink">🎥 Verified Mode</p>
-                <p className="text-[10px] text-slate mt-0.5 max-w-[220px]">Uses your camera to confirm you're present. Nothing is ever recorded or uploaded.</p>
-              </div>
-              <span className={`shrink-0 w-10 h-6 rounded-full flex items-center px-0.5 transition-all ${verifiedMode ? "bg-teal justify-end" : "bg-ink/15 justify-start"}`}>
-                <span className="w-5 h-5 rounded-full bg-white shadow-xs" />
-              </span>
-            </button>
+            {/* Status summary in pre-modal */}
+            <div className={`rounded-xl px-3 py-2.5 border text-[10px] leading-relaxed ${isVerifiedSession ? "bg-teal/8 border-teal/25 text-teal" : "bg-ink/5 border-ink/10 text-slate"}`}>
+              {isVerifiedSession
+                ? "✅ Verified session — this will count on the Leaderboard!"
+                : `⚠️ ${!faceVerificationEnabled && !appBlockerEnabled ? "Both toggles off" : !faceVerificationEnabled ? "Face Verification off" : "App Blocker off"} — session won't count on Leaderboard. Your study data is still saved.`}
+            </div>
 
-            <button onClick={handleStartSession} disabled={modelsLoading}
-              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90 disabled:opacity-50">
-              {modelsLoading ? "Loading camera check…" : "Start Focus Session"}
+            <button
+              onClick={handleStartSession}
+              disabled={modelsLoading}
+              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90 disabled:opacity-50"
+            >
+              {modelsLoading ? "Loading camera check…" : "▶ Start Study Timer"}
             </button>
           </div>
         </div>
       )}
 
-      {/* Post-Session Modal */}
+      {/* ── Post-Session Modal ────────────────────────────────────────────────── */}
       {showPostModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
@@ -914,7 +1190,7 @@ export default function StudyPage() {
         </div>
       )}
 
-      {/* Manual Offline Modal */}
+      {/* ── Manual Offline Modal ──────────────────────────────────────────────── */}
       {showManualModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3">
@@ -971,7 +1247,7 @@ export default function StudyPage() {
         </div>
       )}
 
-      {/* Liveness challenge */}
+      {/* ── Liveness Challenge ────────────────────────────────────────────────── */}
       {livenessPromptOpen && (
         <div className="fixed bottom-24 left-0 right-0 z-50 px-4">
           <div className="max-w-sm mx-auto bg-ink text-white rounded-2xl shadow-2xl p-4 flex items-center gap-3">
