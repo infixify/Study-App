@@ -479,11 +479,16 @@ jobs:
               // camPaused = true means cam lost — timer freezes (but service keeps running)
               private var camPaused = false
 
-              // Overlay state
+              // Blocking overlay state
               private var windowManager: WindowManager? = null
               private var overlayView: View? = null
               private var lastBlockedPkg: String? = null
               private val overlayDismissHandler = Handler(Looper.getMainLooper())
+
+              // Persistent floating dot overlay (shown on all apps while focus is active)
+              private var dotView: View? = null
+              private var dotParams: WindowManager.LayoutParams? = null
+              private var camVerified = true
 
               // Poll every 500ms — tick timer only when cam not paused
               private val tickRunnable = object : Runnable {
@@ -514,13 +519,16 @@ jobs:
                           mode = intent.getStringExtra(EXTRA_MODE) ?: "Study"
                           currentElapsedSeconds = 0
                           camPaused = false
+                          camVerified = true
                           startForeground(NOTIF_ID, buildNotification())
                           handler.removeCallbacks(tickRunnable)
                           handler.post(tickRunnable)
+                          if (canDrawOverlay()) showFloatingDot()
                       }
                       ACTION_STOP -> {
                           handler.removeCallbacks(tickRunnable)
                           removeOverlay()
+                          removeFloatingDot()
                           currentElapsedSeconds = 0
                           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                               stopForeground(STOP_FOREGROUND_REMOVE)
@@ -536,7 +544,8 @@ jobs:
                       ACTION_SET_CAM_STATUS -> {
                           val status = intent.getStringExtra(EXTRA_CAM_STATUS) ?: "verified"
                           camPaused = status != "verified"
-                          // Update notification immediately to reflect paused state
+                          camVerified = !camPaused
+                          updateFloatingDotColor()
                           updateNotification()
                       }
                   }
@@ -548,25 +557,31 @@ jobs:
               private fun checkAndBlock() {
                   if (!hasUsagePermission()) return
                   val foreground = getForegroundPackage() ?: return
+
                   if (foreground == packageName) {
-                      // User is in PrepWise — remove overlay if showing
+                      // User is in PrepWise — remove blocking overlay, hide dot (Flutter dot takes over)
                       if (overlayView != null) removeOverlay()
+                      hideDotView()
                       return
                   }
+
                   if (foreground == "com.android.systemui" || foreground == "com.android.launcher" ||
-                      foreground.startsWith("com.google.android.inputmethod")) return
+                      foreground.startsWith("com.google.android.inputmethod")) {
+                      showDotView() // show dot on launcher/sysui too
+                      return
+                  }
 
                   if (blockedApps.contains(foreground)) {
+                      hideDotView() // blocking overlay covers everything — dot not needed
                       if (canDrawOverlay()) {
-                          // Show hard overlay — blocks any interaction with the app below
                           showBlockingOverlay(foreground)
                       } else {
-                          // Fallback: aggressive redirect without overlay permission
                           redirectToPrepWise()
                       }
                   } else {
-                      // App is allowed — remove any stale overlay
+                      // Allowed app — show dot as reminder
                       if (overlayView != null) removeOverlay()
+                      showDotView()
                   }
               }
 
@@ -674,6 +689,89 @@ jobs:
                   }
               }
 
+              // ── Floating Dot ────────────────────────────────────────────────────────────
+
+              private fun showFloatingDot() {
+                  if (dotView != null) return
+                  val size = 44 // dp → px
+                  val px = (size * resources.displayMetrics.density).toInt()
+
+                  val dot = android.widget.FrameLayout(this)
+                  val circle = android.view.View(this).apply {
+                      background = android.graphics.drawable.GradientDrawable().apply {
+                          shape = android.graphics.drawable.GradientDrawable.OVAL
+                          setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
+                          setStroke(3, Color.parseColor("#1E293B"))
+                      }
+                  }
+                  dot.addView(circle, android.widget.FrameLayout.LayoutParams(px, px))
+
+                  // Touch listener for drag
+                  var startX = 0f; var startY = 0f
+                  var initialX = 0; var initialY = 0
+                  dot.setOnTouchListener { v, event ->
+                      val p = dotParams ?: return@setOnTouchListener false
+                      when (event.action) {
+                          android.view.MotionEvent.ACTION_DOWN -> {
+                              startX = event.rawX; startY = event.rawY
+                              initialX = p.x; initialY = p.y
+                              true
+                          }
+                          android.view.MotionEvent.ACTION_MOVE -> {
+                              p.x = initialX + (event.rawX - startX).toInt()
+                              p.y = initialY + (event.rawY - startY).toInt()
+                              try { windowManager?.updateViewLayout(v, p) } catch (_: Exception) {}
+                              true
+                          }
+                          else -> false
+                      }
+                  }
+
+                  val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                  else
+                      @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+
+                  val params = WindowManager.LayoutParams(
+                      px, px, overlayType,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                      x = 24; y = 180
+                  }
+
+                  try {
+                      windowManager?.addView(dot, params)
+                      dotView = dot
+                      dotParams = params
+                  } catch (_: Exception) {}
+              }
+
+              private fun updateFloatingDotColor() {
+                  val circle = (dotView as? android.widget.FrameLayout)?.getChildAt(0) ?: return
+                  (circle.background as? android.graphics.drawable.GradientDrawable)
+                      ?.setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
+              }
+
+              private fun showDotView() {
+                  dotView?.let { if (it.visibility != View.VISIBLE) it.visibility = View.VISIBLE }
+                      ?: if (canDrawOverlay()) showFloatingDot()
+              }
+
+              private fun hideDotView() {
+                  dotView?.visibility = View.GONE
+              }
+
+              private fun removeFloatingDot() {
+                  dotView?.let {
+                      try { windowManager?.removeView(it) } catch (_: Exception) {}
+                      dotView = null
+                      dotParams = null
+                  }
+              }
+
               private fun redirectToPrepWise() {
                   val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
                   launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
@@ -756,6 +854,7 @@ jobs:
                   handler.removeCallbacks(tickRunnable)
                   overlayDismissHandler.removeCallbacksAndMessages(null)
                   removeOverlay()
+                  removeFloatingDot()
                   currentElapsedSeconds = 0
                   super.onDestroy()
               }
