@@ -1228,11 +1228,9 @@ jobs:
             GoogleAuthService._internal();
 
             final GoogleSignIn _googleSignIn = GoogleSignIn(
-              scopes: [
-                'email',
-                'profile',
-                'openid',
-              ],
+              scopes: ['email', 'profile', 'openid'],
+              // serverClientId injected at build time from google-services.json (client_type 3 = web)
+              serverClientId: const String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID'),
             );
 
             /// Performs native Google Sign-In with account picker popup
@@ -2440,10 +2438,30 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" || true
 
+      - name: Print SHA-1 Fingerprint (for Firebase + Google Cloud Console)
+        run: |
+          echo "=== DEBUG KEYSTORE SHA-1 (add this to Firebase + Google Cloud Console) ==="
+          keytool -list -v \
+            -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey \
+            -storepass android \
+            -keypass android 2>/dev/null | grep -A1 "SHA1:"
+          echo "========================================================================"
+
       - name: Build Release APK
         run: |
           cd prepwise_app
-          flutter build apk --release
+          # Extract Web OAuth Client ID (client_type=3) from google-services.json for GoogleSignIn serverClientId
+          GOOGLE_SERVER_CLIENT_ID=$(python3 -c "
+          import json
+          with open('android/app/google-services.json') as f:
+              d = json.load(f)
+          clients = d.get('client', [{}])[0].get('oauth_client', [])
+          web = next((c['client_id'] for c in clients if c.get('client_type') == 3), '')
+          print(web)
+          ")
+          echo "Google Server Client ID: $GOOGLE_SERVER_CLIENT_ID"
+          flutter build apk --release --dart-define=GOOGLE_SERVER_CLIENT_ID=$GOOGLE_SERVER_CLIENT_ID
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
