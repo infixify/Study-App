@@ -631,21 +631,6 @@ export default function StudyPage() {
           </button>
         </div>
 
-        {/* Streak banner */}
-        {(currentStreak > 0 || streakWasReset) && (
-          <div className={`rounded-ticket border px-4 py-3 flex items-center gap-3 ${streakWasReset ? "bg-coral/10 border-coral/20" : "bg-marigold/10 border-marigold/20"}`}>
-            <span className="text-xl">{streakWasReset ? "💔" : "🔥"}</span>
-            <div>
-              <p className="text-xs font-bold text-ink">
-                {streakWasReset ? "Streak reset — you missed a day" : `${currentStreak}-day streak`}
-              </p>
-              <p className="text-[10px] text-slate">
-                {streakWasReset ? "Start a session today to begin a new streak." : "Keep it going — study at least 2 min today!"}
-              </p>
-            </div>
-          </div>
-        )}
-
         {postStreakResult && (
           <div className="rounded-ticket border border-teal/20 bg-teal/10 px-4 py-3 flex items-center gap-3">
             <span className="text-xl">{postStreakResult.counted ? "🔥" : "⏱️"}</span>
@@ -801,7 +786,7 @@ export default function StudyPage() {
         </div>
       </main>
 
-      {/* Allowed Apps Modal (Point 4: Clean list, + Add App removed) */}
+      {/* Allowed Apps Modal */}
       {showAppsModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 max-h-[85vh] flex flex-col gap-3">
