@@ -14,6 +14,7 @@ declare global {
     __nativeInstalledApps?: { name: string; packageName: string }[];
     onInstalledAppsReady?: (apps: { name: string; packageName: string }[]) => void;
     onNativeRequestStopFocus?: () => void;
+    onNativeFocusTimerSync?: (seconds: number) => void;
   }
 }
 
@@ -141,7 +142,14 @@ export default function StudyPage() {
     // Listen for Force Stop Focus requests from the Android Live Notification
     if (typeof window !== "undefined") {
       window.onNativeRequestStopFocus = () => {
+        // Called when user taps "Stop Focus Mode" notification button.
+        // Show the end-session confirmation modal (user is already on the focus page).
         setShowEndConfirmModal(true);
+      };
+
+      // Sync timer from Kotlin service on app resume (Kotlin is source of truth for elapsed time)
+      window.onNativeFocusTimerSync = (seconds: number) => {
+        setSeconds(seconds);
       };
     }
 
@@ -299,16 +307,28 @@ export default function StudyPage() {
 
   useEffect(() => {
     function handleVisibilityChange() {
+      // When native app: Kotlin FocusBlockerService owns the timer — it keeps running in background.
+      // We only pause the WEB timer here; native timer is unaffected.
+      // Camera tracking (face-api.js) cannot run in background anyway, but timer still counts via Kotlin.
       if (document.hidden && isActive && verifiedMode) {
-        setPresencePaused(true);
         if (typeof window !== "undefined" && window.AppBridge) {
-          try { window.AppBridge.postMessage(JSON.stringify({ action: "updateCamStatus", status: "lost" })); } catch (_) {}
+          // Native: don't send cam "lost" just because screen changed — Kotlin timer keeps running.
+          // The Kotlin service only pauses if setCamStatus("lost") is explicitly sent by face detection.
+          // Do nothing here — cam status is controlled by face detection results only.
+        } else {
+          // Web-only fallback: pause timer if tab hidden (no Kotlin background service)
+          setPresencePaused(true);
+        }
+      } else if (!document.hidden && isActive && verifiedMode && presencePaused) {
+        // Web-only: resume when tab becomes visible again
+        if (typeof window === "undefined" || !window.AppBridge) {
+          setPresencePaused(false);
         }
       }
     }
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [isActive, verifiedMode]);
+  }, [isActive, verifiedMode, presencePaused]);
 
   async function loadFaceModels() {
     if (faceapiRef.current) return faceapiRef.current;
