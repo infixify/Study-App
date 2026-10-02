@@ -1944,11 +1944,11 @@ jobs:
             AppBridgeHandler({required this.webViewController}) {
               // Listen for MainActivity relay — "Stop Focus Mode" notification button
               const MethodChannel('com.prepwise/mainactivity')
-                  .setMethodCallHandler((call, result) async {
+                  .setMethodCallHandler((call) async {
                 if (call.method == 'triggerStopFocusInWeb') {
                   triggerInAppStopConfirmation();
                 }
-                result.success(null);
+                return null;
               });
             }
 
