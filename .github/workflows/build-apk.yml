@@ -408,9 +408,9 @@ jobs:
                       val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                           appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
                       else
-                          @Suppress("DEPRECATION") appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
+                          appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
                       mode == AppOpsManager.MODE_ALLOWED
-                  } catch (_: Exception) { false }
+                  } catch (e: Exception) { false }
               }
           }
           KT_MAIN_EOF
@@ -427,24 +427,31 @@ jobs:
           import android.app.usage.UsageStatsManager
           import android.content.Context
           import android.content.Intent
+          import android.graphics.Color
+          import android.graphics.PixelFormat
           import android.os.Build
           import android.os.Handler
           import android.os.IBinder
           import android.os.Looper
-          import android.widget.Toast
+          import android.provider.Settings
+          import android.view.Gravity
+          import android.view.View
+          import android.view.WindowManager
+          import android.widget.LinearLayout
+          import android.widget.TextView
           import androidx.core.app.NotificationCompat
 
           class FocusBlockerService : Service() {
 
               companion object {
-                  const val ACTION_START = "com.prepwise.ACTION_FOCUS_START"
-                  const val ACTION_STOP  = "com.prepwise.ACTION_FOCUS_STOP"
+                  const val ACTION_START          = "com.prepwise.ACTION_FOCUS_START"
+                  const val ACTION_STOP           = "com.prepwise.ACTION_FOCUS_STOP"
                   const val ACTION_UPDATE_BLOCKED = "com.prepwise.ACTION_UPDATE_BLOCKED"
-                  const val EXTRA_BLOCKED_APPS = "blocked_apps"
-                  const val EXTRA_SUBJECT = "subject"
-                  const val EXTRA_MODE = "mode"
-                  const val NOTIF_ID = 9901
-                  const val CHANNEL_ID = "prepwise_focus_blocker"
+                  const val EXTRA_BLOCKED_APPS    = "blocked_apps"
+                  const val EXTRA_SUBJECT         = "subject"
+                  const val EXTRA_MODE            = "mode"
+                  const val NOTIF_ID              = 9901
+                  const val CHANNEL_ID            = "prepwise_focus_blocker"
               }
 
               private val handler = Handler(Looper.getMainLooper())
@@ -453,12 +460,19 @@ jobs:
               private var mode = "Study"
               private var elapsedSeconds = 0
 
+              // Overlay state
+              private var windowManager: WindowManager? = null
+              private var overlayView: View? = null
+              private var lastBlockedPkg: String? = null
+              private var overlayDismissHandler = Handler(Looper.getMainLooper())
+
+              // Poll every 500ms for faster blocking response
               private val tickRunnable = object : Runnable {
                   override fun run() {
                       elapsedSeconds++
                       checkAndBlock()
-                      updateNotification()
-                      handler.postDelayed(this, 1000)
+                      if (elapsedSeconds % 2 == 0) updateNotification() // update notif every 2s
+                      handler.postDelayed(this, 500)
                   }
               }
 
@@ -466,6 +480,7 @@ jobs:
 
               override fun onCreate() {
                   super.onCreate()
+                  windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
                   createNotificationChannel()
               }
 
@@ -483,7 +498,12 @@ jobs:
                       }
                       ACTION_STOP -> {
                           handler.removeCallbacks(tickRunnable)
-                          stopForeground(true)
+                          removeOverlay()
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                              stopForeground(STOP_FOREGROUND_REMOVE)
+                          } else {
+                              @Suppress("DEPRECATION") stopForeground(true)
+                          }
                           stopSelf()
                       }
                       ACTION_UPDATE_BLOCKED -> {
@@ -494,24 +514,156 @@ jobs:
                   return START_STICKY
               }
 
+              // ── Core blocking logic ─────────────────────────────────────────────────────
+
               private fun checkAndBlock() {
                   if (!hasUsagePermission()) return
                   val foreground = getForegroundPackage() ?: return
-                  if (foreground == packageName) return
-                  if (foreground == "com.android.systemui") return
+                  if (foreground == packageName) {
+                      // User is in PrepWise — remove overlay if showing
+                      if (overlayView != null) removeOverlay()
+                      return
+                  }
+                  if (foreground == "com.android.systemui" || foreground == "com.android.launcher" ||
+                      foreground.startsWith("com.google.android.inputmethod")) return
+
                   if (blockedApps.contains(foreground)) {
-                      val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
-                      launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                      startActivity(launch)
-                      Toast.makeText(applicationContext, "Focus Active! Returning to PrepWise.", Toast.LENGTH_SHORT).show()
+                      if (canDrawOverlay()) {
+                          // Show hard overlay — blocks any interaction with the app below
+                          showBlockingOverlay(foreground)
+                      } else {
+                          // Fallback: aggressive redirect without overlay permission
+                          redirectToPrepWise()
+                      }
+                  } else {
+                      // App is allowed — remove any stale overlay
+                      if (overlayView != null) removeOverlay()
                   }
               }
+
+              private fun canDrawOverlay(): Boolean =
+                  Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+
+              private fun showBlockingOverlay(blockedPkg: String) {
+                  if (overlayView != null && lastBlockedPkg == blockedPkg) return // already showing for same app
+                  removeOverlay()
+                  lastBlockedPkg = blockedPkg
+
+                  val appName = try {
+                      packageManager.getApplicationLabel(
+                          packageManager.getApplicationInfo(blockedPkg, 0)
+                      ).toString()
+                  } catch (e: Exception) { blockedPkg }
+
+                  // Build a full-screen overlay layout programmatically
+                  val layout = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER
+                      setBackgroundColor(Color.parseColor("#EF0F172A")) // dark navy, semi-opaque
+                      setPadding(64, 64, 64, 64)
+                  }
+
+                  val lockIcon = TextView(this).apply {
+                      text = "\uD83D\uDD12" // 🔒 emoji
+                      textSize = 56f
+                      gravity = Gravity.CENTER
+                      setTextColor(Color.WHITE)
+                  }
+
+                  val titleText = TextView(this).apply {
+                      text = "Focus Mode Active"
+                      textSize = 22f
+                      setTextColor(Color.WHITE)
+                      gravity = Gravity.CENTER
+                      typeface = android.graphics.Typeface.DEFAULT_BOLD
+                      setPadding(0, 24, 0, 12)
+                  }
+
+                  val bodyText = TextView(this).apply {
+                      text = "\"$appName\" is blocked during your study session.\nStay focused — you're doing great!"
+                      textSize = 15f
+                      setTextColor(Color.parseColor("#94A3B8"))
+                      gravity = Gravity.CENTER
+                      setPadding(0, 0, 0, 40)
+                  }
+
+                  val returnBtn = TextView(this).apply {
+                      text = "Return to PrepWise \u2192"
+                      textSize = 16f
+                      setTextColor(Color.WHITE)
+                      gravity = Gravity.CENTER
+                      setPadding(48, 28, 48, 28)
+                      background = android.graphics.drawable.GradientDrawable().apply {
+                          setColor(Color.parseColor("#0D9488")) // teal
+                          cornerRadius = 36f
+                      }
+                      setOnClickListener {
+                          removeOverlay()
+                          redirectToPrepWise()
+                      }
+                  }
+
+                  layout.addView(lockIcon)
+                  layout.addView(titleText)
+                  layout.addView(bodyText)
+                  layout.addView(returnBtn)
+
+                  val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                  else
+                      @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+
+                  val params = WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.MATCH_PARENT,
+                      WindowManager.LayoutParams.MATCH_PARENT,
+                      overlayType,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                          WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                      x = 0; y = 0
+                  }
+
+                  try {
+                      windowManager?.addView(layout, params)
+                      overlayView = layout
+                      // Auto-redirect after 1.5s even if user doesn't tap
+                      overlayDismissHandler.postDelayed({
+                          if (overlayView != null) {
+                              removeOverlay()
+                              redirectToPrepWise()
+                          }
+                      }, 1500)
+                  } catch (e: Exception) {
+                      // WindowManager failed — fall back to redirect
+                      redirectToPrepWise()
+                  }
+              }
+
+              private fun removeOverlay() {
+                  overlayDismissHandler.removeCallbacksAndMessages(null)
+                  overlayView?.let {
+                      try { windowManager?.removeView(it) } catch (_: Exception) {}
+                      overlayView = null
+                      lastBlockedPkg = null
+                  }
+              }
+
+              private fun redirectToPrepWise() {
+                  val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
+                  launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                  startActivity(launch)
+              }
+
+              // ── Helpers ─────────────────────────────────────────────────────────────────
 
               private fun getForegroundPackage(): String? {
                   return try {
                       val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
                       val now = System.currentTimeMillis()
-                      val events = usm.queryEvents(now - 3000, now)
+                      val events = usm.queryEvents(now - 2000, now)
                       val event = UsageEvents.Event()
                       var pkg: String? = null
                       while (events.hasNextEvent()) {
@@ -521,7 +673,7 @@ jobs:
                           }
                       }
                       pkg
-                  } catch (_: Exception) { null }
+                  } catch (e: Exception) { null }
               }
 
               private fun hasUsagePermission(): Boolean {
@@ -530,10 +682,12 @@ jobs:
                       val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                           appOps.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
                       else
-                          @Suppress("DEPRECATION") appOps.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
+                          appOps.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
                       mode == android.app.AppOpsManager.MODE_ALLOWED
-                  } catch (_: Exception) { false }
+                  } catch (e: Exception) { false }
               }
+
+              // ── Notification ─────────────────────────────────────────────────────────────
 
               private fun buildNotification(): Notification {
                   val h = elapsedSeconds / 3600
@@ -575,6 +729,7 @@ jobs:
 
               override fun onDestroy() {
                   handler.removeCallbacks(tickRunnable)
+                  removeOverlay()
                   super.onDestroy()
               }
           }
