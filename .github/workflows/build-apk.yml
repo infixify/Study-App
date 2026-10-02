@@ -97,7 +97,10 @@ jobs:
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
               <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
               <uses-feature android:name="android.hardware.camera" android:required="false" />
               <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
               <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -110,6 +113,17 @@ jobs:
           """
 
           fcm_service = """
+                  <service
+                      android:name=".FocusBlockerService"
+                      android:foregroundServiceType="specialUse"
+                      android:exported="false" />
+                  <receiver
+                      android:name=".BootReceiver"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                      </intent-filter>
+                  </receiver>
                   <service
                       android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingBackgroundService"
                       android:permission="android.permission.BIND_JOB_SERVICE"
@@ -432,6 +446,262 @@ jobs:
               }
           }
           KT_MAIN_EOF
+
+          # Patch MainActivity.kt to add the focusblocker channel
+          python3 -c "import sys, textwrap; exec(textwrap.dedent(sys.stdin.read()))" << 'PY_PATCH_KT'
+          import os
+
+          kt_path = "android/app/src/main/kotlin/com/prepwise/prepwise/MainActivity.kt"
+          with open(kt_path, "r", encoding="utf-8") as f:
+              content = f.read()
+
+          # 1. Add import for Build if not there
+          if "import android.os.Build" not in content:
+              content = content.replace(
+                  "import android.os.Handler",
+                  "import android.os.Build\nimport android.os.Handler"
+              )
+
+          # 2. Add the channel constant
+          if "CHANNEL_FOCUS_BLOCKER" not in content:
+              content = content.replace(
+                  "private val CHANNEL_BLOCKER",
+                  'private val CHANNEL_FOCUS_BLOCKER = "com.prepwise/focusblocker"\n    private val CHANNEL_BLOCKER'
+              )
+
+          # 3. Add MethodChannel handler for focusblocker before the closing brace of configureFlutterEngine
+          blocker_channel = """
+                  // FocusBlockerService control channel
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_FOCUS_BLOCKER).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "startFocusBlocker" -> {
+                              val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
+                              val subject = call.argument<String>("subject") ?: "General"
+                              val mode = call.argument<String>("mode") ?: "Study"
+                              val intent = Intent(this, FocusBlockerService::class.java).apply {
+                                  action = FocusBlockerService.ACTION_START
+                                  putStringArrayListExtra(FocusBlockerService.EXTRA_BLOCKED_APPS, ArrayList(blocked))
+                                  putExtra(FocusBlockerService.EXTRA_SUBJECT, subject)
+                                  putExtra(FocusBlockerService.EXTRA_MODE, mode)
+                              }
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                  startForegroundService(intent)
+                              } else {
+                                  startService(intent)
+                              }
+                              result.success(true)
+                          }
+                          "stopFocusBlocker" -> {
+                              val intent = Intent(this, FocusBlockerService::class.java).apply {
+                                  action = FocusBlockerService.ACTION_STOP
+                              }
+                              startService(intent)
+                              result.success(true)
+                          }
+                          "updateBlockedApps" -> {
+                              val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
+                              val intent = Intent(this, FocusBlockerService::class.java).apply {
+                                  action = FocusBlockerService.ACTION_UPDATE_BLOCKED
+                                  putStringArrayListExtra(FocusBlockerService.EXTRA_BLOCKED_APPS, ArrayList(blocked))
+                              }
+                              startService(intent)
+                              result.success(true)
+                          }
+                          else -> result.notImplemented()
+                      }
+                  }
+          """
+
+          if "CHANNEL_FOCUS_BLOCKER" in content and "startFocusBlocker" not in content:
+              # Insert before the closing brace of configureFlutterEngine
+              content = content.replace(
+                  "          }\n\n          private fun hasUsageStatsPermission",
+                  blocker_channel + "\n          }\n\n          private fun hasUsageStatsPermission"
+              )
+
+          with open(kt_path, "w", encoding="utf-8") as f:
+              f.write(content)
+          print("MainActivity.kt patched with focusblocker channel.")
+          PY_PATCH_KT
+
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_SERVICE_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/FocusBlockerService.kt
+          package com.prepwise.prepwise
+
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.app.usage.UsageEvents
+          import android.app.usage.UsageStatsManager
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Build
+          import android.os.Handler
+          import android.os.IBinder
+          import android.os.Looper
+          import android.widget.Toast
+          import androidx.core.app.NotificationCompat
+
+          class FocusBlockerService : Service() {
+
+              companion object {
+                  const val ACTION_START = "com.prepwise.ACTION_FOCUS_START"
+                  const val ACTION_STOP  = "com.prepwise.ACTION_FOCUS_STOP"
+                  const val ACTION_UPDATE_BLOCKED = "com.prepwise.ACTION_UPDATE_BLOCKED"
+                  const val EXTRA_BLOCKED_APPS = "blocked_apps"
+                  const val EXTRA_SUBJECT = "subject"
+                  const val EXTRA_MODE = "mode"
+                  const val NOTIF_ID = 9901
+                  const val CHANNEL_ID = "prepwise_focus_blocker"
+              }
+
+              private val handler = Handler(Looper.getMainLooper())
+              private var blockedApps: List<String> = emptyList()
+              private var subject = "General"
+              private var mode = "Study"
+              private var elapsedSeconds = 0
+
+              private val tickRunnable = object : Runnable {
+                  override fun run() {
+                      elapsedSeconds++
+                      checkAndBlock()
+                      updateNotification()
+                      handler.postDelayed(this, 1000)
+                  }
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              override fun onCreate() {
+                  super.onCreate()
+                  createNotificationChannel()
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  when (intent?.action) {
+                      ACTION_START -> {
+                          val apps = intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: arrayListOf()
+                          blockedApps = apps.toList()
+                          subject = intent.getStringExtra(EXTRA_SUBJECT) ?: "General"
+                          mode = intent.getStringExtra(EXTRA_MODE) ?: "Study"
+                          elapsedSeconds = 0
+                          startForeground(NOTIF_ID, buildNotification())
+                          handler.removeCallbacks(tickRunnable)
+                          handler.post(tickRunnable)
+                      }
+                      ACTION_STOP -> {
+                          handler.removeCallbacks(tickRunnable)
+                          stopForeground(true)
+                          stopSelf()
+                      }
+                      ACTION_UPDATE_BLOCKED -> {
+                          val apps = intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: arrayListOf()
+                          blockedApps = apps.toList()
+                      }
+                  }
+                  return START_STICKY
+              }
+
+              private fun checkAndBlock() {
+                  if (!hasUsagePermission()) return
+                  val foreground = getForegroundPackage() ?: return
+                  if (foreground == packageName) return
+                  if (foreground == "com.android.systemui") return
+                  if (blockedApps.contains(foreground)) {
+                      val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
+                      launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                      startActivity(launch)
+                      Toast.makeText(applicationContext, "Focus Active! Returning to PrepWise.", Toast.LENGTH_SHORT).show()
+                  }
+              }
+
+              private fun getForegroundPackage(): String? {
+                  return try {
+                      val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+                      val now = System.currentTimeMillis()
+                      val events = usm.queryEvents(now - 3000, now)
+                      val event = UsageEvents.Event()
+                      var pkg: String? = null
+                      while (events.hasNextEvent()) {
+                          events.getNextEvent(event)
+                          if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                              pkg = event.packageName
+                          }
+                      }
+                      pkg
+                  } catch (_: Exception) { null }
+              }
+
+              private fun hasUsagePermission(): Boolean {
+                  return try {
+                      val appOps = getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+                      val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                          appOps.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
+                      else
+                          @Suppress("DEPRECATION") appOps.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
+                      mode == android.app.AppOpsManager.MODE_ALLOWED
+                  } catch (_: Exception) { false }
+              }
+
+              private fun buildNotification(): Notification {
+                  val h = elapsedSeconds / 3600
+                  val m = (elapsedSeconds % 3600) / 60
+                  val s = elapsedSeconds % 60
+                  val time = if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
+                  val openIntent = Intent(this, MainActivity::class.java).apply {
+                      flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                  }
+                  val pi = PendingIntent.getActivity(this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                  val stopIntent = Intent(this, FocusBlockerService::class.java).apply { action = ACTION_STOP }
+                  val stopPi = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                  return NotificationCompat.Builder(this, CHANNEL_ID)
+                      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                      .setContentTitle("Focus: $subject | $mode  $time")
+                      .setContentText("Distracting apps are blocked. Tap to open PrepWise.")
+                      .setContentIntent(pi)
+                      .setOngoing(true)
+                      .setOnlyAlertOnce(true)
+                      .setPriority(NotificationCompat.PRIORITY_LOW)
+                      .addAction(android.R.drawable.ic_delete, "Stop", stopPi)
+                      .build()
+              }
+
+              private fun updateNotification() {
+                  val nm = getSystemService(NotificationManager::class.java)
+                  nm.notify(NOTIF_ID, buildNotification())
+              }
+
+              private fun createNotificationChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val ch = NotificationChannel(CHANNEL_ID, "Focus Session Blocker", NotificationManager.IMPORTANCE_LOW).apply {
+                          description = "Keeps focus session active and blocks distracting apps."
+                          setShowBadge(false)
+                      }
+                      getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
+                  }
+              }
+
+              override fun onDestroy() {
+                  handler.removeCallbacks(tickRunnable)
+                  super.onDestroy()
+              }
+          }
+          KT_SERVICE_EOF
+
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_BOOT_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/BootReceiver.kt
+          package com.prepwise.prepwise
+
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+
+          class BootReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent) {
+                  // Boot completed — session will be restarted by user from app
+              }
+          }
+          KT_BOOT_EOF
 
       - name: Write Dart Services and Widgets
         run: |
@@ -983,11 +1253,14 @@ jobs:
             factory AppBlockerService() => _instance;
             AppBlockerService._internal();
 
+            // UsageStats permission check channel (stays in MainActivity)
             static const _channel = MethodChannel('com.prepwise/accessibility');
+            // Overlay permission check channel
             static const _overlayChannel = MethodChannel('com.prepwise/overlay');
+            // FocusBlockerService control channel
+            static const _serviceChannel = MethodChannel('com.prepwise/focusblocker');
 
             bool _isStrictActive = false;
-            List<String> _allowedApps = [];
 
             bool get isStrictActive => _isStrictActive;
 
@@ -1007,7 +1280,7 @@ jobs:
 
             Future<bool> isAccessibilityEnabled() async {
               try {
-                return await _channel.invokeMethod('isAccessibilityEnabled') as bool? ?? false;
+                return await _channel.invokeMethod('hasUsagePermission') as bool? ?? false;
               } catch (_) {
                 return false;
               }
@@ -1015,43 +1288,79 @@ jobs:
 
             Future<void> openAccessibilitySettings() async {
               try {
-                await _channel.invokeMethod('openAccessibilitySettings');
+                await _channel.invokeMethod('openUsageSettings');
               } catch (_) {}
             }
 
-            Future<void> startStrictTimer(List<String> allowedPackages) async {
+            /// Starts the Android ForegroundService blocker.
+            /// [allowedPackages] = packages user has whitelisted (PrepWise itself always allowed).
+            Future<void> startStrictTimer(List<String> allowedPackages, {String subject = 'General', String mode = 'Study'}) async {
               _isStrictActive = true;
-              _allowedApps = List.from(allowedPackages);
 
               final bool accessOk = await isAccessibilityEnabled();
               if (!accessOk) {
-                AppToast.show("Tip: Enable 'Usage Access' for PrepWise to block distracting apps during Focus Mode.");
+                AppToast.show("Enable 'Usage Access' for PrepWise so it can block distracting apps.");
                 await openAccessibilitySettings();
-                // Allow the session to proceed without getting stuck
               }
 
               try {
                 final allInstalledRaw = await const MethodChannel('com.prepwise/apps').invokeMethod('getInstalledApps') as String;
                 final List<dynamic> allApps = _parseJsonArray(allInstalledRaw);
+
                 final Set<String> allowedSet = allowedPackages.toSet();
                 allowedSet.add('com.prepwise.prepwise');
                 allowedSet.add('com.android.systemui');
+                allowedSet.add('com.android.launcher');
+                allowedSet.add('com.android.launcher3');
 
                 final List<String> blockedPackages = allApps
                     .map((a) => a['packageName']?.toString() ?? '')
                     .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
                     .toList();
 
-                await _channel.invokeMethod('setBlockedApps', {'blockedApps': blockedPackages});
-                await _channel.invokeMethod('setBlockingEnabled', {'enabled': true});
-                AppToast.show("Focus Mode Active! Distractions will be redirected.");
+                // Start the ForegroundService — it survives app minimize/close
+                await _serviceChannel.invokeMethod('startFocusBlocker', {
+                  'blockedApps': blockedPackages,
+                  'subject': subject,
+                  'mode': mode,
+                });
+                AppToast.show("Focus Mode Active! Distracting apps will be blocked.");
               } catch (e) {
-                debugPrint('[AppBlockerService] Error starting blocker: $e');
+                debugPrint('[AppBlockerService] Error starting blocker service: $e');
+              }
+            }
+
+            Future<void> stopStrictTimer() async {
+              _isStrictActive = false;
+              try {
+                await _serviceChannel.invokeMethod('stopFocusBlocker');
+              } catch (e) {
+                debugPrint('[AppBlockerService] Error stopping blocker service: $e');
+              }
+            }
+
+            /// Update blocked apps list while session is running
+            Future<void> updateBlockedApps(List<String> allowedPackages) async {
+              if (!_isStrictActive) return;
+              try {
+                final allInstalledRaw = await const MethodChannel('com.prepwise/apps').invokeMethod('getInstalledApps') as String;
+                final List<dynamic> allApps = _parseJsonArray(allInstalledRaw);
+                final Set<String> allowedSet = allowedPackages.toSet();
+                allowedSet.add('com.prepwise.prepwise');
+                allowedSet.add('com.android.systemui');
+                final List<String> blockedPackages = allApps
+                    .map((a) => a['packageName']?.toString() ?? '')
+                    .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
+                    .toList();
+                await _serviceChannel.invokeMethod('updateBlockedApps', {'blockedApps': blockedPackages});
+              } catch (e) {
+                debugPrint('[AppBlockerService] Error updating blocked apps: $e');
               }
             }
 
             void onAppExitedToBackground() {
-              // Background lifecycle hook
+              // FocusBlockerService handles everything in background — nothing to do here
+              debugPrint('[AppBlockerService] App went to background. FocusBlockerService is running independently.');
             }
 
             List<dynamic> _parseJsonArray(String raw) {
@@ -1072,13 +1381,6 @@ jobs:
               } catch (_) {
                 return [];
               }
-            }
-
-            Future<void> stopStrictTimer() async {
-              _isStrictActive = false;
-              try {
-                await _channel.invokeMethod('setBlockingEnabled', {'enabled': false});
-              } catch (_) {}
             }
           }
           DART_BLOCK_EOF
@@ -1260,18 +1562,32 @@ jobs:
                     final String subject = data['subject'] ?? 'General';
                     final String mode = data['mode'] ?? 'Study';
                     final int initialSeconds = data['initialSeconds'] ?? 0;
+                    final List<String> allowedApps = (data['allowedApps'] as List<dynamic>?)
+                        ?.map((e) => e.toString()).toList() ?? [];
+
+                    // 1. Start notification ticker (Flutter side — visible when app is open)
                     await FocusSessionService().startSession(
                       subject: subject,
                       mode: mode,
                       initialSeconds: initialSeconds,
                       onStopClicked: () => triggerInAppStopConfirmation(),
                     );
+
+                    // 2. Start Android ForegroundService — survives app minimize/close
+                    //    This handles BOTH the persistent notification AND app blocking in background
+                    await AppBlockerService().startStrictTimer(
+                      allowedApps,
+                      subject: subject,
+                      mode: mode,
+                    );
+
                     await WakelockService.enable();
                     HapticFeedback.heavyImpact();
                     break;
 
                   case 'stopFocusNotification':
                     await FocusSessionService().stopSession();
+                    await AppBlockerService().stopStrictTimer();
                     await WakelockService.disable();
                     HapticFeedback.mediumImpact();
                     break;
@@ -1291,7 +1607,12 @@ jobs:
 
                   case 'startStrictTimer':
                     final List<String> allowed = (data['allowedApps'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
-                    await AppBlockerService().startStrictTimer(allowed);
+                    if (AppBlockerService().isStrictActive) {
+                      // Session already running — just update the allowed list
+                      await AppBlockerService().updateBlockedApps(allowed);
+                    } else {
+                      await AppBlockerService().startStrictTimer(allowed);
+                    }
                     break;
 
                   case 'stopStrictTimer':
