@@ -75,6 +75,14 @@ jobs:
           print(f"Successfully saved valid {target_path} ({os.path.getsize(target_path)} bytes)")
           JSON_EOF
 
+      - name: Inject Deterministic Keystore (Fixed SHA-1)
+        run: |
+          mkdir -p ~/.android
+          echo "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" | base64 -d > ~/.android/debug.keystore
+          mkdir -p prepwise_app/android/app
+          cp ~/.android/debug.keystore prepwise_app/android/app/debug.keystore
+          echo "Deterministic keystore injected successfully!"
+
       - name: Configure Android Manifest and Permissions
         run: |
           cd prepwise_app
@@ -294,7 +302,7 @@ jobs:
 
               private var flutterEngineRef: FlutterEngine? = null
 
-              // Broadcast receiver: FocusBlockerService → MainActivity → WebView bridge
+              // Broadcast receiver: FocusBlockerService -> MainActivity -> WebView bridge
               private val stopFocusReceiver = object : android.content.BroadcastReceiver() {
                   override fun onReceive(context: Context, intent: Intent) {
                       if (intent.action == "com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST") {
@@ -323,11 +331,11 @@ jobs:
                       registerReceiver(stopFocusReceiver, filter)
                   }
 
-                  // ── MainActivity Channel (relay bridge events to Dart) ─────────────────────
+                  // -- MainActivity Channel (relay bridge events to Dart) ---------------------
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.prepwise/mainactivity")
-                      .setMethodCallHandler { _, _ -> } // Dart calls us; we call Dart — no incoming calls needed here
+                      .setMethodCallHandler { _, _ -> } // Dart calls us; we call Dart - no incoming calls needed here
 
-                  // ── Toast Channel ──────────────────────────────────────────────────────────
+                  // -- Toast Channel ----------------------------------------------------------
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST)
                       .setMethodCallHandler { call, result ->
                           if (call.method == "showToast") {
@@ -336,7 +344,7 @@ jobs:
                           } else result.notImplemented()
                       }
 
-                  // ── Installed Apps Channel ─────────────────────────────────────────────────
+                  // -- Installed Apps Channel -------------------------------------------------
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_APPS)
                       .setMethodCallHandler { call, result ->
                           if (call.method == "getInstalledApps") {
@@ -356,7 +364,7 @@ jobs:
                           } else result.notImplemented()
                       }
 
-                  // ── Overlay Permission Channel ─────────────────────────────────────────────
+                  // -- Overlay Permission Channel ---------------------------------------------
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_OVERLAY)
                       .setMethodCallHandler { call, result ->
                           when (call.method) {
@@ -371,7 +379,7 @@ jobs:
                           }
                       }
 
-                  // ── Usage Stats / Accessibility Channel ───────────────────────────────────
+                  // -- Usage Stats / Accessibility Channel -----------------------------------
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_BLOCKER)
                       .setMethodCallHandler { call, result ->
                           when (call.method) {
@@ -383,13 +391,13 @@ jobs:
                                       result.success(true)
                                   } catch (e: Exception) { result.error("SETTINGS_ERROR", e.message, null) }
                               }
-                              // Legacy in-process blocker calls — kept for compatibility, no-op now
+                              // Legacy in-process blocker calls - kept for compatibility, no-op now
                               "setBlockedApps", "setBlockingEnabled" -> result.success(true)
                               else -> result.notImplemented()
                           }
                       }
 
-                  // ── FocusBlockerService Channel ────────────────────────────────────────────
+                  // -- FocusBlockerService Channel --------------------------------------------
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_FOCUS_SVC)
                       .setMethodCallHandler { call, result ->
                           when (call.method) {
@@ -500,7 +508,7 @@ jobs:
                   const val NOTIF_ID                = 9901
                   const val CHANNEL_ID              = "prepwise_focus_blocker"
 
-                  // Shared elapsed seconds — readable from MainActivity for sync
+                  // Shared elapsed seconds - readable from MainActivity for sync
                   @Volatile var currentElapsedSeconds: Int = 0
               }
 
@@ -508,7 +516,7 @@ jobs:
               private var blockedApps: List<String> = emptyList()
               private var subject = "General"
               private var mode = "Study"
-              // camPaused = true means cam lost — timer freezes (but service keeps running)
+              // camPaused = true means cam lost - timer freezes (but service keeps running)
               private var camPaused = false
 
               // Blocking overlay state
@@ -522,7 +530,7 @@ jobs:
               private var dotParams: WindowManager.LayoutParams? = null
               private var camVerified = true
 
-              // Poll every 500ms — tick timer only when cam not paused
+              // Poll every 500ms - tick timer only when cam not paused
               private var tickCount = 0
               private val tickRunnable = object : Runnable {
                   override fun run() {
@@ -545,7 +553,7 @@ jobs:
                   createNotificationChannel()
               }
 
-              // ── Survive swipe-from-recents kill ─────────────────────────────────────────
+              // -- Survive swipe-from-recents kill -----------------------------------------
               override fun onTaskRemoved(rootIntent: Intent?) {
                   super.onTaskRemoved(rootIntent)
                   // If session is active (timer was running), restart the service immediately
@@ -584,7 +592,7 @@ jobs:
                       ACTION_STOP_REQUEST -> {
                           // Triggered by notification "Stop Focus Mode" button.
                           // Signal the web app to do the full stop+log flow via JS bridge.
-                          // The web app will then call stopFocusNotification → ACTION_STOP.
+                          // The web app will then call stopFocusNotification -> ACTION_STOP.
                           sendStopRequestToWebApp()
                       }
                       ACTION_STOP -> {
@@ -614,14 +622,14 @@ jobs:
                   return START_STICKY
               }
 
-              // ── Core blocking logic ─────────────────────────────────────────────────────
+              // -- Core blocking logic -----------------------------------------------------
 
               private fun checkAndBlock() {
                   if (!hasUsagePermission()) return
                   val foreground = getForegroundPackage() ?: return
 
                   if (foreground == packageName) {
-                      // User is in PrepWise — remove blocking overlay, hide dot (Flutter dot takes over)
+                      // User is in PrepWise - remove blocking overlay, hide dot (Flutter dot takes over)
                       if (overlayView != null) removeOverlay()
                       hideDotView()
                       return
@@ -634,14 +642,14 @@ jobs:
                   }
 
                   if (blockedApps.contains(foreground)) {
-                      hideDotView() // blocking overlay covers everything — dot not needed
+                      hideDotView() // blocking overlay covers everything - dot not needed
                       if (canDrawOverlay()) {
                           showBlockingOverlay(foreground)
                       } else {
                           redirectToPrepWise()
                       }
                   } else {
-                      // Allowed app — show dot as reminder
+                      // Allowed app - show dot as reminder
                       if (overlayView != null) removeOverlay()
                       showDotView()
                   }
@@ -670,7 +678,7 @@ jobs:
                   }
 
                   val lockIcon = TextView(this).apply {
-                      text = "\uD83D\uDD12" // 🔒 emoji
+                      text = "\uD83D\uDD12" // lock emoji
                       textSize = 56f
                       gravity = Gravity.CENTER
                       setTextColor(Color.WHITE)
@@ -686,7 +694,7 @@ jobs:
                   }
 
                   val bodyText = TextView(this).apply {
-                      text = "\"$appName\" is blocked during your study session.\nStay focused — you're doing great!"
+                      text = "\"$appName\" is blocked during your study session.\nStay focused - you are doing great!"
                       textSize = 15f
                       setTextColor(Color.parseColor("#94A3B8"))
                       gravity = Gravity.CENTER
@@ -735,9 +743,9 @@ jobs:
                   try {
                       windowManager?.addView(layout, params)
                       overlayView = layout
-                      // No auto-redirect — user taps "Return to PrepWise" when ready
+                      // No auto-redirect - user taps "Return to PrepWise" when ready
                   } catch (e: Exception) {
-                      // WindowManager failed — fall back to redirect
+                      // WindowManager failed - fall back to redirect
                       redirectToPrepWise()
                   }
               }
@@ -751,7 +759,7 @@ jobs:
                   }
               }
 
-              // ── Floating Dot (Interactive, draggable, expandable) ────────────────────
+              // -- Floating Dot (Interactive, draggable, expandable) --------------------
 
               // Dot has two states: compact (44dp circle) and expanded (card with timer + stop)
               private var dotExpanded = false
@@ -762,7 +770,7 @@ jobs:
 
                   val container = android.widget.FrameLayout(this)
 
-                  // ── Compact circle ──
+                  // -- Compact circle --
                   val compactView = android.widget.FrameLayout(this).apply {
                       val circle = android.view.View(this@FocusBlockerService).apply {
                           background = android.graphics.drawable.GradientDrawable().apply {
@@ -776,7 +784,7 @@ jobs:
                   compactView.tag = "compact"
                   container.addView(compactView, android.widget.FrameLayout.LayoutParams(dotPx, dotPx))
 
-                  // ── Expanded card ──
+                  // -- Expanded card --
                   val cardWidth = (260 * density).toInt()
                   val expandedCard = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
@@ -825,7 +833,7 @@ jobs:
                   headerRow.addView(titleTv, titleParams)
 
                   val closeTv = TextView(this).apply {
-                      text = "✕"
+                      text = "\u2715"
                       textSize = 14f
                       setTextColor(Color.parseColor("#94A3B8"))
                       gravity = Gravity.CENTER
@@ -856,7 +864,7 @@ jobs:
 
                   // Mode + cam status row
                   val statusTv = TextView(this).apply {
-                      text = if (camVerified) "✓ $mode • Cam Verified" else "⏸ $mode • Cam Lost"
+                      text = if (camVerified) "\u2713 $mode - Cam Verified" else "\u23F8 $mode - Cam Lost"
                       textSize = 10f
                       setTextColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
                       gravity = Gravity.CENTER
@@ -867,7 +875,7 @@ jobs:
 
                   // Stop Focus Mode button
                   val stopBtn = TextView(this).apply {
-                      text = "■  Stop Focus Mode"
+                      text = "Stop Focus Mode"
                       textSize = 12f
                       setTextColor(Color.WHITE)
                       gravity = Gravity.CENTER
@@ -1001,7 +1009,7 @@ jobs:
                       (it.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
                   }
                   container.findViewWithTag<TextView>("statusTv")?.let {
-                      it.text = if (camVerified) "✓ $mode • Cam Verified" else "⏸ $mode • Cam Lost"
+                      it.text = if (camVerified) "\u2713 $mode - Cam Verified" else "\u23F8 $mode - Cam Lost"
                       it.setTextColor(color)
                   }
               }
@@ -1034,7 +1042,7 @@ jobs:
                   startActivity(launch)
               }
 
-              // ── Helpers ─────────────────────────────────────────────────────────────────
+              // -- Helpers -----------------------------------------------------------------
 
               private fun getForegroundPackage(): String? {
                   return try {
@@ -1064,7 +1072,7 @@ jobs:
                   } catch (e: Exception) { false }
               }
 
-              // ── Notification ─────────────────────────────────────────────────────────────
+              // -- Notification -------------------------------------------------------------
 
               private fun buildNotification(): Notification {
                   val e = currentElapsedSeconds
@@ -1072,7 +1080,7 @@ jobs:
                   val m = (e % 3600) / 60
                   val s = e % 60
                   val time = if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
-                  val statusText = if (camPaused) "⏸ Paused — come back into camera view" else "Distracting apps are blocked. Tap to open PrepWise."
+                  val statusText = if (camPaused) "Paused - come back into camera view" else "Distracting apps are blocked. Tap to open PrepWise."
                   val openIntent = Intent(this, MainActivity::class.java).apply {
                       flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                   }
@@ -1106,9 +1114,9 @@ jobs:
                   }
               }
 
-              // ── Stop Request → Web App ────────────────────────────────────────────────
-              // When user taps "Stop Focus Mode" in notification, we don't kill the service
-              // immediately — instead we signal the web app to run the full stop+log flow.
+              // -- Stop Request -> Web App ------------------------------------------------
+              // When user taps "Stop Focus Mode" in notification, we do not kill the service
+              // immediately - instead we signal the web app to run the full stop+log flow.
               // The web app calls stopFocusNotification which then sends ACTION_STOP.
               private fun sendStopRequestToWebApp() {
                   // Try to signal via broadcast to MainActivity which relays to WebView bridge
@@ -1144,7 +1152,7 @@ jobs:
 
           class BootReceiver : BroadcastReceiver() {
               override fun onReceive(context: Context, intent: Intent) {
-                  // Boot completed — session will be restarted by user from app
+                  // Boot completed - session will be restarted by user from app
               }
           }
           KT_BOOT_EOF
@@ -1286,7 +1294,7 @@ jobs:
           import 'dart:async';
           import 'package:flutter/foundation.dart';
 
-          /// FocusSessionService — Flutter UI state only.
+          /// FocusSessionService - Flutter UI state only.
           /// The actual notification + timer lives in FocusBlockerService (Kotlin foreground service),
           /// which keeps running reliably in background. This class only tracks UI state:
           /// the floating dot, cam status, and the in-app elapsed display (synced from Kotlin).
@@ -1301,7 +1309,7 @@ jobs:
             String _camStatus = 'verified';
             int _elapsedSeconds = 0;
 
-            // Paused state — cam lost or app in background
+            // Paused state - cam lost or app in background
             bool _isPaused = false;
             Timer? _resumeTickerTimer;
 
@@ -1318,7 +1326,7 @@ jobs:
             final ValueNotifier<bool> activeNotifier = ValueNotifier<bool>(false);
             final ValueNotifier<bool> pausedNotifier = ValueNotifier<bool>(false);
 
-            // Callback triggered when stop is requested from notification (via Kotlin → bridge)
+            // Callback triggered when stop is requested from notification (via Kotlin -> bridge)
             Function()? onStopRequested;
 
             /// Called by bridge when web app starts a focus session.
@@ -1342,12 +1350,12 @@ jobs:
               camStatusNotifier.value = 'verified';
               elapsedNotifier.value = _elapsedSeconds;
 
-              // Local UI ticker — only increments when NOT paused.
+              // Local UI ticker - only increments when NOT paused.
               // Does NOT post any notification (Kotlin service owns that).
               _resumeTickerTimer?.cancel();
               _resumeTickerTimer = Timer.periodic(const Duration(seconds: 1), (_) {
                 if (!_isSessionActive) return;
-                if (_isPaused) return; // cam lost or background — don't count
+                if (_isPaused) return; // cam lost or background - do not count
                 _elapsedSeconds++;
                 elapsedNotifier.value = _elapsedSeconds;
               });
@@ -1362,7 +1370,7 @@ jobs:
               elapsedNotifier.value = seconds;
             }
 
-            /// Cam status update from web — pauses or resumes the UI timer.
+            /// Cam status update from web - pauses or resumes the UI timer.
             void updateCamStatus(String status) {
               if (_camStatus == status) return;
               _camStatus = status;
@@ -1372,11 +1380,11 @@ jobs:
               if (_isPaused != lost) {
                 _isPaused = lost;
                 pausedNotifier.value = lost;
-                debugPrint("[FocusSessionService] Session ${lost ? 'PAUSED' : 'RESUMED'} — cam: $status");
+                debugPrint("[FocusSessionService] Session ${lost ? 'PAUSED' : 'RESUMED'} - cam: $status");
               }
             }
 
-            /// Called when app goes to background — pause UI ticker (Kotlin keeps counting).
+            /// Called when app goes to background - pause UI ticker (Kotlin keeps counting).
             void onBackground() {
               if (!_isSessionActive || _isPaused) return;
               _isPaused = true;
@@ -1394,7 +1402,7 @@ jobs:
               }
             }
 
-            /// Stop session — clears all UI state.
+            /// Stop session - clears all UI state.
             void stopSession() {
               _isSessionActive = false;
               _isPaused = false;
@@ -1697,7 +1705,7 @@ jobs:
               final bool accessOk = await isAccessibilityEnabled();
               if (!accessOk) {
                 AppToast.show("Tip: Grant 'Usage Access' in Settings for full app blocking.");
-                // Don't force open settings — user can continue without it
+                // Don't force open settings - user can continue without it
               }
 
               try {
@@ -1715,7 +1723,7 @@ jobs:
                     .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
                     .toList();
 
-                // Start the ForegroundService — it survives app minimize/close
+                // Start the ForegroundService - it survives app minimize/close
                 await _serviceChannel.invokeMethod('startFocusBlocker', {
                   'blockedApps': blockedPackages,
                   'subject': subject,
@@ -1756,7 +1764,7 @@ jobs:
             }
 
             void onAppExitedToBackground() {
-              // FocusBlockerService handles everything in background — nothing to do here
+              // FocusBlockerService handles everything in background - nothing to do here
               debugPrint('[AppBlockerService] App went to background. FocusBlockerService is running independently.');
             }
 
@@ -1906,7 +1914,7 @@ jobs:
                       Icon(isVerified ? Icons.face_rounded : Icons.face_retouching_off_rounded, color: statusColor, size: 24),
                       const SizedBox(width: 10),
                       Expanded(child: Text(
-                        isVerified ? "Your face is under tracking. Keep going!" : "We can't see your face, focus timer is paused.",
+                        isVerified ? "Your face is under tracking. Keep going!" : "We cannot see your face, focus timer is paused.",
                         style: TextStyle(color: isVerified ? const Color(0xFFD1FAE5) : const Color(0xFFFEE2E2), fontSize: 12, fontWeight: FontWeight.w500, height: 1.3),
                       )),
                     ]),
@@ -1936,7 +1944,7 @@ jobs:
           class AppBridgeHandler {
             final WebViewController webViewController;
             AppBridgeHandler({required this.webViewController}) {
-              // Listen for MainActivity relay — "Stop Focus Mode" notification button
+              // Listen for MainActivity relay - "Stop Focus Mode" notification button
               const MethodChannel('com.prepwise/mainactivity')
                   .setMethodCallHandler((call) async {
                 if (call.method == 'triggerStopFocusInWeb') {
@@ -1971,7 +1979,7 @@ jobs:
                     final List<String> allowedApps = (data['allowedApps'] as List<dynamic>?)
                         ?.map((e) => e.toString()).toList() ?? [];
 
-                    // 1. Update Flutter UI state only (no notification — Kotlin owns that)
+                    // 1. Update Flutter UI state only (no notification - Kotlin owns that)
                     FocusSessionService().startSession(
                       subject: subject,
                       mode: mode,
@@ -1979,7 +1987,7 @@ jobs:
                       onStopClicked: () => triggerInAppStopConfirmation(),
                     );
 
-                    // 2. Start Kotlin ForegroundService — owns the notification + blocking + timer
+                    // 2. Start Kotlin ForegroundService - owns the notification + blocking + timer
                     await AppBlockerService().startStrictTimer(
                       allowedApps,
                       subject: subject,
@@ -2024,7 +2032,7 @@ jobs:
                   case 'startStrictTimer':
                     final List<String> allowed = (data['allowedApps'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
                     if (AppBlockerService().isStrictActive) {
-                      // Session already running — just update the allowed list
+                      // Session already running - just update the allowed list
                       await AppBlockerService().updateBlockedApps(allowed);
                     } else {
                       await AppBlockerService().startStrictTimer(allowed);
@@ -2334,7 +2342,7 @@ jobs:
             @override
             void didChangeAppLifecycleState(AppLifecycleState state) async {
               if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-                // Pause the Flutter UI timer — Kotlin service keeps counting in background
+                // Pause the Flutter UI timer - Kotlin service keeps counting in background
                 FocusSessionService().onBackground();
               } else if (state == AppLifecycleState.resumed) {
                 // Ask Kotlin service how many seconds have elapsed, sync Flutter UI
