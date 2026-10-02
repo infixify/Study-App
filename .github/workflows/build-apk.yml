@@ -1240,12 +1240,9 @@ jobs:
             Future<GoogleAuthResult> signIn() async {
               try {
                 debugPrint('[GoogleAuthService] Launching native Google Account Picker...');
-                // Try silent sign-in first (returns existing account without picker if already signed in)
-                GoogleSignInAccount? account = await _googleSignIn.signInSilently();
-                // If silent fails (null), show the full account picker popup
-                if (account == null) {
-                  account = await _googleSignIn.signIn();
-                }
+                // Always sign out first to force account picker + fresh token
+                await _googleSignIn.signOut();
+                final GoogleSignInAccount? account = await _googleSignIn.signIn();
                 if (account == null) {
                   debugPrint('[GoogleAuthService] User cancelled Google Account Picker.');
                   return GoogleAuthResult(
@@ -2091,12 +2088,15 @@ jobs:
                   final idToken = result.idToken!;
                   final accessToken = result.accessToken ?? '';
                   AppToast.show("Signed in as ${result.email ?? 'Google account'}!");
+                  // Use JSON.parse to safely handle any special chars in tokens
+                  final payload = jsonEncode({'idToken': idToken, 'accessToken': accessToken});
                   await webViewController.runJavaScript(
                     "(function(){"
+                    "var p=JSON.parse('${payload.replaceAll("'", "\\'")}');"
                     "if(typeof window.onNativeGoogleSignInSuccess==='function'){"
-                    "  window.onNativeGoogleSignInSuccess('$idToken','$accessToken');"
+                    "  window.onNativeGoogleSignInSuccess(p.idToken,p.accessToken);"
                     "}else{"
-                    "  window.__pendingGoogleTokens={idToken:'$idToken',accessToken:'$accessToken'};"
+                    "  window.__pendingGoogleTokens=p;"
                     "}"
                     "})();"
                   );
