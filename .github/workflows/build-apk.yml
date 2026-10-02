@@ -293,6 +293,20 @@ jobs:
               private val CHANNEL_BLOCKER      = "com.prepwise/accessibility"
               private val CHANNEL_FOCUS_SVC    = "com.prepwise/focusblocker"
 
+              private var flutterEngineRef: FlutterEngine? = null
+
+              // Broadcast receiver: FocusBlockerService → MainActivity → WebView bridge
+              private val stopFocusReceiver = object : android.content.BroadcastReceiver() {
+                  override fun onReceive(context: Context, intent: Intent) {
+                      if (intent.action == "com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST") {
+                          flutterEngineRef?.let { engine ->
+                              io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "com.prepwise/mainactivity")
+                                  .invokeMethod("triggerStopFocusInWeb", null)
+                          }
+                      }
+                  }
+              }
+
               override fun onNewIntent(intent: Intent) {
                   super.onNewIntent(intent)
                   setIntent(intent)
@@ -300,6 +314,19 @@ jobs:
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
+                  flutterEngineRef = flutterEngine
+
+                  // Register broadcast receiver for focus stop relay
+                  val filter = android.content.IntentFilter("com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST")
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      registerReceiver(stopFocusReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+                  } else {
+                      registerReceiver(stopFocusReceiver, filter)
+                  }
+
+                  // ── MainActivity Channel (relay bridge events to Dart) ─────────────────────
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.prepwise/mainactivity")
+                      .setMethodCallHandler { _, _ -> } // Dart calls us; we call Dart — no incoming calls needed here
 
                   // ── Toast Channel ──────────────────────────────────────────────────────────
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST)
@@ -425,6 +452,11 @@ jobs:
                       mode == AppOpsManager.MODE_ALLOWED
                   } catch (e: Exception) { false }
               }
+
+              override fun onDestroy() {
+                  try { unregisterReceiver(stopFocusReceiver) } catch (_: Exception) {}
+                  super.onDestroy()
+              }
           }
           KT_MAIN_EOF
 
@@ -457,16 +489,17 @@ jobs:
           class FocusBlockerService : Service() {
 
               companion object {
-                  const val ACTION_START          = "com.prepwise.ACTION_FOCUS_START"
-                  const val ACTION_STOP           = "com.prepwise.ACTION_FOCUS_STOP"
-                  const val ACTION_UPDATE_BLOCKED = "com.prepwise.ACTION_UPDATE_BLOCKED"
-                  const val ACTION_SET_CAM_STATUS = "com.prepwise.ACTION_SET_CAM_STATUS"
-                  const val EXTRA_BLOCKED_APPS    = "blocked_apps"
-                  const val EXTRA_SUBJECT         = "subject"
-                  const val EXTRA_MODE            = "mode"
-                  const val EXTRA_CAM_STATUS      = "cam_status"
-                  const val NOTIF_ID              = 9901
-                  const val CHANNEL_ID            = "prepwise_focus_blocker"
+                  const val ACTION_START            = "com.prepwise.ACTION_FOCUS_START"
+                  const val ACTION_STOP             = "com.prepwise.ACTION_FOCUS_STOP"
+                  const val ACTION_STOP_REQUEST     = "com.prepwise.ACTION_FOCUS_STOP_REQUEST"
+                  const val ACTION_UPDATE_BLOCKED   = "com.prepwise.ACTION_UPDATE_BLOCKED"
+                  const val ACTION_SET_CAM_STATUS   = "com.prepwise.ACTION_SET_CAM_STATUS"
+                  const val EXTRA_BLOCKED_APPS      = "blocked_apps"
+                  const val EXTRA_SUBJECT           = "subject"
+                  const val EXTRA_MODE              = "mode"
+                  const val EXTRA_CAM_STATUS        = "cam_status"
+                  const val NOTIF_ID                = 9901
+                  const val CHANNEL_ID              = "prepwise_focus_blocker"
 
                   // Shared elapsed seconds — readable from MainActivity for sync
                   @Volatile var currentElapsedSeconds: Int = 0
@@ -491,11 +524,14 @@ jobs:
               private var camVerified = true
 
               // Poll every 500ms — tick timer only when cam not paused
+              private var tickCount = 0
               private val tickRunnable = object : Runnable {
                   override fun run() {
+                      tickCount++
                       if (!camPaused) {
                           currentElapsedSeconds++
                           if (currentElapsedSeconds % 2 == 0) updateNotification() // update notif every 2s
+                          if (tickCount % 2 == 0) updateDotTimer() // update dot timer every 1s
                       }
                       checkAndBlock()
                       handler.postDelayed(this, 500)
@@ -508,6 +544,27 @@ jobs:
                   super.onCreate()
                   windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
                   createNotificationChannel()
+              }
+
+              // ── Survive swipe-from-recents kill ─────────────────────────────────────────
+              override fun onTaskRemoved(rootIntent: Intent?) {
+                  super.onTaskRemoved(rootIntent)
+                  // If session is active (timer was running), restart the service immediately
+                  if (currentElapsedSeconds > 0) {
+                      val restartIntent = Intent(applicationContext, FocusBlockerService::class.java).apply {
+                          action = ACTION_START
+                          putStringArrayListExtra(EXTRA_BLOCKED_APPS, ArrayList(blockedApps))
+                          putExtra(EXTRA_SUBJECT, subject)
+                          putExtra(EXTRA_MODE, mode)
+                      }
+                      val pi = android.app.PendingIntent.getService(
+                          applicationContext, 1, restartIntent,
+                          android.app.PendingIntent.FLAG_ONE_SHOT or android.app.PendingIntent.FLAG_IMMUTABLE
+                      )
+                      val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+                      alarmManager.set(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                          android.os.SystemClock.elapsedRealtime() + 500, pi)
+                  }
               }
 
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -524,6 +581,12 @@ jobs:
                           handler.removeCallbacks(tickRunnable)
                           handler.post(tickRunnable)
                           if (canDrawOverlay()) showFloatingDot()
+                      }
+                      ACTION_STOP_REQUEST -> {
+                          // Triggered by notification "Stop Focus Mode" button.
+                          // Signal the web app to do the full stop+log flow via JS bridge.
+                          // The web app will then call stopFocusNotification → ACTION_STOP.
+                          sendStopRequestToWebApp()
                       }
                       ACTION_STOP -> {
                           handler.removeCallbacks(tickRunnable)
@@ -689,38 +752,217 @@ jobs:
                   }
               }
 
-              // ── Floating Dot ────────────────────────────────────────────────────────────
+              // ── Floating Dot (Interactive, draggable, expandable) ────────────────────
 
-              private fun showFloatingDot() {
-                  if (dotView != null) return
-                  val size = 44 // dp → px
-                  val px = (size * resources.displayMetrics.density).toInt()
+              // Dot has two states: compact (44dp circle) and expanded (card with timer + stop)
+              private var dotExpanded = false
 
-                  val dot = android.widget.FrameLayout(this)
-                  val circle = android.view.View(this).apply {
+              private fun buildDotView(): android.widget.FrameLayout {
+                  val density = resources.displayMetrics.density
+                  val dotPx = (44 * density).toInt()
+
+                  val container = android.widget.FrameLayout(this)
+
+                  // ── Compact circle ──
+                  val compactView = android.widget.FrameLayout(this).apply {
+                      val circle = android.view.View(this@FocusBlockerService).apply {
+                          background = android.graphics.drawable.GradientDrawable().apply {
+                              shape = android.graphics.drawable.GradientDrawable.OVAL
+                              setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
+                              setStroke((3 * density).toInt(), Color.parseColor("#1E293B"))
+                          }
+                      }
+                      addView(circle, android.widget.FrameLayout.LayoutParams(dotPx, dotPx))
+                  }
+                  compactView.tag = "compact"
+                  container.addView(compactView, android.widget.FrameLayout.LayoutParams(dotPx, dotPx))
+
+                  // ── Expanded card ──
+                  val cardWidth = (260 * density).toInt()
+                  val expandedCard = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      background = android.graphics.drawable.GradientDrawable().apply {
+                          setColor(Color.parseColor("#F01E293B"))
+                          cornerRadius = 18 * density
+                          setStroke((2 * density).toInt(), Color.parseColor("#0D9488"))
+                      }
+                      setPadding((14 * density).toInt(), (14 * density).toInt(), (14 * density).toInt(), (14 * density).toInt())
+                      visibility = View.GONE
+                      elevation = 12 * density
+                  }
+                  expandedCard.tag = "expanded"
+
+                  // Header row: dot + title + close
+                  val headerRow = android.widget.RelativeLayout(this)
+                  val statusDot = android.view.View(this).apply {
                       background = android.graphics.drawable.GradientDrawable().apply {
                           shape = android.graphics.drawable.GradientDrawable.OVAL
                           setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
-                          setStroke(3, Color.parseColor("#1E293B"))
                       }
+                      id = android.view.View.generateViewId()
                   }
-                  dot.addView(circle, android.widget.FrameLayout.LayoutParams(px, px))
+                  statusDot.tag = "statusDot"
+                  val sdSize = (10 * density).toInt()
+                  val sdParams = android.widget.RelativeLayout.LayoutParams(sdSize, sdSize)
+                  sdParams.addRule(android.widget.RelativeLayout.ALIGN_PARENT_START)
+                  sdParams.addRule(android.widget.RelativeLayout.CENTER_VERTICAL)
+                  headerRow.addView(statusDot, sdParams)
 
-                  // Touch listener for drag
+                  val titleTv = TextView(this).apply {
+                      text = "Focus: $subject"
+                      textSize = 12f
+                      setTextColor(Color.WHITE)
+                      typeface = android.graphics.Typeface.DEFAULT_BOLD
+                      id = android.view.View.generateViewId()
+                      setPadding((14 * density).toInt(), 0, 0, 0)
+                  }
+                  titleTv.tag = "titleTv"
+                  val titleParams = android.widget.RelativeLayout.LayoutParams(
+                      android.widget.RelativeLayout.LayoutParams.WRAP_CONTENT,
+                      android.widget.RelativeLayout.LayoutParams.WRAP_CONTENT
+                  )
+                  titleParams.addRule(android.widget.RelativeLayout.CENTER_VERTICAL)
+                  titleParams.addRule(android.widget.RelativeLayout.END_OF, statusDot.id)
+                  headerRow.addView(titleTv, titleParams)
+
+                  val closeTv = TextView(this).apply {
+                      text = "✕"
+                      textSize = 14f
+                      setTextColor(Color.parseColor("#94A3B8"))
+                      gravity = Gravity.CENTER
+                      id = android.view.View.generateViewId()
+                  }
+                  val closeParams = android.widget.RelativeLayout.LayoutParams(
+                      (28 * density).toInt(), (28 * density).toInt()
+                  )
+                  closeParams.addRule(android.widget.RelativeLayout.ALIGN_PARENT_END)
+                  closeParams.addRule(android.widget.RelativeLayout.CENTER_VERTICAL)
+                  closeTv.setOnClickListener { collapseNativeDot() }
+                  headerRow.addView(closeTv, closeParams)
+
+                  val headerLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (32 * density).toInt())
+                  expandedCard.addView(headerRow, headerLp)
+
+                  // Timer display
+                  val timerTv = TextView(this).apply {
+                      text = formatElapsed(currentElapsedSeconds)
+                      textSize = 28f
+                      setTextColor(Color.WHITE)
+                      gravity = Gravity.CENTER
+                      typeface = android.graphics.Typeface.MONOSPACE
+                      setPadding(0, (8 * density).toInt(), 0, (4 * density).toInt())
+                  }
+                  timerTv.tag = "timerTv"
+                  expandedCard.addView(timerTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+                  // Mode + cam status row
+                  val statusTv = TextView(this).apply {
+                      text = if (camVerified) "✓ $mode • Cam Verified" else "⏸ $mode • Cam Lost"
+                      textSize = 10f
+                      setTextColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
+                      gravity = Gravity.CENTER
+                      setPadding(0, 0, 0, (10 * density).toInt())
+                  }
+                  statusTv.tag = "statusTv"
+                  expandedCard.addView(statusTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+                  // Stop Focus Mode button
+                  val stopBtn = TextView(this).apply {
+                      text = "■  Stop Focus Mode"
+                      textSize = 12f
+                      setTextColor(Color.WHITE)
+                      gravity = Gravity.CENTER
+                      setPadding((16 * density).toInt(), (10 * density).toInt(), (16 * density).toInt(), (10 * density).toInt())
+                      background = android.graphics.drawable.GradientDrawable().apply {
+                          setColor(Color.parseColor("#DC2626"))
+                          cornerRadius = 10 * density
+                      }
+                      typeface = android.graphics.Typeface.DEFAULT_BOLD
+                      setOnClickListener { sendStopRequestToWebApp() }
+                  }
+                  expandedCard.addView(stopBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+                  // Hint
+                  val hintTv = TextView(this).apply {
+                      text = "Drag anywhere"
+                      textSize = 9f
+                      setTextColor(Color.parseColor("#475569"))
+                      gravity = Gravity.CENTER
+                      setPadding(0, (6 * density).toInt(), 0, 0)
+                  }
+                  expandedCard.addView(hintTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+                  container.addView(expandedCard, android.widget.FrameLayout.LayoutParams(cardWidth, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
+
+                  return container
+              }
+
+              private fun formatElapsed(secs: Int): String {
+                  val h = secs / 3600; val m = (secs % 3600) / 60; val s = secs % 60
+                  return if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
+              }
+
+              private fun expandNativeDot() {
+                  dotExpanded = true
+                  val container = dotView ?: return
+                  container.findViewWithTag<android.view.View>("compact")?.visibility = View.GONE
+                  container.findViewWithTag<android.view.View>("expanded")?.visibility = View.VISIBLE
+                  // Resize WindowManager params to fit card
+                  dotParams?.let { p ->
+                      val density = resources.displayMetrics.density
+                      p.width = (260 * density).toInt()
+                      p.height = android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+                      p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                      try { windowManager?.updateViewLayout(container, p) } catch (_: Exception) {}
+                  }
+              }
+
+              private fun collapseNativeDot() {
+                  dotExpanded = false
+                  val container = dotView ?: return
+                  container.findViewWithTag<android.view.View>("compact")?.visibility = View.VISIBLE
+                  container.findViewWithTag<android.view.View>("expanded")?.visibility = View.GONE
+                  val px = (44 * resources.displayMetrics.density).toInt()
+                  dotParams?.let { p ->
+                      p.width = px; p.height = px
+                      p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                      try { windowManager?.updateViewLayout(container, p) } catch (_: Exception) {}
+                  }
+              }
+
+              private fun showFloatingDot() {
+                  if (dotView != null) return
+                  val density = resources.displayMetrics.density
+                  val px = (44 * density).toInt()
+
+                  val dot = buildDotView()
+
+                  // Touch: tap = expand/collapse, drag = reposition
                   var startX = 0f; var startY = 0f
                   var initialX = 0; var initialY = 0
+                  var moved = false
                   dot.setOnTouchListener { v, event ->
                       val p = dotParams ?: return@setOnTouchListener false
                       when (event.action) {
                           android.view.MotionEvent.ACTION_DOWN -> {
                               startX = event.rawX; startY = event.rawY
                               initialX = p.x; initialY = p.y
-                              true
+                              moved = false; true
                           }
                           android.view.MotionEvent.ACTION_MOVE -> {
-                              p.x = initialX + (event.rawX - startX).toInt()
-                              p.y = initialY + (event.rawY - startY).toInt()
-                              try { windowManager?.updateViewLayout(v, p) } catch (_: Exception) {}
+                              val dx = (event.rawX - startX).toInt()
+                              val dy = (event.rawY - startY).toInt()
+                              if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+                                  moved = true
+                                  p.x = initialX + dx; p.y = initialY + dy
+                                  try { windowManager?.updateViewLayout(v, p) } catch (_: Exception) {}
+                              }
+                              true
+                          }
+                          android.view.MotionEvent.ACTION_UP -> {
+                              if (!moved) {
+                                  if (dotExpanded) collapseNativeDot() else expandNativeDot()
+                              }
                               true
                           }
                           else -> false
@@ -750,9 +992,24 @@ jobs:
               }
 
               private fun updateFloatingDotColor() {
-                  val circle = (dotView as? android.widget.FrameLayout)?.getChildAt(0) ?: return
-                  (circle.background as? android.graphics.drawable.GradientDrawable)
-                      ?.setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
+                  val container = dotView ?: return
+                  val color = if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444")
+                  // Update compact circle color
+                  val compact = container.findViewWithTag<android.widget.FrameLayout>("compact")
+                  (compact?.getChildAt(0)?.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
+                  // Update expanded status dot + text
+                  container.findViewWithTag<android.view.View>("statusDot")?.let {
+                      (it.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
+                  }
+                  container.findViewWithTag<TextView>("statusTv")?.let {
+                      it.text = if (camVerified) "✓ $mode • Cam Verified" else "⏸ $mode • Cam Lost"
+                      it.setTextColor(color)
+                  }
+              }
+
+              private fun updateDotTimer() {
+                  val container = dotView ?: return
+                  container.findViewWithTag<TextView>("timerTv")?.text = formatElapsed(currentElapsedSeconds)
               }
 
               private fun showDotView() {
@@ -821,8 +1078,8 @@ jobs:
                       flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                   }
                   val pi = PendingIntent.getActivity(this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                  val stopIntent = Intent(this, FocusBlockerService::class.java).apply { action = ACTION_STOP }
-                  val stopPi = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                  val stopReqIntent = Intent(this, FocusBlockerService::class.java).apply { action = ACTION_STOP_REQUEST }
+                  val stopPi = PendingIntent.getService(this, 1, stopReqIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                   return NotificationCompat.Builder(this, CHANNEL_ID)
                       .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
                       .setContentTitle("Focus: $subject | $mode  $time")
@@ -831,7 +1088,7 @@ jobs:
                       .setOngoing(true)
                       .setOnlyAlertOnce(true)
                       .setPriority(NotificationCompat.PRIORITY_LOW)
-                      .addAction(android.R.drawable.ic_delete, "Stop", stopPi)
+                      .addAction(android.R.drawable.ic_delete, "Stop Focus Mode", stopPi)
                       .build()
               }
 
@@ -847,6 +1104,24 @@ jobs:
                           setShowBadge(false)
                       }
                       getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
+                  }
+              }
+
+              // ── Stop Request → Web App ────────────────────────────────────────────────
+              // When user taps "Stop Focus Mode" in notification, we don't kill the service
+              // immediately — instead we signal the web app to run the full stop+log flow.
+              // The web app calls stopFocusNotification which then sends ACTION_STOP.
+              private fun sendStopRequestToWebApp() {
+                  // Try to signal via broadcast to MainActivity which relays to WebView bridge
+                  val intent = Intent("com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST")
+                  intent.setPackage(packageName)
+                  sendBroadcast(intent)
+
+                  // Also bring PrepWise to foreground so user sees the log popup
+                  val launch = packageManager.getLaunchIntentForPackage(packageName)
+                  if (launch != null) {
+                      launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                      startActivity(launch)
                   }
               }
 
@@ -961,15 +1236,17 @@ jobs:
               ],
             );
 
-            /// Performs native 1-Tap Google Sign-In
+            /// Performs native Google Sign-In with account picker popup
             /// Returns ID Token & Access Token for Supabase signInWithIdToken
             Future<GoogleAuthResult> signIn() async {
               try {
-                debugPrint('[GoogleAuthService] Launching 1-Tap Google Account Picker...');
-                // Ensure previous session is signed out for fresh account picking if needed
-                await _googleSignIn.signOut();
-
-                final GoogleSignInAccount? account = await _googleSignIn.signIn();
+                debugPrint('[GoogleAuthService] Launching native Google Account Picker...');
+                // Try silent sign-in first (returns existing account without picker if already signed in)
+                GoogleSignInAccount? account = await _googleSignIn.signInSilently();
+                // If silent fails (null), show the full account picker popup
+                if (account == null) {
+                  account = await _googleSignIn.signIn();
+                }
                 if (account == null) {
                   debugPrint('[GoogleAuthService] User cancelled Google Account Picker.');
                   return GoogleAuthResult(
@@ -1664,7 +1941,16 @@ jobs:
 
           class AppBridgeHandler {
             final WebViewController webViewController;
-            AppBridgeHandler({required this.webViewController});
+            AppBridgeHandler({required this.webViewController}) {
+              // Listen for MainActivity relay — "Stop Focus Mode" notification button
+              const MethodChannel('com.prepwise/mainactivity')
+                  .setMethodCallHandler((call, result) async {
+                if (call.method == 'triggerStopFocusInWeb') {
+                  triggerInAppStopConfirmation();
+                }
+                result.success(null);
+              });
+            }
 
             Future<void> handleMessage(JavaScriptMessage message) async {
               try {
