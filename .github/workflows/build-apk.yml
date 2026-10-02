@@ -564,6 +564,28 @@ jobs:
                           "getElapsedSeconds" -> {
                               result.success(FocusBlockerService.currentElapsedSeconds)
                           }
+                          "getPendingSession" -> {
+                              val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                              val hasPending = prefs.getBoolean("has_pending_session", false)
+                              if (hasPending) {
+                                  val map = HashMap<String, Any>()
+                                  map["hasPending"] = true
+                                  map["seconds"] = prefs.getInt("pending_session_seconds", 0)
+                                  map["subject"] = prefs.getString("pending_session_subject", "General") ?: "General"
+                                  map["mode"] = prefs.getString("pending_session_mode", "Study") ?: "Study"
+                                  map["timestamp"] = prefs.getLong("pending_session_timestamp", System.currentTimeMillis())
+                                  prefs.edit()
+                                      .remove("has_pending_session")
+                                      .remove("pending_session_seconds")
+                                      .remove("pending_session_subject")
+                                      .remove("pending_session_mode")
+                                      .remove("pending_session_timestamp")
+                                      .apply()
+                                  result.success(map)
+                              } else {
+                                  result.success(null)
+                              }
+                          }
                           else -> result.notImplemented()
                       }
                   }
@@ -2668,19 +2690,13 @@ jobs:
 
                     // Task 3: Check if a session was stopped & saved directly while in background or dead
                     try {
-                      final prefs = await SharedPreferences.getInstance();
-                      final hasPending = prefs.getBool('has_pending_session') ?? false;
-                      if (hasPending) {
-                        final int secs = prefs.getInt('pending_session_seconds') ?? 0;
-                        final String subj = prefs.getString('pending_session_subject') ?? 'General';
-                        final String mode = prefs.getString('pending_session_mode') ?? 'Study';
-                        final int ts = prefs.getInt('pending_session_timestamp') ?? DateTime.now().millisecondsSinceEpoch;
-
-                        await prefs.remove('has_pending_session');
-                        await prefs.remove('pending_session_seconds');
-                        await prefs.remove('pending_session_subject');
-                        await prefs.remove('pending_session_mode');
-                        await prefs.remove('pending_session_timestamp');
+                      final pending = await const MethodChannel('com.prepwise/focusblocker')
+                          .invokeMethod<Map<dynamic, dynamic>>('getPendingSession');
+                      if (pending != null && pending['hasPending'] == true) {
+                        final int secs = pending['seconds'] as int? ?? 0;
+                        final String subj = pending['subject'] as String? ?? 'General';
+                        final String mode = pending['mode'] as String? ?? 'Study';
+                        final int ts = pending['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch;
 
                         controller.runJavaScript("""
                           (function(){
