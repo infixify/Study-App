@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase, classLevelsForContent } from "@/lib/supabase";
+import { loadAndReconcileStreak } from "@/lib/focus";
 import { useRouter } from "next/navigation";
 import BottomNav from "@/components/dashboard/BottomNav";
 import AppHeader from "@/components/dashboard/AppHeader";
@@ -352,8 +353,6 @@ function HeroWidget({
   const greeting = getGreeting(name, hour);
   const todayHours = (todayFocusMins / 60).toFixed(1);
 
-  // Dynamic font scaling: long quotes/greetings shrink cleanly without
-  // getting cut off with "..." or breaking words with hyphens.
   const greetingFontClass = greeting.length > 35 ? "text-xs" : "text-sm sm:text-base";
   const quoteLength = currentItem?.quote?.length ?? 0;
   const quoteFontClass =
@@ -363,7 +362,6 @@ function HeroWidget({
       ? "text-[11.5px] leading-snug"
       : "text-xs leading-snug";
 
-  // Safe URL encoding (handles spaces or special characters in filenames like "(1).gif")
   const rawMediaSrc = currentItem?.icon_or_sticker || "";
   const isExternalImage =
     rawMediaSrc.startsWith("http://") ||
@@ -454,7 +452,7 @@ function HeroWidget({
           </button>
         </div>
 
-        {/* ─── PROMINENT CARD WITH ENLARGED MEDIA BOX (NO CUTOFFS) ─── */}
+        {/* ─── PROMINENT CARD WITH ENLARGED MEDIA BOX ─── */}
         {currentItem && (
           <button
             type="button"
@@ -462,7 +460,6 @@ function HeroWidget({
             className={`w-full text-left rounded-2xl border ${currentItem.border} ${currentItem.bg} p-2.5 sm:p-3 active:scale-[0.98] transition-all relative overflow-hidden group shadow-2xs`}
           >
             <div className="flex items-center gap-3">
-              {/* ENLARGED MEDIA BOX (80px) FOR HIGH-QUALITY GIFS & PHOTOS */}
               <div
                 className={`w-20 h-20 rounded-2xl flex-shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden bg-black/5 relative`}
               >
@@ -480,7 +477,6 @@ function HeroWidget({
                 )}
               </div>
 
-              {/* Text Info (Full text display with zero hyphen cuts) */}
               <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
                 <p
                   className={`${quoteFontClass} font-bold ${currentItem.text} break-normal [hyphens:none]`}
@@ -837,9 +833,22 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function loadData() {
+      // Point 8: Check session safely to eliminate 1-2s login page flicker on restart
       const {
         data: { session },
       } = await supabase.auth.getSession();
+
+      if (!session) {
+        const hasLocalToken =
+          typeof window !== "undefined" &&
+          Object.keys(localStorage).some(
+            (k) => k.startsWith("sb-") && k.endsWith("-auth-token")
+          );
+        if (!hasLocalToken) {
+          router.push("/");
+          return;
+        }
+      }
 
       if (!session) {
         router.push("/");
@@ -985,8 +994,17 @@ export default function DashboardPage() {
       }
 
       const todayLog = pastLogs?.find((l) => l.log_date === todayStr);
+
+      // Point 12: Total study time (Timer + Manual offline study)
       setTodayFocusMins(todayLog?.study_time_minutes || 0);
-      setStreak(todayLog?.streak_count || pastLogs?.[0]?.streak_count || 0);
+
+      // Point 2: Unified streak reconciliation engine (Synchronized with Focus page)
+      try {
+        const streakInfo = await loadAndReconcileStreak(session.user.id);
+        setStreak(streakInfo.currentStreak);
+      } catch (e) {
+        setStreak(todayLog?.streak_count || pastLogs?.[0]?.streak_count || 0);
+      }
 
       setSplitRatio({
         theory: todayLog?.theory_minutes || 0,
@@ -1187,10 +1205,15 @@ export default function DashboardPage() {
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   };
 
+  // Point 8: High-performance branded splash loader that prevents any login screen flicker
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F1F5F9] flex items-center justify-center text-xs font-bold text-slate-700">
-        <span className="animate-spin mr-2">⏳</span> Loading PrepWise Dashboard…
+      <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center text-white p-6">
+        <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-2xl shadow-lg shadow-teal-500/10 mb-4 animate-pulse">
+          ⚡
+        </div>
+        <h2 className="text-base font-black tracking-wide">PrepWise Cockpit</h2>
+        <p className="text-xs text-slate-400 mt-1">Syncing study streak & analytics…</p>
       </div>
     );
   }
@@ -1217,7 +1240,6 @@ export default function DashboardPage() {
       <AppHeader />
 
       <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
-
         {/* 0. DUAL-MODE HERO WIDGET WITH ENLARGED MEDIA CONTAINER */}
         <HeroWidget
           name={firstName}
@@ -1295,7 +1317,7 @@ export default function DashboardPage() {
           onOpenDoubtSolver={() => setDoubtOpen(true)}
         />
 
-        {/* 3. THREE COCKPIT METRICS */}
+        {/* 3. THREE COCKPIT METRICS (Point 12: Total Study Time Timer + Offline) */}
         <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
@@ -1306,6 +1328,7 @@ export default function DashboardPage() {
             <div className="text-lg font-black text-slate-900 tracking-tight">
               {todayHours}
               <span className="text-xs font-semibold text-slate-500 ml-0.5">h</span>
+              <span className="text-[10px] font-bold text-slate-400 ml-1">({todayFocusMins}m)</span>
             </div>
             <span className="text-[10px] font-bold text-teal-700 block mt-0.5">Timer →</span>
           </button>
