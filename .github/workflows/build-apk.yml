@@ -1303,17 +1303,23 @@ jobs:
             factory GoogleAuthService() => _instance;
             GoogleAuthService._internal();
 
+            static String? get _serverClientId {
+              const fromEnv = String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID');
+              final trimmed = fromEnv.trim();
+              return trimmed.isNotEmpty ? trimmed : null;
+            }
+
             final GoogleSignIn _googleSignIn = GoogleSignIn(
               scopes: ['email', 'profile', 'openid'],
               // serverClientId injected at build time from google-services.json (client_type 3 = web)
-              serverClientId: const String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID'),
+              serverClientId: _serverClientId,
             );
 
             /// Performs native Google Sign-In with account picker popup
             /// Returns ID Token & Access Token for Supabase signInWithIdToken
             Future<GoogleAuthResult> signIn() async {
               try {
-                debugPrint('[GoogleAuthService] Launching native Google Account Picker...');
+                debugPrint('[GoogleAuthService] Launching native Google Account Picker with serverClientId: $_serverClientId');
                 // Always sign out first to force account picker + fresh token
                 await _googleSignIn.signOut();
                 final GoogleSignInAccount? account = await _googleSignIn.signIn();
@@ -1328,6 +1334,14 @@ jobs:
                 final GoogleSignInAuthentication auth = await account.authentication;
                 final String? idToken = auth.idToken;
                 final String? accessToken = auth.accessToken;
+
+                if (idToken == null || idToken.isEmpty) {
+                  debugPrint('[GoogleAuthService] idToken is null. Check SHA-1 and Web Client ID in Firebase.');
+                  return GoogleAuthResult(
+                    success: false,
+                    errorMessage: 'ID Token missing. Check SHA-1 and Web Client ID in Firebase.',
+                  );
+                }
 
                 debugPrint('[GoogleAuthService] Success! Got ID Token for: ${account.email}');
 
@@ -2176,9 +2190,15 @@ jobs:
                     "})();"
                   );
                 } else {
-                  // Native Sign-In cancelled or unavailable
-                  debugPrint("[GoogleAuth] Native Sign-In unavailable (${result.errorMessage})");
-                  AppToast.show("Sign-in cancelled. Please try again.");
+                  final err = result.errorMessage ?? '';
+                  debugPrint("[GoogleAuth] Native Sign-In failed: $err");
+                  if (err.contains('User cancelled')) {
+                    AppToast.show("Sign-in cancelled.");
+                  } else if (err.contains('10') || err.contains('DEVELOPER_ERROR') || err.contains('ID Token missing')) {
+                    AppToast.show("Google Sign-In: Add SHA-1 & Web Client ID in Firebase");
+                  } else {
+                    AppToast.show(err.isNotEmpty ? err : "Sign-in failed. Please try again.");
+                  }
                 }
               } catch (e) {
                 debugPrint("triggerNativeGoogleSignIn error: $e");
@@ -2525,18 +2545,28 @@ jobs:
           echo "========================================================================"
 
       - name: Build Release APK
+        env:
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
         run: |
           cd prepwise_app
           # Extract Web OAuth Client ID (client_type=3) from google-services.json for GoogleSignIn serverClientId
           GOOGLE_SERVER_CLIENT_ID=$(python3 -c "
-          import json
-          with open('android/app/google-services.json') as f:
-              d = json.load(f)
-          clients = d.get('client', [{}])[0].get('oauth_client', [])
-          web = next((c['client_id'] for c in clients if c.get('client_type') == 3), '')
-          print(web)
+          import json, os
+          cid = os.environ.get('GOOGLE_WEB_CLIENT_ID', '').strip()
+          if not cid and os.path.exists('android/app/google-services.json'):
+              with open('android/app/google-services.json') as f:
+                  d = json.load(f)
+              clients = d.get('client', [{}])[0].get('oauth_client', [])
+              cid = next((c.get('client_id', '') for c in clients if c.get('client_type') == 3), '')
+          print(cid)
           ")
-          echo "Google Server Client ID: $GOOGLE_SERVER_CLIENT_ID"
+          echo "========================================================================"
+          echo "Google Server Web Client ID: $GOOGLE_SERVER_CLIENT_ID"
+          if [ -z "$GOOGLE_SERVER_CLIENT_ID" ]; then
+              echo "WARNING: GOOGLE_SERVER_CLIENT_ID is empty! Google ID Token will not be generated on Android."
+              echo "Ensure your google-services.json contains client_type: 3 OR set secret GOOGLE_WEB_CLIENT_ID."
+          fi
+          echo "========================================================================"
           flutter build apk --release --dart-define=GOOGLE_SERVER_CLIENT_ID=$GOOGLE_SERVER_CLIENT_ID
 
       - name: Upload Release APK
