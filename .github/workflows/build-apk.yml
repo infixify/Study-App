@@ -249,6 +249,17 @@ jobs:
           if os.path.exists("android/app/build.gradle.kts"):
               with open("android/app/build.gradle.kts", "r") as f:
                   a = f.read()
+              signing_kts = '''    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+'''
+              if 'storeFile = file("debug.keystore")' not in a:
+                  a = re.sub(r'android\s*\{', 'android {\n' + signing_kts, a, count=1)
               app_plugin = '    id("com.google.gms.google-services")\n'
               if "com.google.gms.google-services" not in a:
                   m = re.search(r'plugins\s*\{([^}]*)\}', a)
@@ -271,6 +282,17 @@ jobs:
           elif os.path.exists("android/app/build.gradle"):
               with open("android/app/build.gradle", "r") as f:
                   a = f.read()
+              signing_groovy = '''    signingConfigs {
+        debug {
+            storeFile file("debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+'''
+              if 'file("debug.keystore")' not in a:
+                  a = re.sub(r'android\s*\{', 'android {\n' + signing_groovy, a, count=1)
               if "apply plugin: 'com.google.gms.google-services'" not in a:
                   a += "\napply plugin: 'com.google.gms.google-services'\n"
               if "coreLibraryDesugaringEnabled" not in a:
@@ -658,9 +680,6 @@ jobs:
                           if (canDrawOverlay()) showFloatingDot()
                       }
                       ACTION_STOP_REQUEST -> {
-                          // Triggered by notification "Stop Focus Mode" button.
-                          // Signal the web app to do the full stop+log flow via JS bridge.
-                          // The web app will then call stopFocusNotification -> ACTION_STOP.
                           sendStopRequestToWebApp()
                       }
                       ACTION_STOP -> {
@@ -697,7 +716,6 @@ jobs:
                   val foreground = getForegroundPackage() ?: return
 
                   if (foreground == packageName) {
-                      // User is in PrepWise - remove blocking overlay, hide dot (Flutter dot takes over)
                       if (overlayView != null) removeOverlay()
                       hideDotView()
                       return
@@ -705,19 +723,18 @@ jobs:
 
                   if (foreground == "com.android.systemui" || foreground == "com.android.launcher" ||
                       foreground.startsWith("com.google.android.inputmethod")) {
-                      showDotView() // show dot on launcher/sysui too
+                      showDotView()
                       return
                   }
 
                   if (blockedApps.contains(foreground)) {
-                      hideDotView() // blocking overlay covers everything - dot not needed
+                      hideDotView()
                       if (canDrawOverlay()) {
                           showBlockingOverlay(foreground)
                       } else {
                           redirectToPrepWise()
                       }
                   } else {
-                      // Allowed app - show dot as reminder
                       if (overlayView != null) removeOverlay()
                       showDotView()
                   }
@@ -727,7 +744,7 @@ jobs:
                   Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
 
               private fun showBlockingOverlay(blockedPkg: String) {
-                  if (overlayView != null && lastBlockedPkg == blockedPkg) return // already showing for same app
+                  if (overlayView != null && lastBlockedPkg == blockedPkg) return
                   removeOverlay()
                   lastBlockedPkg = blockedPkg
 
@@ -737,16 +754,15 @@ jobs:
                       ).toString()
                   } catch (e: Exception) { blockedPkg }
 
-                  // Build a full-screen overlay layout programmatically
                   val layout = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       gravity = Gravity.CENTER
-                      setBackgroundColor(Color.parseColor("#EF0F172A")) // dark navy, semi-opaque
+                      setBackgroundColor(Color.parseColor("#EF0F172A"))
                       setPadding(64, 64, 64, 64)
                   }
 
                   val lockIcon = TextView(this).apply {
-                      text = "\uD83D\uDD12" // lock emoji
+                      text = "\uD83D\uDD12"
                       textSize = 56f
                       gravity = Gravity.CENTER
                       setTextColor(Color.WHITE)
@@ -776,7 +792,7 @@ jobs:
                       gravity = Gravity.CENTER
                       setPadding(48, 28, 48, 28)
                       background = android.graphics.drawable.GradientDrawable().apply {
-                          setColor(Color.parseColor("#0D9488")) // teal
+                          setColor(Color.parseColor("#0D9488"))
                           cornerRadius = 36f
                       }
                       setOnClickListener {
@@ -811,9 +827,7 @@ jobs:
                   try {
                       windowManager?.addView(layout, params)
                       overlayView = layout
-                      // No auto-redirect - user taps "Return to PrepWise" when ready
                   } catch (e: Exception) {
-                      // WindowManager failed - fall back to redirect
                       redirectToPrepWise()
                   }
               }
@@ -827,18 +841,13 @@ jobs:
                   }
               }
 
-              // -- Floating Dot (Interactive, draggable, expandable) --------------------
-
-              // Dot has two states: compact (44dp circle) and expanded (card with timer + stop)
               private var dotExpanded = false
 
               private fun buildDotView(): android.widget.FrameLayout {
                   val density = resources.displayMetrics.density
                   val dotPx = (44 * density).toInt()
-
                   val container = android.widget.FrameLayout(this)
 
-                  // -- Compact circle --
                   val compactView = android.widget.FrameLayout(this).apply {
                       val circle = android.view.View(this@FocusBlockerService).apply {
                           background = android.graphics.drawable.GradientDrawable().apply {
@@ -852,7 +861,6 @@ jobs:
                   compactView.tag = "compact"
                   container.addView(compactView, android.widget.FrameLayout.LayoutParams(dotPx, dotPx))
 
-                  // -- Expanded card --
                   val cardWidth = (260 * density).toInt()
                   val expandedCard = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
@@ -867,7 +875,6 @@ jobs:
                   }
                   expandedCard.tag = "expanded"
 
-                  // Header row: dot + title + close
                   val headerRow = android.widget.RelativeLayout(this)
                   val statusDot = android.view.View(this).apply {
                       background = android.graphics.drawable.GradientDrawable().apply {
@@ -918,7 +925,6 @@ jobs:
                   val headerLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (32 * density).toInt())
                   expandedCard.addView(headerRow, headerLp)
 
-                  // Timer display
                   val timerTv = TextView(this).apply {
                       text = formatElapsed(currentElapsedSeconds)
                       textSize = 28f
@@ -930,7 +936,6 @@ jobs:
                   timerTv.tag = "timerTv"
                   expandedCard.addView(timerTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-                  // Mode + cam status row
                   val statusTv = TextView(this).apply {
                       text = if (camVerified) "\u2713 $mode - Cam Verified" else "\u23F8 $mode - Cam Lost"
                       textSize = 10f
@@ -941,7 +946,6 @@ jobs:
                   statusTv.tag = "statusTv"
                   expandedCard.addView(statusTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-                  // Stop Focus Mode button
                   val stopBtn = TextView(this).apply {
                       text = "Stop Focus Mode"
                       textSize = 12f
@@ -957,7 +961,6 @@ jobs:
                   }
                   expandedCard.addView(stopBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-                  // Hint
                   val hintTv = TextView(this).apply {
                       text = "Drag anywhere"
                       textSize = 9f
@@ -968,7 +971,6 @@ jobs:
                   expandedCard.addView(hintTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
                   container.addView(expandedCard, android.widget.FrameLayout.LayoutParams(cardWidth, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
-
                   return container
               }
 
@@ -982,7 +984,6 @@ jobs:
                   val container = dotView ?: return
                   container.findViewWithTag<android.view.View>("compact")?.visibility = View.GONE
                   container.findViewWithTag<android.view.View>("expanded")?.visibility = View.VISIBLE
-                  // Resize WindowManager params to fit card
                   dotParams?.let { p ->
                       val density = resources.displayMetrics.density
                       p.width = (260 * density).toInt()
@@ -1009,10 +1010,8 @@ jobs:
                   if (dotView != null) return
                   val density = resources.displayMetrics.density
                   val px = (44 * density).toInt()
-
                   val dot = buildDotView()
 
-                  // Touch: tap = expand/collapse, drag = reposition
                   var startX = 0f; var startY = 0f
                   var initialX = 0; var initialY = 0
                   var moved = false
@@ -1069,10 +1068,8 @@ jobs:
               private fun updateFloatingDotColor() {
                   val container = dotView ?: return
                   val color = if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444")
-                  // Update compact circle color
                   val compact = container.findViewWithTag<android.widget.FrameLayout>("compact")
                   (compact?.getChildAt(0)?.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
-                  // Update expanded status dot + text
                   container.findViewWithTag<android.view.View>("statusDot")?.let {
                       (it.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
                   }
@@ -1110,8 +1107,6 @@ jobs:
                   startActivity(launch)
               }
 
-              // -- Helpers -----------------------------------------------------------------
-
               private fun getForegroundPackage(): String? {
                   return try {
                       val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
@@ -1139,8 +1134,6 @@ jobs:
                       mode == android.app.AppOpsManager.MODE_ALLOWED
                   } catch (e: Exception) { false }
               }
-
-              // -- Notification -------------------------------------------------------------
 
               private fun buildNotification(): Notification {
                   val e = currentElapsedSeconds
@@ -1182,17 +1175,11 @@ jobs:
                   }
               }
 
-              // -- Stop Request -> Web App ------------------------------------------------
-              // When user taps "Stop Focus Mode" in notification, we do not kill the service
-              // immediately - instead we signal the web app to run the full stop+log flow.
-              // The web app calls stopFocusNotification which then sends ACTION_STOP.
               private fun sendStopRequestToWebApp() {
-                  // Try to signal via broadcast to MainActivity which relays to WebView bridge
                   val intent = Intent("com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST")
                   intent.setPackage(packageName)
                   sendBroadcast(intent)
 
-                  // Also bring PrepWise to foreground so user sees the log popup
                   val launch = packageManager.getLaunchIntentForPackage(packageName)
                   if (launch != null) {
                       launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -1220,7 +1207,6 @@ jobs:
 
           class BootReceiver : BroadcastReceiver() {
               override fun onReceive(context: Context, intent: Intent) {
-                  // Boot completed - session will be restarted by user from app
               }
           }
           KT_BOOT_EOF
@@ -1376,10 +1362,6 @@ jobs:
           import 'dart:async';
           import 'package:flutter/foundation.dart';
 
-          /// FocusSessionService - Flutter UI state only.
-          /// The actual notification + timer lives in FocusBlockerService (Kotlin foreground service),
-          /// which keeps running reliably in background. This class only tracks UI state:
-          /// the floating dot, cam status, and the in-app elapsed display (synced from Kotlin).
           class FocusSessionService {
             static final FocusSessionService _instance = FocusSessionService._internal();
             factory FocusSessionService() => _instance;
@@ -1391,7 +1373,6 @@ jobs:
             String _camStatus = 'verified';
             int _elapsedSeconds = 0;
 
-            // Paused state - cam lost or app in background
             bool _isPaused = false;
             Timer? _resumeTickerTimer;
 
@@ -1402,17 +1383,13 @@ jobs:
             String get camStatus => _camStatus;
             int get elapsedSeconds => _elapsedSeconds;
 
-            // UI notifiers
             final ValueNotifier<String> camStatusNotifier = ValueNotifier<String>('verified');
             final ValueNotifier<int> elapsedNotifier = ValueNotifier<int>(0);
             final ValueNotifier<bool> activeNotifier = ValueNotifier<bool>(false);
             final ValueNotifier<bool> pausedNotifier = ValueNotifier<bool>(false);
 
-            // Callback triggered when stop is requested from notification (via Kotlin -> bridge)
             Function()? onStopRequested;
 
-            /// Called by bridge when web app starts a focus session.
-            /// [initialSeconds] = seconds already elapsed (e.g. resumed session).
             void startSession({
               required String subject,
               required String mode,
@@ -1432,12 +1409,10 @@ jobs:
               camStatusNotifier.value = 'verified';
               elapsedNotifier.value = _elapsedSeconds;
 
-              // Local UI ticker - only increments when NOT paused.
-              // Does NOT post any notification (Kotlin service owns that).
               _resumeTickerTimer?.cancel();
               _resumeTickerTimer = Timer.periodic(const Duration(seconds: 1), (_) {
                 if (!_isSessionActive) return;
-                if (_isPaused) return; // cam lost or background - do not count
+                if (_isPaused) return;
                 _elapsedSeconds++;
                 elapsedNotifier.value = _elapsedSeconds;
               });
@@ -1445,14 +1420,12 @@ jobs:
               debugPrint("[FocusSessionService] UI session started: $_subject ($_mode) from ${_elapsedSeconds}s");
             }
 
-            /// Sync elapsed time from Kotlin service (called by bridge on resume/sync events).
             void syncElapsed(int seconds) {
               if (!_isSessionActive) return;
               _elapsedSeconds = seconds;
               elapsedNotifier.value = seconds;
             }
 
-            /// Cam status update from web - pauses or resumes the UI timer.
             void updateCamStatus(String status) {
               if (_camStatus == status) return;
               _camStatus = status;
@@ -1466,14 +1439,12 @@ jobs:
               }
             }
 
-            /// Called when app goes to background - pause UI ticker (Kotlin keeps counting).
             void onBackground() {
               if (!_isSessionActive || _isPaused) return;
               _isPaused = true;
               pausedNotifier.value = true;
             }
 
-            /// Called when app comes back to foreground.
             void onForeground(int syncedSeconds) {
               if (!_isSessionActive) return;
               _elapsedSeconds = syncedSeconds;
@@ -1484,7 +1455,6 @@ jobs:
               }
             }
 
-            /// Stop session - clears all UI state.
             void stopSession() {
               _isSessionActive = false;
               _isPaused = false;
@@ -1497,7 +1467,6 @@ jobs:
               debugPrint("[FocusSessionService] Session stopped.");
             }
 
-            /// No-op kept for compatibility with NotificationService init call.
             Future<void> initializeNotificationChannel() async {}
           }
           DART_FOCUS_EOF
@@ -1524,7 +1493,6 @@ jobs:
 
                 final uri = Uri.parse(url);
 
-                // Browser User-Agent and referer headers so ncert.nic.in allows download
                 final response = await http.get(
                   uri,
                   headers: {
@@ -1538,7 +1506,6 @@ jobs:
                   throw Exception("Server returned HTTP ${response.statusCode}");
                 }
 
-                // Safe storage path that works on all Android versions (10, 11, 12, 13, 14, 15)
                 Directory? targetDir;
                 try {
                   final extDir = await getExternalStorageDirectory();
@@ -1558,12 +1525,10 @@ jobs:
 
                 AppToast.show("Opening NCERT Textbook...");
 
-                // Open directly in native Android PDF viewer using OpenFilex
                 final result = await OpenFilex.open(file.path);
                 debugPrint("[PdfDownloadService] OpenFilex result: ${result.type} - ${result.message}");
 
                 if (result.type != ResultType.done) {
-                  // Fallback: launch external viewer directly if OpenFilex could not open
                   await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                 }
               } catch (e) {
@@ -1617,7 +1582,6 @@ jobs:
               onNotificationTapped = onNotificationClick;
               onFocusStopActionClicked = onFocusStopAction;
 
-              // 1. Request Permission
               try {
                 NotificationSettings settings = await _fcm.requestPermission(
                   alert: true,
@@ -1630,7 +1594,6 @@ jobs:
                 debugPrint('FCM requestPermission error: $e');
               }
 
-              // 2. Initialize Local Notifications
               const AndroidInitializationSettings androidSettings =
                   AndroidInitializationSettings('@mipmap/ic_launcher');
               const InitializationSettings initSettings =
@@ -1639,9 +1602,6 @@ jobs:
               await _localNotifications.initialize(
                 initSettings,
                 onDidReceiveNotificationResponse: (NotificationResponse response) {
-                  debugPrint('[NotificationService] Response actionId: ${response.actionId}, payload: ${response.payload}');
-
-                  // Handle Stop Focus Session action button click
                   if (response.actionId == 'STOP_FOCUS_SESSION' || response.payload == 'FOCUS_SESSION_STOP_ACTION') {
                     if (onFocusStopActionClicked != null) {
                       onFocusStopActionClicked!();
@@ -1659,7 +1619,6 @@ jobs:
                 },
               );
 
-              // 3. Android High-Importance Broadcast Channel
               const AndroidNotificationChannel broadcastChannel = AndroidNotificationChannel(
                 'prepwise_broadcast_channel',
                 'PrepWise Notifications',
@@ -1673,10 +1632,8 @@ jobs:
                   .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
                   ?.createNotificationChannel(broadcastChannel);
 
-              // 4. Initialize Live Focus Session Channel
               await FocusSessionService().initializeNotificationChannel();
 
-              // 5. Get and monitor FCM Device Token
               try {
                 _fcmToken = await _fcm.getToken();
                 debugPrint("FCM Device Token: $_fcmToken");
@@ -1694,7 +1651,6 @@ jobs:
                 }
               });
 
-              // 6. Handle Foreground Push Messages
               FirebaseMessaging.onMessage.listen((RemoteMessage message) {
                 RemoteNotification? notification = message.notification;
                 AndroidNotification? android = message.notification?.android;
@@ -1740,15 +1696,11 @@ jobs:
             factory AppBlockerService() => _instance;
             AppBlockerService._internal();
 
-            // UsageStats permission check channel (stays in MainActivity)
             static const _channel = MethodChannel('com.prepwise/accessibility');
-            // Overlay permission check channel
             static const _overlayChannel = MethodChannel('com.prepwise/overlay');
-            // FocusBlockerService control channel
             static const _serviceChannel = MethodChannel('com.prepwise/focusblocker');
 
             bool _isStrictActive = false;
-
             bool get isStrictActive => _isStrictActive;
 
             Future<bool> canDrawOverlays() async {
@@ -1779,15 +1731,12 @@ jobs:
               } catch (_) {}
             }
 
-            /// Starts the Android ForegroundService blocker.
-            /// [allowedPackages] = packages user has whitelisted (PrepWise itself always allowed).
             Future<void> startStrictTimer(List<String> allowedPackages, {String subject = 'General', String mode = 'Study'}) async {
               _isStrictActive = true;
 
               final bool accessOk = await isAccessibilityEnabled();
               if (!accessOk) {
                 AppToast.show("Tip: Grant 'Usage Access' in Settings for full app blocking.");
-                // Don't force open settings - user can continue without it
               }
 
               try {
@@ -1805,7 +1754,6 @@ jobs:
                     .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
                     .toList();
 
-                // Start the ForegroundService - it survives app minimize/close
                 await _serviceChannel.invokeMethod('startFocusBlocker', {
                   'blockedApps': blockedPackages,
                   'subject': subject,
@@ -1826,7 +1774,6 @@ jobs:
               }
             }
 
-            /// Update blocked apps list while session is running
             Future<void> updateBlockedApps(List<String> allowedPackages) async {
               if (!_isStrictActive) return;
               try {
@@ -1846,7 +1793,6 @@ jobs:
             }
 
             void onAppExitedToBackground() {
-              // FocusBlockerService handles everything in background - nothing to do here
               debugPrint('[AppBlockerService] App went to background. FocusBlockerService is running independently.');
             }
 
@@ -2026,7 +1972,6 @@ jobs:
           class AppBridgeHandler {
             final WebViewController webViewController;
             AppBridgeHandler({required this.webViewController}) {
-              // Listen for MainActivity relay - "Stop Focus Mode" notification button
               const MethodChannel('com.prepwise/mainactivity')
                   .setMethodCallHandler((call) async {
                 if (call.method == 'triggerStopFocusInWeb') {
@@ -2047,7 +1992,6 @@ jobs:
                     break;
 
                   case 'startFocusNotification':
-                    // Request camera permission if starting Focus Mode
                     try {
                       final camGranted = await Permission.camera.isGranted;
                       if (!camGranted) {
@@ -2061,7 +2005,6 @@ jobs:
                     final List<String> allowedApps = (data['allowedApps'] as List<dynamic>?)
                         ?.map((e) => e.toString()).toList() ?? [];
 
-                    // 1. Update Flutter UI state only (no notification - Kotlin owns that)
                     FocusSessionService().startSession(
                       subject: subject,
                       mode: mode,
@@ -2069,7 +2012,6 @@ jobs:
                       onStopClicked: () => triggerInAppStopConfirmation(),
                     );
 
-                    // 2. Start Kotlin ForegroundService - owns the notification + blocking + timer
                     await AppBlockerService().startStrictTimer(
                       allowedApps,
                       subject: subject,
@@ -2090,7 +2032,6 @@ jobs:
                   case 'updateCamStatus':
                     final String status = data['status'] ?? 'verified';
                     FocusSessionService().updateCamStatus(status);
-                    // Also tell Kotlin service to pause/resume its notification timer
                     try {
                       await const MethodChannel('com.prepwise/focusblocker')
                           .invokeMethod('setCamStatus', {'status': status});
@@ -2098,7 +2039,6 @@ jobs:
                     break;
 
                   case 'syncFocusTimer':
-                    // Web app sends current elapsed seconds for sync
                     final int secs = data['seconds'] ?? 0;
                     FocusSessionService().syncElapsed(secs);
                     break;
@@ -2114,7 +2054,6 @@ jobs:
                   case 'startStrictTimer':
                     final List<String> allowed = (data['allowedApps'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
                     if (AppBlockerService().isStrictActive) {
-                      // Session already running - just update the allowed list
                       await AppBlockerService().updateBlockedApps(allowed);
                     } else {
                       await AppBlockerService().startStrictTimer(allowed);
@@ -2176,7 +2115,6 @@ jobs:
                   final idToken = result.idToken!;
                   final accessToken = result.accessToken ?? '';
                   AppToast.show("Signed in as ${result.email ?? 'Google account'}!");
-                  // Encode tokens as base64 to avoid ALL JS string escape issues (JWT has +/= chars)
                   final idTokenB64 = base64Encode(utf8.encode(idToken));
                   final accessTokenB64 = base64Encode(utf8.encode(accessToken));
                   await webViewController.runJavaScript(
@@ -2194,11 +2132,16 @@ jobs:
                   debugPrint("[GoogleAuth] Native Sign-In failed: $err");
                   if (err.contains('User cancelled')) {
                     AppToast.show("Sign-in cancelled.");
-                  } else if (err.contains('10') || err.contains('DEVELOPER_ERROR') || err.contains('ID Token missing')) {
-                    AppToast.show("Google Sign-In: Add SHA-1 & Web Client ID in Firebase");
                   } else {
-                    AppToast.show(err.isNotEmpty ? err : "Sign-in failed. Please try again.");
+                    AppToast.show("Google Sign-In: $err");
                   }
+                  await webViewController.runJavaScript(
+                    "(function(){"
+                    "if(typeof window.onNativeGoogleSignInFailure==='function'){"
+                    "  window.onNativeGoogleSignInFailure('$err');"
+                    "}"
+                    "})();"
+                  );
                 }
               } catch (e) {
                 debugPrint("triggerNativeGoogleSignIn error: $e");
@@ -2230,12 +2173,10 @@ jobs:
           void main() async {
             WidgetsFlutterBinding.ensureInitialized();
 
-            // Lock to portrait orientation for handheld academic cockpit UX
             await SystemChrome.setPreferredOrientations([
               DeviceOrientation.portraitUp,
             ]);
 
-            // Set system navigation bar and status bar colors to match PrepWise ink palette
             SystemChrome.setSystemUIOverlayStyle(
               const SystemUiOverlayStyle(
                 statusBarColor: Colors.transparent,
@@ -2245,7 +2186,6 @@ jobs:
               ),
             );
 
-            // Initialize Firebase safely (gracefully degrades if google-services.json not yet placed)
             try {
               await Firebase.initializeApp();
               FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -2323,8 +2263,6 @@ jobs:
 
             Future<void> _requestStartupPermissions() async {
               try {
-                // Prompt user for Camera, Microphone, and Notification permissions at launch
-                // so Camera Verified Focus Mode and Alerts work without background failure.
                 await [
                   Permission.camera,
                   Permission.microphone,
@@ -2377,13 +2315,11 @@ jobs:
                   onNavigationRequest: (NavigationRequest request) {
                     final url = request.url;
 
-                    // 1. Intercept non-http protocols
                     if (url.startsWith('intent://') || url.startsWith('tel:') || url.startsWith('mailto:') || url.startsWith('whatsapp:') || url.startsWith('market:')) {
                       try { launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
                       return NavigationDecision.prevent;
                     }
 
-                    // 2. Intercept NCERT and other PDF downloads
                     if (url.toLowerCase().endsWith('.pdf') ||
                         url.contains('application/pdf') ||
                         url.contains('ncert.nic.in/textbook/pdf')) {
@@ -2391,7 +2327,6 @@ jobs:
                       return NavigationDecision.prevent;
                     }
 
-                    // Allow all normal web navigation including Google OAuth (accounts.google.com) and Supabase
                     return NavigationDecision.navigate;
                   },
                 ));
@@ -2430,16 +2365,13 @@ jobs:
             @override
             void didChangeAppLifecycleState(AppLifecycleState state) async {
               if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-                // Pause the Flutter UI timer - Kotlin service keeps counting in background
                 FocusSessionService().onBackground();
               } else if (state == AppLifecycleState.resumed) {
-                // Ask Kotlin service how many seconds have elapsed, sync Flutter UI
                 try {
                   final int? elapsed = await const MethodChannel('com.prepwise/focusblocker')
                       .invokeMethod<int>('getElapsedSeconds');
                   if (elapsed != null) {
                     FocusSessionService().onForeground(elapsed);
-                    // Also push the synced time back to the web app
                     await _controller.runJavaScript(
                       "(function(){ if(typeof window.onNativeFocusTimerSync==='function') window.onNativeFocusTimerSync($elapsed); })();"
                     );
@@ -2500,7 +2432,7 @@ jobs:
                           width: double.infinity,
                           height: double.infinity,
                           padding: const EdgeInsets.all(24),
-                          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          child: Column(mainAxisAlignment: Center(children: [
                             const Icon(Icons.wifi_off_rounded, size: 64, color: Color(0xFFF59E0B)),
                             const SizedBox(height: 16),
                             const Text("Connection Interrupted", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
@@ -2534,9 +2466,9 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" || true
 
-      - name: Print SHA-1 Fingerprint (for Firebase + Google Cloud Console)
+      - name: Print Keystore Fingerprint (Host Level)
         run: |
-          echo "=== DEBUG KEYSTORE SHA-1 (add this to Firebase + Google Cloud Console) ==="
+          echo "=== DEBUG KEYSTORE SHA-1 (Host ~/.android/debug.keystore) ==="
           keytool -list -v \
             -keystore ~/.android/debug.keystore \
             -alias androiddebugkey \
@@ -2549,7 +2481,6 @@ jobs:
           GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
         run: |
           cd prepwise_app
-          # Extract Web OAuth Client ID (client_type=3) from google-services.json for GoogleSignIn serverClientId
           GOOGLE_SERVER_CLIENT_ID=$(python3 -c "
           import json, os
           cid = os.environ.get('GOOGLE_WEB_CLIENT_ID', '').strip()
@@ -2568,6 +2499,13 @@ jobs:
           fi
           echo "========================================================================"
           flutter build apk --release --dart-define=GOOGLE_SERVER_CLIENT_ID=$GOOGLE_SERVER_CLIENT_ID
+
+      - name: Verify Final Built APK Signing SHA-1
+        run: |
+          echo "========================================================================"
+          echo "=== ACTUAL BUILT APK SIGNING CERTIFICATE SHA-1 ==="
+          keytool -printcert -jarfile prepwise_app/build/app/outputs/flutter-apk/app-release.apk | grep -A1 "SHA1:"
+          echo "========================================================================"
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
