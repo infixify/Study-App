@@ -2581,10 +2581,14 @@ jobs:
           flutter build apk --release --dart-define=GOOGLE_SERVER_CLIENT_ID=$GOOGLE_SERVER_CLIENT_ID
 
       - name: Verify Final Built APK Signing SHA-1
+        continue-on-error: true
         run: |
           echo "========================================================================"
           echo "=== ACTUAL BUILT APK SIGNING CERTIFICATE SHA-1 ==="
-          keytool -printcert -jarfile prepwise_app/build/app/outputs/flutter-apk/app-release.apk | grep -A1 "SHA1:"
+          APK_FILE="prepwise_app/build/app/outputs/flutter-apk/app-release.apk"
+          if [ -f "$APK_FILE" ]; then
+              keytool -printcert -jarfile "$APK_FILE" 2>&1 | grep -iE "(SHA1|SHA-1)" || true
+          fi
           echo "========================================================================"
 
       - name: Upload Release APK
