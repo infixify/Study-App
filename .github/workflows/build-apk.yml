@@ -679,7 +679,7 @@ jobs:
                           "storeSupabaseSession" -> {
                               val token = call.argument<String>("accessToken") ?: ""
                               val uid = call.argument<String>("userId") ?: ""
-                              if (token.isNotEmpty && uid.isNotEmpty) {
+                              if (token.isNotEmpty() && uid.isNotEmpty()) {
                                   getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE).edit()
                                       .putString("supabase_access_token", token)
                                       .putString("supabase_user_id", uid)
