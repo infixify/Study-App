@@ -84,7 +84,7 @@ export async function POST(req: Request) {
       supabase.from("users").select("*").eq("uid", userId).maybeSingle(),
       supabase
         .from("daily_logs")
-        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, streak_count, log_date")
+        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, verified_minutes, streak_count, log_date")
         .eq("user_id", userId)
         .order("log_date", { ascending: false })
         .limit(14),
@@ -119,7 +119,7 @@ Student Context:
 - Target Exam: ${targetExam}
 - Class Level: ${classLevel}
 - Active Pending Backlogs: ${JSON.stringify(pendingBacklogs || [])}
-- Recent 14-day study logs (minutes): ${JSON.stringify(pastLogs || [])}
+- Recent 14-day study logs (minutes, includes verified_minutes = time studied with BOTH face-cam AND app-blocker ON — this is the strict leaderboard-counted time, always ≤ study_time_minutes): ${JSON.stringify(pastLogs || [])}
 - Recent 14-day question solving numbers: ${JSON.stringify(questionLogs || [])}
 - Last 5 Mock Test Results: ${JSON.stringify(recentTests || [])}
 
