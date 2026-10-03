@@ -713,6 +713,86 @@ jobs:
                                   result.success(null)
                               }
                           }
+                          "retryPendingSession" -> {
+                              // Called by Dart on app resume — retries any pending Supabase log entirely in Kotlin
+                              val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                              val hasPending = prefs.getBoolean("has_pending_session", false)
+                              if (hasPending) {
+                                  val elapsed  = prefs.getInt("pending_session_seconds", 0)
+                                  val subj     = prefs.getString("pending_session_subject", "General") ?: "General"
+                                  val md       = prefs.getString("pending_session_mode", "Study") ?: "Study"
+                                  val camEn    = prefs.getBoolean("pending_session_cam_enabled", false)
+                                  val blkEn    = prefs.getBoolean("pending_session_blocker_enabled", false)
+                                  val ts       = prefs.getLong("pending_session_timestamp", System.currentTimeMillis())
+                                  // Clear pending immediately so a second resume doesn't double-log
+                                  prefs.edit()
+                                      .remove("has_pending_session")
+                                      .remove("pending_session_seconds")
+                                      .remove("pending_session_subject")
+                                      .remove("pending_session_mode")
+                                      .remove("pending_session_cam_enabled")
+                                      .remove("pending_session_blocker_enabled")
+                                      .remove("pending_session_timestamp")
+                                      .apply()
+                                  if (elapsed > 0) {
+                                      val mins = elapsed / 60
+                                      val secs = elapsed % 60
+                                      val timeLabel = when {
+                                          mins > 0 && secs > 0 -> "${mins}m ${secs}s"
+                                          mins > 0 -> "${mins}m"
+                                          else -> "${secs}s"
+                                      }
+                                      android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                          android.widget.Toast.makeText(
+                                              applicationContext,
+                                              "\u2705 Session saved! $subj \u00B7 $md \u00B7 $timeLabel logged",
+                                              android.widget.Toast.LENGTH_LONG
+                                          ).show()
+                                      }
+                                      Thread {
+                                          try {
+                                              val accessToken = prefs.getString("supabase_access_token", null)
+                                          val userId = prefs.getString("supabase_user_id", null)
+                                          if (accessToken != null && userId != null) {
+                                              val supabaseUrl = "https://tvhgqdgwpjivwuiawdrf.supabase.co"
+                                              val anonKey = "sb_publishable_dkMHodPE0rD9hPSlq88kAw_SenHt33L"
+                                              val addMins = Math.max(1, Math.round(elapsed / 60.0).toInt())
+                                              val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(ts))
+                                              val authHeaders = mapOf("apikey" to anonKey, "Authorization" to "Bearer $accessToken", "Content-Type" to "application/json")
+                                              val getUrl = java.net.URL("$supabaseUrl/rest/v1/daily_logs?user_id=eq.$userId&log_date=eq.$todayStr&select=*")
+                                              val getConn = getUrl.openConnection() as java.net.HttpURLConnection
+                                              getConn.requestMethod = "GET"
+                                              authHeaders.forEach { (k, v) -> getConn.setRequestProperty(k, v) }
+                                              val existingJson = try { if (getConn.responseCode == 200) org.json.JSONArray(getConn.inputStream.bufferedReader().readText()) else org.json.JSONArray() } catch (_: Exception) { org.json.JSONArray() } finally { getConn.disconnect() }
+                                              val existing = if (existingJson.length() > 0) existingJson.getJSONObject(0) else null
+                                              val totalStudy = (existing?.optInt("study_time_minutes", 0) ?: 0) + addMins
+                                              val totalTheory = (existing?.optInt("theory_minutes", 0) ?: 0) + if (md == "Theory") addMins else 0
+                                              val totalPractice = (existing?.optInt("practice_minutes", 0) ?: 0) + if (md == "Practice" || md == "questions") addMins else 0
+                                              val totalRevision = (existing?.optInt("revision_minutes", 0) ?: 0) + if (md == "Revision") addMins else 0
+                                              val totalVerifiedRetry = (existing?.optInt("verified_minutes", 0) ?: 0) + if (camEn && blkEn) addMins else 0
+                                              val logBody = org.json.JSONObject().apply { put("user_id", userId); put("log_date", todayStr); put("study_time_minutes", totalStudy); put("theory_minutes", totalTheory); put("practice_minutes", totalPractice); put("revision_minutes", totalRevision); put("verified_minutes", totalVerifiedRetry) }
+                                              val logConn = java.net.URL("$supabaseUrl/rest/v1/daily_logs").openConnection() as java.net.HttpURLConnection
+                                              logConn.requestMethod = "POST"
+                                              authHeaders.forEach { (k, v) -> logConn.setRequestProperty(k, v) }
+                                              logConn.setRequestProperty("Prefer", "resolution=merge-duplicates")
+                                              logConn.doOutput = true
+                                              java.io.OutputStreamWriter(logConn.outputStream).use { it.write(logBody.toString()) }
+                                              logConn.responseCode; logConn.disconnect()
+                                              val fmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault()).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                                              val sessionBody = org.json.JSONObject().apply { put("user_id", userId); put("started_at", fmt.format(java.util.Date(ts - elapsed * 1000L))); put("ended_at", fmt.format(java.util.Date(ts))); put("duration_seconds", elapsed); put("counts_for_streak", elapsed >= 1200); put("subject", subj) }
+                                              val sessConn = java.net.URL("$supabaseUrl/rest/v1/focus_sessions").openConnection() as java.net.HttpURLConnection
+                                              sessConn.requestMethod = "POST"
+                                              authHeaders.forEach { (k, v) -> sessConn.setRequestProperty(k, v) }
+                                              sessConn.doOutput = true
+                                              java.io.OutputStreamWriter(sessConn.outputStream).use { it.write(sessionBody.toString()) }
+                                              sessConn.responseCode; sessConn.disconnect()
+                                          }
+                                          } catch (_: Exception) {}
+                                      }.start()
+                                  }
+                              }
+                              result.success(true)
+                          }
                           else -> result.notImplemented()
                       }
                   }
@@ -1916,6 +1996,9 @@ jobs:
                   val totalTheory = (existing?.optInt("theory_minutes", 0) ?: 0) + if (mode == "Theory") addMins else 0
                   val totalPractice = (existing?.optInt("practice_minutes", 0) ?: 0) + if (mode == "Practice" || mode == "questions") addMins else 0
                   val totalRevision = (existing?.optInt("revision_minutes", 0) ?: 0) + if (mode == "Revision") addMins else 0
+                  // verified_minutes: only increment when both cam AND blocker were ON (strict leaderboard hours)
+                  val bothToggles = camEnabled && blockerEnabled
+                  val totalVerified = (existing?.optInt("verified_minutes", 0) ?: 0) + if (bothToggles) addMins else 0
 
                   // 2. Upsert daily_log
                   val logBody = JSONObject().apply {
@@ -1925,6 +2008,7 @@ jobs:
                       put("theory_minutes", totalTheory)
                       put("practice_minutes", totalPractice)
                       put("revision_minutes", totalRevision)
+                      put("verified_minutes", totalVerified)
                   }
                   val logConn = URL("$supabaseUrl/rest/v1/daily_logs").openConnection() as HttpURLConnection
                   logConn.requestMethod = "POST"
@@ -3133,7 +3217,6 @@ jobs:
 
             void triggerInAppStopDirect() {
               // Immediately stop native session, floating dot, notification, and blocker
-              _stopPeriodicTimerSync();
               FocusSessionService().stopSession();
               try {
                 const MethodChannel('com.prepwise/focusblocker').invokeMethod('stopFocusBlocker');
@@ -3883,145 +3966,15 @@ jobs:
               _syncTimer = null;
             }
 
+            // Pending session retry is handled entirely by Kotlin via retryPendingSession MethodChannel.
+            // Kotlin shows a toast and logs directly to Supabase — no JS involved.
             Future<void> _checkAndLogPendingSessions() async {
               try {
-                final pending = await const MethodChannel('com.prepwise/focusblocker')
-                    .invokeMethod<Map<dynamic, dynamic>>('getPendingSession');
-                if (pending != null && pending['hasPending'] == true) {
-                  final int secs = pending['seconds'] as int? ?? 0;
-                  final String subj = pending['subject'] as String? ?? 'General';
-                  final String mode = pending['mode'] as String? ?? 'Study';
-                  final bool cam = pending['camEnabled'] == true;
-                  final bool blk = pending['blockerEnabled'] == true;
-                  final int ts = pending['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch;
-
-                  if (secs > 0) {
-                    await _logSessionDirectlyToSupabase(
-                      seconds: secs,
-                      subject: subj,
-                      mode: mode,
-                      camEnabled: cam,
-                      blockerEnabled: blk,
-                      timestamp: ts,
-                    );
-                  }
-                }
+                await const MethodChannel('com.prepwise/focusblocker')
+                    .invokeMethod('retryPendingSession');
               } catch (e) {
-                debugPrint("Error checking pending sessions: $e");
+                debugPrint("Error retrying pending session via Kotlin: $e");
               }
-            }
-
-            Future<void> _logSessionDirectlyToSupabase({
-              required int seconds,
-              required String subject,
-              required String mode,
-              required bool camEnabled,
-              required bool blockerEnabled,
-              required int timestamp,
-            }) async {
-              final String js = """
-                (async function(){
-                  try {
-                    var userId = null;
-                    var accessToken = null;
-                    for (var i = 0; i < localStorage.length; i++) {
-                      var k = localStorage.key(i);
-                      if (k && (k.indexOf('auth-token') !== -1 || k.indexOf('sb-') === 0)) {
-                        try {
-                          var v = JSON.parse(localStorage.getItem(k));
-                          if (v && v.user && v.user.id) {
-                            userId = v.user.id;
-                            accessToken = v.access_token;
-                            break;
-                          }
-                        } catch(e) {}
-                      }
-                    }
-                    if (!userId || !accessToken) return;
-
-                    var supabaseUrl = 'https://tvhgqdgwpjivwuiawdrf.supabase.co';
-                    var anonKey = 'sb_publishable_dkMHodPE0rD9hPSlq88kAw_SenHt33L';
-                    var headers = {
-                      'apikey': anonKey,
-                      'Authorization': 'Bearer ' + accessToken,
-                      'Content-Type': 'application/json',
-                      'Prefer': 'resolution=merge-duplicates'
-                    };
-
-                    var elapsedSecs = $seconds;
-                    var addMins = Math.max(1, Math.round(elapsedSecs / 60));
-                    var todayStr = new Date().toISOString().split('T')[0];
-                    var curMode = '$mode';
-                    var curSubj = '$subject';
-                    var bothToggles = $camEnabled && $blockerEnabled;
-
-                    // Read current daily_logs
-                    var getUrl = supabaseUrl + '/rest/v1/daily_logs?user_id=eq.' + userId + '&log_date=eq.' + todayStr + '&select=*';
-                    var curLogs = [];
-                    try {
-                      var res = await fetch(getUrl, { headers: { 'apikey': anonKey, 'Authorization': 'Bearer ' + accessToken } });
-                      if (res.ok) curLogs = await res.json();
-                    } catch(e) {}
-
-                    var existing = (curLogs && curLogs.length > 0) ? curLogs[0] : null;
-                    var totalStudy = (existing && existing.study_time_minutes ? existing.study_time_minutes : 0) + addMins;
-                    var totalTheory = (existing && existing.theory_minutes ? existing.theory_minutes : 0) + (curMode === 'Theory' ? addMins : 0);
-                    var totalPractice = (existing && existing.practice_minutes ? existing.practice_minutes : 0) + (curMode === 'Practice' || curMode === 'questions' ? addMins : 0);
-                    var totalRevision = (existing && existing.revision_minutes ? existing.revision_minutes : 0) + (curMode === 'Revision' ? addMins : 0);
-
-                    await fetch(supabaseUrl + '/rest/v1/daily_logs', {
-                      method: 'POST',
-                      headers: headers,
-                      body: JSON.stringify({
-                        user_id: userId,
-                        log_date: todayStr,
-                        study_time_minutes: totalStudy,
-                        theory_minutes: totalTheory,
-                        practice_minutes: totalPractice,
-                        revision_minutes: totalRevision
-                      })
-                    });
-
-                    // Insert into focus_sessions
-                    var startTime = new Date($timestamp - (elapsedSecs * 1000)).toISOString();
-                    var endTime = new Date($timestamp).toISOString();
-                    await fetch(supabaseUrl + '/rest/v1/focus_sessions', {
-                      method: 'POST',
-                      headers: {
-                        'apikey': anonKey,
-                        'Authorization': 'Bearer ' + accessToken,
-                        'Content-Type': 'application/json'
-                      },
-                      body: JSON.stringify({
-                        user_id: userId,
-                        started_at: startTime,
-                        ended_at: endTime,
-                        duration_seconds: elapsedSecs,
-                        counts_for_streak: elapsedSecs >= 1200,
-                        subject: curSubj
-                      })
-                    });
-
-                    if (bothToggles) {
-                      try {
-                        var rawList = localStorage.getItem('prepwise_strict_sessions') || '[]';
-                        var strictList = JSON.parse(rawList);
-                        strictList.push({
-                          date: todayStr,
-                          seconds: elapsedSecs,
-                          minutes: addMins,
-                          timestamp: $timestamp
-                        });
-                        localStorage.setItem('prepwise_strict_sessions', JSON.stringify(strictList));
-                      } catch(e) {}
-                    }
-
-                  } catch(err) {
-                    console.error('Direct Supabase log error:', err);
-                  }
-                })();
-              """;
-              await _controller.runJavaScript(js);
             }
 
             @override
