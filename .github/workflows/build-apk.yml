@@ -542,14 +542,33 @@ jobs:
                           }
                           "requestOverlayPermission" -> {
                               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                                  Toast.makeText(applicationContext, "App Info mein 'Display over other apps' allow karein", Toast.LENGTH_LONG).show()
+                                  try {
+                                      val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                                          data = Uri.parse("package:$packageName")
+                                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                      }
+                                      startActivity(intent)
+                                  } catch (e: Exception) {
+                                      val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                          data = Uri.parse("package:$packageName")
+                                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                      }
+                                      startActivity(intent)
+                                  }
+                              }
+                              result.success(true)
+                          }
+                          "openAppInfoSettings" -> {
+                              try {
                                   val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                       data = Uri.parse("package:$packageName")
                                       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                   }
                                   startActivity(intent)
+                                  result.success(true)
+                              } catch (e: Exception) {
+                                  result.error("APP_INFO_ERROR", e.message, null)
                               }
-                              result.success(true)
                           }
                           else -> result.notImplemented()
                       }
@@ -561,10 +580,25 @@ jobs:
                           "isAccessibilityEnabled", "hasUsagePermission" -> result.success(hasUsageStatsPermission())
                           "openAccessibilitySettings", "openUsageSettings" -> {
                               try {
-                                  startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                                  val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                  }
+                                  startActivity(intent)
                                   result.success(true)
                               } catch (e: Exception) {
                                   result.error("SETTINGS_ERROR", e.message, null)
+                              }
+                          }
+                          "openAppInfoSettings" -> {
+                              try {
+                                  val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                      data = Uri.parse("package:$packageName")
+                                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                  }
+                                  startActivity(intent)
+                                  result.success(true)
+                              } catch (e: Exception) {
+                                  result.error("APP_INFO_ERROR", e.message, null)
                               }
                           }
                           "setBlockedApps", "setBlockingEnabled" -> result.success(true)
@@ -1588,21 +1622,21 @@ jobs:
                   val timeStr = String.format("%02d:%02d", m, s)
 
                   val title = when {
-                      camEnabled && !blockerEnabled -> "$timeStr   $subject"
-                      !camEnabled && blockerEnabled -> "$timeStr   $subject   Focus Active"
-                      camEnabled && blockerEnabled  -> "$timeStr   $subject   Focus Active"
-                      else                          -> "$timeStr   $subject   Study Session"
+                      camEnabled && !blockerEnabled -> "$timeStr - $subject"
+                      !camEnabled && blockerEnabled -> "$timeStr - $subject - Focus Active"
+                      camEnabled && blockerEnabled  -> "$timeStr - $subject - Focus Active"
+                      else                          -> "$timeStr - $subject - Study Session"
                   }
 
                   val text = when {
                       camEnabled && !blockerEnabled ->
-                          if (camPaused) "Face not detected   Timer paused" else "Face under detection   Timer running"
+                          if (camPaused) "Face not detected - Timer paused" else "Face under detection - Timer running"
                       !camEnabled && blockerEnabled ->
-                          "Focus Mode active   App blocking is ON"
+                          "Focus Mode active - App blocking is ON"
                       camEnabled && blockerEnabled ->
-                          (if (camPaused) "Face not detected" else "Face under detection") + "   App blocking is ON"
+                          (if (camPaused) "Face not detected" else "Face under detection") + " - App blocking is ON"
                       else ->
-                          "Timer running   Stay focused on $subject"
+                          "Timer running - Stay focused on $subject"
                   }
 
                   val openIntent = Intent(this, MainActivity::class.java).apply {
@@ -1810,25 +1844,37 @@ jobs:
             factory GoogleAuthService() => _instance;
             GoogleAuthService._internal();
 
-            static String? get _serverClientId {
+            static String? serverClientId;
+
+            // Supabase Google OAuth Web Client ID for prepwise project
+            static const String defaultWebClientId = '759640583420-8scrqq26ucmjkpbkv52komi9f7s3og11.apps.googleusercontent.com';
+
+            static String get effectiveServerClientId {
               const fromEnv = String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID');
-              final trimmed = fromEnv.trim();
-              return trimmed.isNotEmpty ? trimmed : null;
+              final trimmedEnv = fromEnv.trim();
+              if (trimmedEnv.isNotEmpty) return trimmedEnv;
+              final trimmedProp = serverClientId?.trim() ?? '';
+              if (trimmedProp.isNotEmpty) return trimmedProp;
+              return defaultWebClientId;
             }
 
-            final GoogleSignIn _googleSignIn = GoogleSignIn(
-              scopes: ['email', 'profile', 'openid'],
-              // serverClientId injected at build time from google-services.json (client_type 3 = web)
-              serverClientId: _serverClientId,
+            GoogleSignIn get _googleSignIn => GoogleSignIn(
+              serverClientId: effectiveServerClientId,
+              scopes: [
+                'email',
+                'profile',
+                'openid',
+              ],
             );
 
-            /// Performs native Google Sign-In with account picker popup
+            /// Performs native 1-Tap Google Sign-In
             /// Returns ID Token & Access Token for Supabase signInWithIdToken
             Future<GoogleAuthResult> signIn() async {
               try {
-                debugPrint('[GoogleAuthService] Launching native Google Account Picker with serverClientId: $_serverClientId');
-                // Always sign out first to force account picker + fresh token
+                debugPrint('[GoogleAuthService] Launching 1-Tap Google Account Picker...');
+                // Ensure previous session is signed out for fresh account picking if needed
                 await _googleSignIn.signOut();
+
                 final GoogleSignInAccount? account = await _googleSignIn.signIn();
                 if (account == null) {
                   debugPrint('[GoogleAuthService] User cancelled Google Account Picker.');
@@ -1841,14 +1887,6 @@ jobs:
                 final GoogleSignInAuthentication auth = await account.authentication;
                 final String? idToken = auth.idToken;
                 final String? accessToken = auth.accessToken;
-
-                if (idToken == null || idToken.isEmpty) {
-                  debugPrint('[GoogleAuthService] idToken is null. Check SHA-1 and Web Client ID in Firebase.');
-                  return GoogleAuthResult(
-                    success: false,
-                    errorMessage: 'ID Token missing. Check SHA-1 and Web Client ID in Firebase.',
-                  );
-                }
 
                 debugPrint('[GoogleAuthService] Success! Got ID Token for: ${account.email}');
 
@@ -2115,45 +2153,34 @@ jobs:
           class PdfDownloadService {
             static Future<void> downloadAndOpenPdf(String url, {String? customTitle}) async {
               try {
-                final safeTitle = (customTitle != null && customTitle.trim().isNotEmpty)
-                    ? customTitle.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_\-\. ]'), '_')
-                    : "Study_Resource_${DateTime.now().millisecondsSinceEpoch}";
-
-                final displayTitle = (customTitle != null && customTitle.trim().isNotEmpty)
-                    ? customTitle.trim()
-                    : "Document";
-
-                final filename = safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : "$safeTitle.pdf";
-
-                AppToast.show("Downloading $displayTitle...");
-
-                // Transform Google Drive viewer link to direct download link if applicable
+                // Transform Google Docs Viewer or Google Drive links to direct download link
                 String directUrl = url;
-                if (url.contains('drive.google.com')) {
+                if (url.contains('docs.google.com/viewer')) {
+                  final parsed = Uri.tryParse(url);
+                  final embedded = parsed?.queryParameters['url'];
+                  if (embedded != null && embedded.isNotEmpty) {
+                    directUrl = embedded;
+                  }
+                }
+                if (directUrl.contains('drive.google.com')) {
                   final driveRegex = RegExp(r'/d/([a-zA-Z0-9_-]+)');
-                  final match = driveRegex.firstMatch(url);
+                  final match = driveRegex.firstMatch(directUrl);
                   if (match != null) {
                     final fileId = match.group(1);
                     directUrl = "https://drive.google.com/uc?export=download&id=$fileId";
                   }
                 }
 
-                final uri = Uri.parse(directUrl);
+                final safeTitle = (customTitle != null && customTitle.trim().isNotEmpty)
+                    ? customTitle.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_\-\. ]'), '_')
+                    : "Study_Resource_${DateTime.now().millisecondsSinceEpoch}";
 
-                // Browser User-Agent and referer headers
-                final response = await http.get(
-                  uri,
-                  headers: {
-                    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-                    'Accept': 'application/pdf,application/octet-stream,*/*',
-                  },
-                ).timeout(const Duration(seconds: 30));
+                final displayTitle = (customTitle != null && customTitle.trim().isNotEmpty)
+                    ? customTitle.trim()
+                    : "NCERT Document";
 
-                if (response.statusCode != 200) {
-                  throw Exception("Server returned HTTP ${response.statusCode}");
-                }
+                final filename = safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : "$safeTitle.pdf";
 
-                // Safe storage path that works on all Android versions
                 Directory? targetDir;
                 try {
                   final extDir = await getExternalStorageDirectory();
@@ -2165,25 +2192,46 @@ jobs:
                     targetDir = resourceFolder;
                   }
                 } catch (_) {}
-
                 targetDir ??= await getApplicationDocumentsDirectory();
 
                 final file = File("${targetDir.path}/$filename");
+                // Instant cache check: If already downloaded and valid, open instantly!
+                if (await file.exists() && await file.length() > 2000) {
+                  AppToast.show("Opening $displayTitle (Offline)...");
+                  final cachedResult = await OpenFilex.open(file.path);
+                  if (cachedResult.type == ResultType.done) return;
+                }
+
+                AppToast.show("Downloading $displayTitle...");
+
+                final uri = Uri.parse(directUrl);
+
+                final response = await http.get(
+                  uri,
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+                    'Accept': 'application/pdf,application/octet-stream,*/*',
+                  },
+                ).timeout(const Duration(seconds: 45));
+
+                if (response.statusCode != 200) {
+                  throw Exception("Server returned HTTP ${response.statusCode}");
+                }
+
                 await file.writeAsBytes(response.bodyBytes);
 
-                AppToast.show("Opening $displayTitle...");
+                AppToast.show("Opening $displayTitle in PDF Reader...");
 
-                // Open directly in native Android PDF viewer using OpenFilex
                 final result = await OpenFilex.open(file.path);
                 debugPrint("[PdfDownloadService] OpenFilex result: ${result.type} - ${result.message}");
 
                 if (result.type != ResultType.done) {
-                  await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                  await launchUrl(Uri.parse(directUrl), mode: LaunchMode.externalApplication);
                 }
               } catch (e) {
                 debugPrint("[PdfDownloadService] Download error: $e");
                 final displayTitle = (customTitle != null && customTitle.trim().isNotEmpty) ? customTitle.trim() : "Document";
-                AppToast.show("Opening $displayTitle in external viewer...");
+                AppToast.show("Opening $displayTitle in browser...");
                 try {
                   await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                 } catch (err) {
@@ -2501,20 +2549,25 @@ jobs:
             @override
             Widget build(BuildContext context) {
               final focusService = FocusSessionService();
+              // Point 5 FIX: ONLY render the Floating Dot when BOTH session is active AND Cam Verification is ON!
               return ValueListenableBuilder<bool>(
                 valueListenable: focusService.activeNotifier,
                 builder: (context, isActive, _) {
                   if (!isActive) return const SizedBox.shrink();
+
                   return ValueListenableBuilder<bool>(
                     valueListenable: focusService.camEnabledNotifier,
                     builder: (context, isCamEnabled, _) {
+                      // Strictly hide dot if camera verification toggle is OFF
                       if (!isCamEnabled) return const SizedBox.shrink();
+
                       return ValueListenableBuilder<String>(
                         valueListenable: focusService.camStatusNotifier,
                         builder: (context, camStatus, _) {
                           final bool isVerified = camStatus == 'verified';
                           final Color statusColor = isVerified ? const Color(0xFF10B981) : const Color(0xFFEF4444);
                           final Color glowColor = isVerified ? const Color(0x6610B981) : const Color(0x66EF4444);
+
                           return Positioned(
                             left: _posX,
                             top: _posY,
@@ -2572,39 +2625,31 @@ jobs:
             }
 
             Widget _buildExpandedCard(bool isVerified, Color statusColor) {
+              final focusService = FocusSessionService();
               return SizedBox(
                 width: 260,
                 child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Row(children: [
-                      Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor)),
-                      const SizedBox(width: 8),
-                      const Text("Cam Verification", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                    ]),
-                    GestureDetector(
-                      onTap: () => setState(() => _isExpanded = false),
-                      child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.white10, shape: BoxShape.circle), child: const Icon(Icons.close_rounded, size: 16, color: Colors.white70)),
-                    ),
+                  Row(children: [
+                    Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor)),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(isVerified ? "Face Detected (Live)" : "No Face Detected!", style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 13))),
                   ]),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: isVerified ? const Color(0x1A10B981) : const Color(0x1AEF4444),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: isVerified ? const Color(0x3310B981) : const Color(0x33EF4444)),
-                    ),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Icon(isVerified ? Icons.face_rounded : Icons.face_retouching_off_rounded, color: statusColor, size: 24),
-                      const SizedBox(width: 10),
-                      Expanded(child: Text(
-                        isVerified ? "Your face is under tracking. Keep going!" : "We cannot see your face, focus timer is paused.",
-                        style: TextStyle(color: isVerified ? const Color(0xFFD1FAE5) : const Color(0xFFFEE2E2), fontSize: 12, fontWeight: FontWeight.w500, height: 1.3),
-                      )),
-                    ]),
+                  const SizedBox(height: 6),
+                  Text(
+                    isVerified
+                        ? "Verified study timer running. You are earning verified leaderboard focus."
+                        : "Timer is paused. Please position your face in view to resume.",
+                    style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3),
                   ),
                   const SizedBox(height: 8),
-                  const Center(child: Text("Tap to collapse  Drag anywhere", style: TextStyle(color: Colors.white38, fontSize: 10))),
+                  ValueListenableBuilder<int>(
+                    valueListenable: focusService.elapsedNotifier,
+                    builder: (context, secs, _) {
+                      final m = (secs ~/ 60).toString().padLeft(2, '0');
+                      final s = (secs % 60).toString().padLeft(2, '0');
+                      return Text("Time: $m:$s", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12));
+                    },
+                  ),
                 ]),
               );
             }
@@ -2884,17 +2929,84 @@ jobs:
                   AppToast.show("Signed in! Syncing account...");
 
                   final String js = """
-                    (function() {
-                      var idToken = ${jsonEncode(idToken)};
-                      var accessToken = ${jsonEncode(accessToken)};
-                      if (typeof window.__handleNativeGoogleAuth === 'function') {
-                        window.__handleNativeGoogleAuth(idToken, accessToken);
-                      } else {
+                    (async function() {
+                      try {
+                        var idToken = ${jsonEncode(idToken)};
+                        var accessToken = ${jsonEncode(accessToken)};
+
+                        // 1. Store tokens globally for any listeners
+                        window.__pendingGoogleTokens = { idToken: idToken, accessToken: accessToken };
+
+                        // 2. Trigger all known web callback variations
+                        if (typeof window.onNativeGoogleSignInSuccess === 'function') {
+                          try { window.onNativeGoogleSignInSuccess(idToken, accessToken); } catch(e){}
+                        }
+                        if (typeof window.__handleNativeGoogleAuth === 'function') {
+                          try { window.__handleNativeGoogleAuth(idToken, accessToken); } catch(e){}
+                        }
                         window.postMessage({
                           type: 'NATIVE_GOOGLE_AUTH_SUCCESS',
                           idToken: idToken,
                           accessToken: accessToken
                         }, '*');
+
+                        // 3. Guaranteed Direct Supabase Authentication
+                        var supabaseUrl = 'https://tvhgqdgwpjivwuiawdrf.supabase.co';
+                        var anonKey = 'sb_publishable_dkMHodPE0rD9hPSlq88kAw_SenHt33L';
+
+                        var body = {
+                          provider: 'google',
+                          id_token: idToken
+                        };
+                        if (accessToken) {
+                          body.access_token = accessToken;
+                        }
+
+                        var resp = await fetch(supabaseUrl + '/auth/v1/token?grant_type=id_token', {
+                          method: 'POST',
+                          headers: {
+                            'apikey': anonKey,
+                            'Content-Type': 'application/json'
+                          },
+                          body: JSON.stringify(body)
+                        });
+
+                        if (resp.ok) {
+                          var session = await resp.json();
+                          if (session && session.access_token) {
+                            localStorage.setItem('sb-tvhgqdgwpjivwuiawdrf-auth-token', JSON.stringify(session));
+                            try {
+                              document.cookie = 'sb-tvhgqdgwpjivwuiawdrf-auth-token=' + encodeURIComponent(JSON.stringify(session)) + '; path=/; max-age=31536000';
+                            } catch(e){}
+
+                            if (session.user && session.user.id) {
+                              try {
+                                await fetch(supabaseUrl + '/rest/v1/users', {
+                                  method: 'POST',
+                                  headers: {
+                                    'apikey': anonKey,
+                                    'Authorization': 'Bearer ' + session.access_token,
+                                    'Content-Type': 'application/json',
+                                    'Prefer': 'resolution=merge-duplicates'
+                                  },
+                                  body: JSON.stringify({
+                                    uid: session.user.id,
+                                    email: session.user.email,
+                                    name: (session.user.user_metadata && (session.user.user_metadata.full_name || session.user.user_metadata.name)) || 'Student'
+                                  })
+                                });
+                              } catch(e){}
+                            }
+
+                            window.location.href = '/dashboard';
+                            return;
+                          }
+                        } else {
+                          var errJson = await resp.json().catch(function(){ return {}; });
+                          console.error('Supabase token exchange failed:', errJson);
+                        }
+                      } catch(err) {
+                        console.error('Direct Google Auth error:', err);
                       }
                     })();
                   """;
@@ -2904,10 +3016,16 @@ jobs:
                   debugPrint("[GoogleAuth] Native Sign-In failed: $err");
                   if (err.contains('User cancelled')) {
                     AppToast.show("Sign-in cancelled.");
-                  } else if (err.contains('10') || err.contains('DEVELOPER_ERROR') || err.contains('missing')) {
-                    AppToast.show("Config error: Add SHA-1 in Firebase Console ($err)");
                   } else {
-                    AppToast.show("Google Sign-In: $err");
+                    // Automatic Web Google OAuth fallback so student is NEVER blocked!
+                    AppToast.show("Redirecting to Google sign-in...");
+                    final String fallbackJs = """
+                      (function() {
+                        var redirectUrl = encodeURIComponent(window.location.origin + '/onboarding');
+                        window.location.href = 'https://tvhgqdgwpjivwuiawdrf.supabase.co/auth/v1/authorize?provider=google&redirect_to=' + redirectUrl;
+                      })();
+                    """;
+                    await webViewController.runJavaScript(fallbackJs);
                   }
                   await webViewController.runJavaScript("""
                     (function() {
@@ -2919,7 +3037,18 @@ jobs:
                 }
               } catch (e) {
                 debugPrint("[GoogleAuth] Exception in triggerNativeGoogleSignIn: $e");
-                AppToast.show("Sign-in failed. Please try again.");
+                // Fallback redirect
+                try {
+                  final String fallbackJs = """
+                    (function() {
+                      var redirectUrl = encodeURIComponent(window.location.origin + '/onboarding');
+                      window.location.href = 'https://tvhgqdgwpjivwuiawdrf.supabase.co/auth/v1/authorize?provider=google&redirect_to=' + redirectUrl;
+                    })();
+                  """;
+                  await webViewController.runJavaScript(fallbackJs);
+                } catch (_) {
+                  AppToast.show("Sign-in failed. Please try again.");
+                }
               }
             }
           }
@@ -3178,7 +3307,7 @@ jobs:
                               if (parent && !parent.querySelector('.ncert-quick-open-btn')) {
                                 var btn = document.createElement('button');
                                 btn.className = 'ncert-quick-open-btn';
-                                btn.innerText = '  Open in PDF Reader (Instant & Offline)';
+                                btn.innerText = 'Open in PDF Reader (Instant & Offline)';
                                 btn.style.cssText = 'position:absolute; top:8px; right:8px; z-index:999999; background:#2563eb; color:#ffffff; border:none; padding:8px 14px; border-radius:8px; font-weight:bold; font-size:12px; box-shadow:0 4px 10px rgba(0,0,0,0.5); cursor:pointer; font-family:sans-serif;';
                                 btn.onclick = function(ev) {
                                   ev.preventDefault();
@@ -3364,6 +3493,12 @@ jobs:
                 ))
                 ..addJavaScriptChannel(
                   'FlutterBridge',
+                  onMessageReceived: (JavaScriptMessage message) {
+                    _bridgeHandler.handleMessage(message);
+                  },
+                )
+                ..addJavaScriptChannel(
+                  'AppBridge',
                   onMessageReceived: (JavaScriptMessage message) {
                     _bridgeHandler.handleMessage(message);
                   },
@@ -3772,6 +3907,8 @@ jobs:
                   d = json.load(f)
               clients = d.get('client', [{}])[0].get('oauth_client', [])
               cid = next((c.get('client_id', '') for c in clients if c.get('client_type') == 3), '')
+          if not cid:
+              cid = '759640583420-8scrqq26ucmjkpbkv52komi9f7s3og11.apps.googleusercontent.com'
           print(cid)
           ")
           echo "========================================================================"
@@ -3799,6 +3936,5 @@ jobs:
         with:
           name: PrepWise-Android-APK
           path: prepwise_app/build/app/outputs/flutter-apk/app-release.apk
-
 
 
