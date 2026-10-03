@@ -2346,6 +2346,7 @@ jobs:
           DART_NOTIF_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_BLOCK_EOF' > prepwise_app/lib/services/app_blocker_service.dart
+          import 'dart:convert';
           import 'package:flutter/services.dart';
           import 'package:flutter/foundation.dart';
           import 'app_toast.dart';
@@ -2355,16 +2356,21 @@ jobs:
             factory AppBlockerService() => _instance;
             AppBlockerService._internal();
 
-            // UsageStats permission check channel (stays in MainActivity)
             static const _channel = MethodChannel('com.prepwise/accessibility');
-            // Overlay permission check channel
             static const _overlayChannel = MethodChannel('com.prepwise/overlay');
-            // FocusBlockerService control channel
-            static const _serviceChannel = MethodChannel('com.prepwise/focusblocker');
 
             bool _isStrictActive = false;
+            List<String> _allowedApps = [];
 
             bool get isStrictActive => _isStrictActive;
+
+            List<dynamic> parseJsonArray(String jsonStr) {
+              try {
+                final decoded = jsonDecode(jsonStr);
+                if (decoded is List) return decoded;
+              } catch (_) {}
+              return [];
+            }
 
             Future<bool> canDrawOverlays() async {
               try {
@@ -2382,7 +2388,7 @@ jobs:
 
             Future<bool> isAccessibilityEnabled() async {
               try {
-                return await _channel.invokeMethod('hasUsagePermission') as bool? ?? false;
+                return await _channel.invokeMethod('isAccessibilityEnabled') as bool? ?? false;
               } catch (_) {
                 return false;
               }
@@ -2390,89 +2396,54 @@ jobs:
 
             Future<void> openAccessibilitySettings() async {
               try {
-                await _channel.invokeMethod('openUsageSettings');
+                await _channel.invokeMethod('openAccessibilitySettings');
               } catch (_) {}
             }
 
-            /// Starts the Android ForegroundService blocker.
-            /// [allowedPackages] = packages user has whitelisted (PrepWise itself always allowed).
-            Future<void> startStrictTimer(List<String> allowedPackages, {
-              String subject = 'General',
-              String mode = 'Study',
-              bool camEnabled = false,
-              bool blockerEnabled = false,
-            }) async {
-              _isStrictActive = true;
+            Future<void> openAppInfoSettings() async {
+              try {
+                await _channel.invokeMethod('openAppInfoSettings');
+              } catch (_) {}
+            }
 
-              if (blockerEnabled) {
-                final bool accessOk = await isAccessibilityEnabled();
-                if (!accessOk) {
-                  AppToast.show("Tip: Grant 'Usage Access' in Settings for full app blocking.");
-                }
+            Future<void> startStrictTimer(List<String> allowedPackages) async {
+              _isStrictActive = true;
+              _allowedApps = List.from(allowedPackages);
+
+              final bool accessOk = await isAccessibilityEnabled();
+              if (!accessOk) {
+                // Only guide if blocker was intentionally activated
+                AppToast.show("Please grant 'Usage Access' in Settings to enable App Blocker");
+                await openAccessibilitySettings();
+                return;
               }
 
               try {
                 final allInstalledRaw = await const MethodChannel('com.prepwise/apps').invokeMethod('getInstalledApps') as String;
                 final List<dynamic> allApps = _parseJsonArray(allInstalledRaw);
-
                 final Set<String> allowedSet = allowedPackages.toSet();
                 allowedSet.add('com.prepwise.prepwise');
                 allowedSet.add('com.android.systemui');
-                allowedSet.add('com.android.launcher');
-                allowedSet.add('com.android.launcher3');
 
-                final List<String> blockedPackages = blockerEnabled ? allApps
+                final List<String> blockedPackages = allApps
                     .map((a) => a['packageName']?.toString() ?? '')
                     .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
-                    .toList() : <String>[];
+                    .toList();
 
-                // Start the ForegroundService - it survives app minimize/close
-                await _serviceChannel.invokeMethod('startFocusBlocker', {
-                  'blockedApps': blockedPackages,
-                  'subject': subject,
-                  'mode': mode,
-                  'camEnabled': camEnabled,
-                  'blockerEnabled': blockerEnabled,
-                });
-                if (blockerEnabled) {
-                  AppToast.show("Focus Mode Active! Distracting apps will be blocked.");
-                }
+                await _channel.invokeMethod('setBlockedApps', {'blockedApps': blockedPackages});
+                await _channel.invokeMethod('setBlockingEnabled', {'enabled': true});
+                AppToast.show("Focus Mode Active! Distracting apps will be blocked.");
               } catch (e) {
-                debugPrint('[AppBlockerService] Error starting blocker service: $e');
+                debugPrint('[AppBlockerService] Error starting blocker: $e');
               }
             }
 
             Future<void> stopStrictTimer() async {
               _isStrictActive = false;
+              _allowedApps = [];
               try {
-                await _serviceChannel.invokeMethod('stopFocusBlocker');
-              } catch (e) {
-                debugPrint('[AppBlockerService] Error stopping blocker service: $e');
-              }
-            }
-
-            /// Update blocked apps list while session is running
-            Future<void> updateBlockedApps(List<String> allowedPackages) async {
-              if (!_isStrictActive) return;
-              try {
-                final allInstalledRaw = await const MethodChannel('com.prepwise/apps').invokeMethod('getInstalledApps') as String;
-                final List<dynamic> allApps = _parseJsonArray(allInstalledRaw);
-                final Set<String> allowedSet = allowedPackages.toSet();
-                allowedSet.add('com.prepwise.prepwise');
-                allowedSet.add('com.android.systemui');
-                final List<String> blockedPackages = allApps
-                    .map((a) => a['packageName']?.toString() ?? '')
-                    .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
-                    .toList();
-                await _serviceChannel.invokeMethod('updateBlockedApps', {'blockedApps': blockedPackages});
-              } catch (e) {
-                debugPrint('[AppBlockerService] Error updating blocked apps: $e');
-              }
-            }
-
-            void onAppExitedToBackground() {
-              // FocusBlockerService handles everything in background - nothing to do here
-              debugPrint('[AppBlockerService] App went to background. FocusBlockerService is running independently.');
+                await _channel.invokeMethod('setBlockingEnabled', {'enabled': false});
+              } catch (_) {}
             }
 
             List<dynamic> _parseJsonArray(String raw) {
@@ -2690,7 +2661,8 @@ jobs:
                     if (blockerEnabled) {
                       try {
                         final allInstalledRaw = await const MethodChannel('com.prepwise/apps').invokeMethod('getInstalledApps') as String;
-                        final List<dynamic> allApps = AppBlockerService().parseJsonArray(allInstalledRaw);
+                        final dynamic decoded = jsonDecode(allInstalledRaw);
+                        final List<dynamic> allApps = decoded is List ? decoded : [];
                         final Set<String> allowedSet = allowed.toSet();
                         allowedSet.add('com.prepwise.prepwise');
                         allowedSet.add('com.android.systemui');
@@ -3427,8 +3399,8 @@ jobs:
 
             Future<void> _initNotifications() async {
               await NotificationService().initialize(
-                onSelectNotification: (String? payload) {
-                  if (payload != null && payload.isNotEmpty) {
+                onNotificationClick: (String payload) {
+                  if (payload.isNotEmpty) {
                     _controller.runJavaScript("""
                       (function(){
                         if (typeof window.onNotificationDeepLink === 'function') {
