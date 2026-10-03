@@ -676,6 +676,17 @@ jobs:
                                   result.success(map)
                               }
                           }
+                          "storeSupabaseSession" -> {
+                              val token = call.argument<String>("accessToken") ?: ""
+                              val uid = call.argument<String>("userId") ?: ""
+                              if (token.isNotEmpty && uid.isNotEmpty) {
+                                  getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE).edit()
+                                      .putString("supabase_access_token", token)
+                                      .putString("supabase_user_id", uid)
+                                      .apply()
+                              }
+                              result.success(true)
+                          }
                           "getPendingSession" -> {
                               val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
                               val hasPending = prefs.getBoolean("has_pending_session", false)
@@ -764,6 +775,11 @@ jobs:
           import android.widget.TextView
           import android.widget.Toast
           import androidx.core.app.NotificationCompat
+          import java.io.OutputStreamWriter
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import org.json.JSONArray
+          import org.json.JSONObject
 
           class FocusBlockerService : Service() {
 
@@ -1590,7 +1606,8 @@ jobs:
                               val dx = (event.rawX - startX).toInt()
                               val dy = (event.rawY - startY).toInt()
                               if (Math.abs(dx) > 8 || Math.abs(dy) > 8) moved = true
-                              p.x = initialX + dx; p.y = initialY + dy
+                              // Gravity.END: x is right-side margin, so horizontal drag is negated
+                              p.x = initialX - dx; p.y = initialY + dy
                               try { windowManager?.updateViewLayout(dot, p) } catch (_: Exception) {}
                               true
                           }
@@ -1613,11 +1630,11 @@ jobs:
                   val params = WindowManager.LayoutParams(
                       px, px,
                       layoutType,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                       PixelFormat.TRANSLUCENT
                   ).apply {
-                      gravity = Gravity.TOP or Gravity.START
-                      x = (resources.displayMetrics.widthPixels - px - (16 * density).toInt())
+                      gravity = Gravity.TOP or Gravity.END
+                      x = (16 * density).toInt()
                       y = (resources.displayMetrics.heightPixels / 4)
                   }
 
@@ -1794,44 +1811,153 @@ jobs:
                   removeOverlay()
                   removeFloatingDot()
                   val elapsed = currentElapsedSeconds
+                  val snapSubject = subject
+                  val snapMode = mode
+                  val snapCam = camEnabled
+                  val snapBlocker = blockerEnabled
+                  val snapTimestamp = System.currentTimeMillis()
                   isRunning = false
 
-                  try {
-                      val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
-                      val edit = prefs.edit()
-                          .putBoolean("is_service_running", false)
-                          .remove("active_subject")
-                          .remove("active_mode")
-                          .remove("active_cam_enabled")
-                          .remove("active_blocker_enabled")
-                          .remove("active_start_timestamp_ms")
+                  val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                  prefs.edit()
+                      .putBoolean("is_service_running", false)
+                      .remove("active_subject").remove("active_mode")
+                      .remove("active_cam_enabled").remove("active_blocker_enabled")
+                      .remove("active_start_timestamp_ms")
+                      .remove("focus_start_ts").remove("focus_paused_duration")
+                      .remove("focus_cam_paused").remove("focus_pause_start")
+                      .remove("focus_was_running")
+                      .apply()
 
-                      if (elapsed > 0) {
-                          edit.putBoolean("has_pending_session", true)
-                              .putInt("pending_session_seconds", elapsed)
-                              .putString("pending_session_subject", subject)
-                              .putString("pending_session_mode", mode)
-                              .putBoolean("pending_session_cam_enabled", camEnabled)
-                              .putBoolean("pending_session_blocker_enabled", blockerEnabled)
-                              .putLong("pending_session_timestamp", System.currentTimeMillis())
-                      }
-                      // Clear resume state so AlarmManager does not revive session after deliberate stop
-                      edit.remove("focus_start_ts").remove("focus_paused_duration")
-                          .remove("focus_cam_paused").remove("focus_pause_start")
-                          .remove("focus_was_running")
-                      edit.apply()
-                  } catch (_: Exception) {}
-
-                  stopForegroundSafely()
-
+                  // Show immediate Kotlin toast (works in background too)
                   val mins = elapsed / 60
                   val secs = elapsed % 60
-                  val timeLabel = if (mins > 0) "${mins}m ${secs}s" else "${secs}s"
-                  Toast.makeText(applicationContext, "Study session stopped & saved ($timeLabel logged)!", Toast.LENGTH_LONG).show()
+                  val timeLabel = when {
+                      mins > 0 && secs > 0 -> "${mins}m ${secs}s"
+                      mins > 0 -> "${mins}m"
+                      else -> "${secs}s"
+                  }
+                  Handler(Looper.getMainLooper()).post {
+                      Toast.makeText(
+                          applicationContext,
+                          "✅ Session saved! $snapSubject · $snapMode · $timeLabel logged",
+                          Toast.LENGTH_LONG
+                      ).show()
+                  }
 
+                  // Log to Supabase directly from Kotlin on background thread
+                  if (elapsed > 0) {
+                      Thread {
+                          try {
+                              logSessionToSupabase(
+                                  elapsed = elapsed,
+                                  subject = snapSubject,
+                                  mode = snapMode,
+                                  camEnabled = snapCam,
+                                  blockerEnabled = snapBlocker,
+                                  timestamp = snapTimestamp
+                              )
+                          } catch (_: Exception) {
+                              // Fallback: save as pending so app can retry on next open
+                              prefs.edit()
+                                  .putBoolean("has_pending_session", true)
+                                  .putInt("pending_session_seconds", elapsed)
+                                  .putString("pending_session_subject", snapSubject)
+                                  .putString("pending_session_mode", snapMode)
+                                  .putBoolean("pending_session_cam_enabled", snapCam)
+                                  .putBoolean("pending_session_blocker_enabled", snapBlocker)
+                                  .putLong("pending_session_timestamp", snapTimestamp)
+                                  .apply()
+                          }
+                      }.start()
+                  }
+
+                  stopForegroundSafely()
                   currentElapsedSeconds = 0
                   startTimestampMs = 0L
                   stopSelf()
+              }
+
+              private fun logSessionToSupabase(
+                  elapsed: Int, subject: String, mode: String,
+                  camEnabled: Boolean, blockerEnabled: Boolean, timestamp: Long
+              ) {
+                  val supabaseUrl = "https://tvhgqdgwpjivwuiawdrf.supabase.co"
+                  val anonKey = "sb_publishable_dkMHodPE0rD9hPSlq88kAw_SenHt33L"
+
+                  // Read access token + user id from SharedPrefs (stored by web app)
+                  val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                  val accessToken = prefs.getString("supabase_access_token", null) ?: return
+                  val userId = prefs.getString("supabase_user_id", null) ?: return
+
+                  val addMins = Math.max(1, Math.round(elapsed / 60.0).toInt())
+                  val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                      .format(java.util.Date(timestamp))
+
+                  val authHeaders = mapOf(
+                      "apikey" to anonKey,
+                      "Authorization" to "Bearer $accessToken",
+                      "Content-Type" to "application/json"
+                  )
+
+                  // 1. Read existing daily_log
+                  val getUrl = URL("$supabaseUrl/rest/v1/daily_logs?user_id=eq.$userId&log_date=eq.$todayStr&select=*")
+                  val getConn = getUrl.openConnection() as HttpURLConnection
+                  getConn.requestMethod = "GET"
+                  authHeaders.forEach { (k, v) -> getConn.setRequestProperty(k, v) }
+                  val existingJson = try {
+                      if (getConn.responseCode == 200)
+                          JSONArray(getConn.inputStream.bufferedReader().readText())
+                      else JSONArray()
+                  } catch (_: Exception) { JSONArray() } finally { getConn.disconnect() }
+
+                  val existing = if (existingJson.length() > 0) existingJson.getJSONObject(0) else null
+                  val totalStudy = (existing?.optInt("study_time_minutes", 0) ?: 0) + addMins
+                  val totalTheory = (existing?.optInt("theory_minutes", 0) ?: 0) + if (mode == "Theory") addMins else 0
+                  val totalPractice = (existing?.optInt("practice_minutes", 0) ?: 0) + if (mode == "Practice" || mode == "questions") addMins else 0
+                  val totalRevision = (existing?.optInt("revision_minutes", 0) ?: 0) + if (mode == "Revision") addMins else 0
+
+                  // 2. Upsert daily_log
+                  val logBody = JSONObject().apply {
+                      put("user_id", userId)
+                      put("log_date", todayStr)
+                      put("study_time_minutes", totalStudy)
+                      put("theory_minutes", totalTheory)
+                      put("practice_minutes", totalPractice)
+                      put("revision_minutes", totalRevision)
+                  }
+                  val logConn = URL("$supabaseUrl/rest/v1/daily_logs").openConnection() as HttpURLConnection
+                  logConn.requestMethod = "POST"
+                  authHeaders.forEach { (k, v) -> logConn.setRequestProperty(k, v) }
+                  logConn.setRequestProperty("Prefer", "resolution=merge-duplicates")
+                  logConn.doOutput = true
+                  OutputStreamWriter(logConn.outputStream).use { it.write(logBody.toString()) }
+                  logConn.responseCode // trigger request
+                  logConn.disconnect()
+
+                  // 3. Insert focus_session
+                  val startIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
+                      .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                      .format(java.util.Date(timestamp - elapsed * 1000L))
+                  val endIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
+                      .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                      .format(java.util.Date(timestamp))
+
+                  val sessionBody = JSONObject().apply {
+                      put("user_id", userId)
+                      put("started_at", startIso)
+                      put("ended_at", endIso)
+                      put("duration_seconds", elapsed)
+                      put("counts_for_streak", elapsed >= 1200)
+                      put("subject", subject)
+                  }
+                  val sessConn = URL("$supabaseUrl/rest/v1/focus_sessions").openConnection() as HttpURLConnection
+                  sessConn.requestMethod = "POST"
+                  authHeaders.forEach { (k, v) -> sessConn.setRequestProperty(k, v) }
+                  sessConn.doOutput = true
+                  OutputStreamWriter(sessConn.outputStream).use { it.write(sessionBody.toString()) }
+                  sessConn.responseCode
+                  sessConn.disconnect()
               }
 
               override fun onDestroy() {
@@ -2942,6 +3068,21 @@ jobs:
                     }
                     break;
 
+                  case 'storeSupabaseSession':
+                    // Called from JS on login/session refresh — stores token for native Supabase logging
+                    final String accessToken = data['accessToken'] ?? '';
+                    final String userId = data['userId'] ?? '';
+                    if (accessToken.isNotEmpty && userId.isNotEmpty) {
+                      try {
+                        await const MethodChannel('com.prepwise/focusblocker')
+                            .invokeMethod('storeSupabaseSession', {
+                          'accessToken': accessToken,
+                          'userId': userId,
+                        });
+                      } catch (_) {}
+                    }
+                    break;
+
                   case 'checkActiveSession':
                     try {
                       final activeMap = await const MethodChannel('com.prepwise/focusblocker')
@@ -2992,6 +3133,7 @@ jobs:
 
             void triggerInAppStopDirect() {
               // Immediately stop native session, floating dot, notification, and blocker
+              _stopPeriodicTimerSync();
               FocusSessionService().stopSession();
               try {
                 const MethodChannel('com.prepwise/focusblocker').invokeMethod('stopFocusBlocker');
@@ -3458,6 +3600,28 @@ jobs:
                           }
                         });
 
+                        // Sync Supabase token to native on every page load (so Kotlin can log sessions)
+                        (function syncTokenToNative() {
+                          try {
+                            for (var i = 0; i < localStorage.length; i++) {
+                              var k = localStorage.key(i);
+                              if (k && (k.indexOf('sb-') === 0 || k.indexOf('auth-token') !== -1)) {
+                                try {
+                                  var v = JSON.parse(localStorage.getItem(k));
+                                  if (v && v.user && v.user.id && v.access_token) {
+                                    window.AppBridge.postMessage(JSON.stringify({
+                                      action: 'storeSupabaseSession',
+                                      accessToken: v.access_token,
+                                      userId: v.user.id
+                                    }));
+                                    break;
+                                  }
+                                } catch(e) {}
+                              }
+                            }
+                          } catch(e) {}
+                        })();
+
                         // 2. Client-side route change detector (Next.js Link / router)
                         function handleRouteChange() {
                           var path = window.location.pathname || '';
@@ -3687,6 +3851,7 @@ jobs:
                   """);
                 } else {
                   _stopPeriodicTimerSync();
+                  FocusSessionService().stopSession();
                 }
               } catch (_) {}
             }
@@ -3851,12 +4016,6 @@ jobs:
                       } catch(e) {}
                     }
 
-                    if (window.AppBridge) {
-                      window.AppBridge.postMessage(JSON.stringify({
-                        action: 'toast',
-                        message: 'Study session logged (' + addMins + 'm added to Today Study)!'
-                      }));
-                    }
                   } catch(err) {
                     console.error('Direct Supabase log error:', err);
                   }
