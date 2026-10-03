@@ -769,10 +769,13 @@ jobs:
 
               companion object {
                   const val ACTION_START            = "com.prepwise.ACTION_FOCUS_START"
+                  const val ACTION_RESUME           = "com.prepwise.ACTION_FOCUS_RESUME"
                   const val ACTION_STOP             = "com.prepwise.ACTION_FOCUS_STOP"
                   const val ACTION_STOP_REQUEST     = "com.prepwise.ACTION_FOCUS_STOP_REQUEST"
                   const val ACTION_UPDATE_BLOCKED   = "com.prepwise.ACTION_UPDATE_BLOCKED"
                   const val ACTION_SET_CAM_STATUS   = "com.prepwise.ACTION_SET_CAM_STATUS"
+
+                  @Volatile var isStopping: Boolean = false
                   const val EXTRA_BLOCKED_APPS      = "blocked_apps"
                   const val EXTRA_SUBJECT           = "subject"
                   const val EXTRA_MODE              = "mode"
@@ -862,11 +865,19 @@ jobs:
               // Survive swipe-from-recents kill only if session is actively running
               override fun onTaskRemoved(rootIntent: Intent?) {
                   super.onTaskRemoved(rootIntent)
-                  val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
-                  val active = prefs.getBoolean("is_service_running", false)
-                  if (active && currentElapsedSeconds > 0) {
+                  if (isStopping) return
+                  if (currentElapsedSeconds > 0 && startTimestampMs > 0L) {
+                      // Save epoch-based timer state so restart can resume without resetting timer
+                      val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                      prefs.edit()
+                          .putLong("focus_start_ts", startTimestampMs)
+                          .putLong("focus_paused_duration", pausedDurationMs)
+                          .putBoolean("focus_cam_paused", camPaused)
+                          .putLong("focus_pause_start", if (camPaused && pauseStartMs > 0L) pauseStartMs else 0L)
+                          .putBoolean("focus_was_running", true)
+                          .apply()
                       val restartIntent = Intent(applicationContext, FocusBlockerService::class.java).apply {
-                          action = ACTION_START
+                          action = ACTION_RESUME
                           putStringArrayListExtra(EXTRA_BLOCKED_APPS, ArrayList(blockedApps))
                           putExtra(EXTRA_SUBJECT, subject)
                           putExtra(EXTRA_MODE, mode)
@@ -878,7 +889,8 @@ jobs:
                           PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
                       )
                       val alarmMgr = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
-                      alarmMgr?.set(android.app.AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1000, pi)
+                      alarmMgr?.set(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                          android.os.SystemClock.elapsedRealtime() + 500, pi)
                   }
               }
 
@@ -897,20 +909,24 @@ jobs:
 
                   when (intent?.action) {
                       ACTION_START -> {
+                          if (isStopping) isStopping = false
                           blockedApps = intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: emptyList()
                           subject = intent.getStringExtra(EXTRA_SUBJECT) ?: "General"
                           mode = intent.getStringExtra(EXTRA_MODE) ?: "Study"
                           camEnabled = intent.getBooleanExtra(EXTRA_CAM_ENABLED, false)
                           blockerEnabled = intent.getBooleanExtra(EXTRA_BLOCKER_ENABLED, false)
 
-                          startTimestampMs = System.currentTimeMillis()
-                          pausedDurationMs = 0L
-                          pauseStartMs = 0L
-                          lastReportedSecond = -1
-                          currentElapsedSeconds = 0
-                          camPaused = false
-                          camVerified = true
-                          lastFaceSeenTimestamp = System.currentTimeMillis()
+                          // Only reset timer if not already running (prevent double-start wipe)
+                          if (startTimestampMs == 0L) {
+                              startTimestampMs = System.currentTimeMillis()
+                              pausedDurationMs = 0L
+                              pauseStartMs = 0L
+                              lastReportedSecond = -1
+                              currentElapsedSeconds = 0
+                              camPaused = false
+                              camVerified = true
+                              lastFaceSeenTimestamp = System.currentTimeMillis()
+                          }
 
                           isRunning = true
                           currentSubject = subject
@@ -932,21 +948,79 @@ jobs:
                           handler.post(tickRunnable)
 
                           if (camEnabled) {
-                              if (canDrawOverlay()) {
-                                  showFloatingDot()
-                              }
-                              startNativeFaceTracker()
+                              if (canDrawOverlay()) showFloatingDot()
+                              if (cameraProvider == null) startNativeFaceTracker()
+                          } else {
+                              removeFloatingDot()
+                              stopNativeFaceTracker()
+                          }
+                      }
+                      ACTION_RESUME -> {
+                          // Restore epoch-based timer from SharedPrefs after app was killed and restarted
+                          if (isStopping) isStopping = false
+                          blockedApps = intent?.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: emptyList()
+                          subject = intent?.getStringExtra(EXTRA_SUBJECT) ?: "General"
+                          mode = intent?.getStringExtra(EXTRA_MODE) ?: "Study"
+                          camEnabled = intent?.getBooleanExtra(EXTRA_CAM_ENABLED, false) ?: false
+                          blockerEnabled = intent?.getBooleanExtra(EXTRA_BLOCKER_ENABLED, false) ?: false
+
+                          val savedStart = prefs.getLong("focus_start_ts", 0L)
+                          val savedPaused = prefs.getLong("focus_paused_duration", 0L)
+                          val savedCamPaused = prefs.getBoolean("focus_cam_paused", false)
+                          val savedPauseStart = prefs.getLong("focus_pause_start", 0L)
+                          prefs.edit()
+                              .remove("focus_start_ts").remove("focus_paused_duration")
+                              .remove("focus_cam_paused").remove("focus_pause_start")
+                              .remove("focus_was_running")
+                              .putBoolean("is_service_running", true)
+                              .putString("active_subject", subject)
+                              .putString("active_mode", mode)
+                              .putBoolean("active_cam_enabled", camEnabled)
+                              .putBoolean("active_blocker_enabled", blockerEnabled)
+                              .apply()
+
+                          if (savedStart > 0L) {
+                              startTimestampMs = savedStart
+                              pausedDurationMs = savedPaused
+                              camPaused = savedCamPaused
+                              pauseStartMs = savedPauseStart
+                              if (camPaused && pauseStartMs == 0L) pauseStartMs = System.currentTimeMillis()
+                          } else {
+                              startTimestampMs = System.currentTimeMillis()
+                              pausedDurationMs = 0L
+                              pauseStartMs = 0L
+                              camPaused = false
+                          }
+                          camVerified = !camPaused
+                          lastReportedSecond = -1
+                          lastFaceSeenTimestamp = System.currentTimeMillis()
+                          isRunning = true
+                          currentSubject = subject
+                          currentMode = mode
+                          currentCamEnabled = camEnabled
+                          currentBlockerEnabled = blockerEnabled
+
+                          startForegroundSafely()
+                          handler.removeCallbacks(tickRunnable)
+                          handler.post(tickRunnable)
+
+                          if (camEnabled) {
+                              if (canDrawOverlay()) showFloatingDot()
+                              if (cameraProvider == null) startNativeFaceTracker()
                           } else {
                               removeFloatingDot()
                               stopNativeFaceTracker()
                           }
                       }
                       ACTION_STOP_REQUEST -> {
-                          // Immediate 1-tap termination and logging
-                          sendStopRequestToWebApp()
-                          directBackgroundStopAndLog()
+                          if (!isStopping) {
+                              sendStopRequestToWebApp()
+                              directBackgroundStopAndLog()
+                          }
                       }
                       ACTION_STOP -> {
+                          if (isStopping) return START_NOT_STICKY
+                          isStopping = true
                           cancelScheduledRestart()
                           handler.removeCallbacks(tickRunnable)
                           stopNativeFaceTracker()
@@ -963,6 +1037,11 @@ jobs:
                               .remove("active_cam_enabled")
                               .remove("active_blocker_enabled")
                               .remove("active_start_timestamp_ms")
+                              .remove("focus_start_ts")
+                              .remove("focus_paused_duration")
+                              .remove("focus_cam_paused")
+                              .remove("focus_pause_start")
+                              .remove("focus_was_running")
                               .apply()
 
                           stopForegroundSafely()
@@ -1597,10 +1676,19 @@ jobs:
 
               private fun updateDotTimer() {
                   val container = dotView ?: return
-                  container.findViewWithTag<TextView>("timerTv")?.text = formatElapsed(currentElapsedSeconds)
+                  val formatted = formatElapsed(currentElapsedSeconds)
+                  fun updateAll(v: android.view.ViewGroup) {
+                      for (i in 0 until v.childCount) {
+                          val child = v.getChildAt(i)
+                          if (child is android.widget.TextView && child.tag == "timerTv") {
+                              child.text = formatted
+                          } else if (child is android.view.ViewGroup) {
+                              updateAll(child)
+                          }
+                      }
+                  }
+                  if (container is android.view.ViewGroup) updateAll(container)
               }
-
-              // Foreground Notification
               private fun createNotificationChannel() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val channel = NotificationChannel(
@@ -1698,6 +1786,8 @@ jobs:
               }
 
               private fun directBackgroundStopAndLog() {
+                  if (isStopping) return
+                  isStopping = true
                   cancelScheduledRestart()
                   handler.removeCallbacks(tickRunnable)
                   stopNativeFaceTracker()
@@ -1725,6 +1815,10 @@ jobs:
                               .putBoolean("pending_session_blocker_enabled", blockerEnabled)
                               .putLong("pending_session_timestamp", System.currentTimeMillis())
                       }
+                      // Clear resume state so AlarmManager does not revive session after deliberate stop
+                      edit.remove("focus_start_ts").remove("focus_paused_duration")
+                          .remove("focus_cam_paused").remove("focus_pause_start")
+                          .remove("focus_was_running")
                       edit.apply()
                   } catch (_: Exception) {}
 
@@ -1747,6 +1841,7 @@ jobs:
                   removeOverlay()
                   removeFloatingDot()
                   currentElapsedSeconds = 0
+                  isStopping = false
                   super.onDestroy()
               }
           }
@@ -3937,5 +4032,6 @@ jobs:
         with:
           name: PrepWise-Android-APK
           path: prepwise_app/build/app/outputs/flutter-apk/app-release.apk
+
 
 
