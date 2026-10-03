@@ -37,18 +37,18 @@ interface AppItem {
 }
 
 const WEB_FALLBACK_APPS: AppItem[] = [
-  { id: "pdf_reader", name: "PDF Reader", icon: "📄" },
-  { id: "calculator", name: "Calculator", icon: "🧮" },
-  { id: "youtube", name: "YouTube", icon: "▶️" },
-  { id: "whatsapp", name: "WhatsApp", icon: "💬" },
-  { id: "instagram", name: "Instagram", icon: "📸" },
-  { id: "telegram", name: "Telegram", icon: "✈️" },
-  { id: "snapchat", name: "Snapchat", icon: "👻" },
-  { id: "games", name: "Games & Social Media", icon: "🎮" },
+  { id: "pdf_reader", name: "PDF Reader", icon: "ðŸ“„" },
+  { id: "calculator", name: "Calculator", icon: "ðŸ§®" },
+  { id: "youtube", name: "YouTube", icon: "â–¶ï¸" },
+  { id: "whatsapp", name: "WhatsApp", icon: "ðŸ’¬" },
+  { id: "instagram", name: "Instagram", icon: "ðŸ“¸" },
+  { id: "telegram", name: "Telegram", icon: "âœˆï¸" },
+  { id: "snapchat", name: "Snapchat", icon: "ðŸ‘»" },
+  { id: "games", name: "Games & Social Media", icon: "ðŸŽ®" },
 ];
 
 function nativeToAppItem(n: { name: string; packageName: string }): AppItem {
-  return { id: n.packageName, name: n.name, icon: "📱" };
+  return { id: n.packageName, name: n.name, icon: "ðŸ“±" };
 }
 
 const SYNC_INTERVAL_SECONDS = 60;
@@ -101,7 +101,7 @@ export default function StudyPage() {
   const [usageGranted, setUsageGranted] = useState(false);
   const [showUsageSteps, setShowUsageSteps] = useState(false);
 
-  // Native cam status (driven by Kotlin FocusBlockerService — no face-api.js)
+  // Native cam status (driven by Kotlin FocusBlockerService â€” no face-api.js)
   const [nativeCamPaused, setNativeCamPaused] = useState(false);
 
   const availableSubjects: SubjectType[] =
@@ -471,12 +471,12 @@ export default function StudyPage() {
               <h1 className="font-display text-2xl text-ink">Focus Mode</h1>
               {isNativeApp && (
                 <span className="text-[10px] font-black bg-teal/15 text-teal px-2 py-0.5 rounded-full border border-teal/30">
-                  🛡️ Native Protected
+                  ðŸ›¡ï¸ Native Protected
                 </span>
               )}
             </div>
             <p className="text-xs text-slate mt-0.5">
-              Target: <span className="font-bold text-teal">{targetExam}</span> • Zero Distractions
+              Target: <span className="font-bold text-teal">{targetExam}</span> â€¢ Zero Distractions
             </p>
           </div>
           <button
@@ -489,23 +489,23 @@ export default function StudyPage() {
 
         {postStreakResult && (
           <div className="rounded-ticket border border-teal/20 bg-teal/10 px-4 py-3 flex items-center gap-3">
-            <span className="text-xl">{postStreakResult.counted ? "🔥" : "⏱️"}</span>
+            <span className="text-xl">{postStreakResult.counted ? "ðŸ”¥" : "â±ï¸"}</span>
             <div>
               <p className="text-xs font-bold text-ink">
                 {postStreakResult.counted
                   ? `Streak updated: ${postStreakResult.newStreak} day${postStreakResult.newStreak !== 1 ? "s" : ""}!`
-                  : "Session saved & logged ✓ (min 2 min for streak count)"}
+                  : "Session saved & logged âœ“ (min 2 min for streak count)"}
               </p>
             </div>
           </div>
         )}
 
-        {/* Native cam-paused banner — status driven by Kotlin, not face-api.js */}
+        {/* Native cam-paused banner â€” status driven by Kotlin, not face-api.js */}
         {isActive && faceVerificationEnabled && nativeCamPaused && (
           <div className="rounded-ticket border border-coral/30 bg-coral/10 px-4 py-3 flex items-center gap-3">
-            <span className="text-xl">⏸️</span>
+            <span className="text-xl">â¸ï¸</span>
             <div>
-              <p className="text-xs font-bold text-ink">Paused — face not detected</p>
+              <p className="text-xs font-bold text-ink">Paused â€” face not detected</p>
               <p className="text-[10px] text-slate">Come back into camera view to resume your timer.</p>
             </div>
           </div>
@@ -517,7 +517,7 @@ export default function StudyPage() {
             {isActive && faceVerificationEnabled && (
               <span className={`inline-block w-2 h-2 rounded-full ${nativeCamPaused ? "bg-coral animate-pulse" : "bg-teal"}`} />
             )}
-            {isActive ? `🔥 Studying ${selectedSub} (${selectedTask})` : "Ready to focus?"}
+            {isActive ? `ðŸ”¥ Studying ${selectedSub} (${selectedTask})` : "Ready to focus?"}
           </div>
           <div className="font-mono text-5xl font-black text-ink my-3 tracking-tight">
             {formatTimer(seconds)}
@@ -527,7 +527,7 @@ export default function StudyPage() {
               onClick={() => setShowPreModal(true)}
               className="mt-4 px-8 py-3.5 bg-teal text-white font-bold text-sm rounded-2xl shadow-md shadow-teal/20 hover:bg-teal/90 transition-all"
             >
-              ▶ Start Study Timer
+              â–¶ Start Study Timer
             </button>
           ) : (
             <button
@@ -535,7 +535,7 @@ export default function StudyPage() {
               onClick={handleDirectStopAndSave}
               className="mt-4 px-8 py-3.5 bg-rose-600 text-white font-bold text-sm rounded-2xl shadow-md shadow-rose-600/20 hover:bg-rose-700 transition-all"
             >
-              {saving ? "Saving..." : "■ Stop & Log Session"}
+              {saving ? "Saving..." : "â–  Stop & Log Session"}
             </button>
           )}
         </div>
@@ -543,7 +543,7 @@ export default function StudyPage() {
         {/* Feature Toggles */}
         <div className="bg-white rounded-ticket border border-ink/10 shadow-xs overflow-hidden">
           <div className="bg-marigold/10 border-b border-marigold/20 px-4 py-2.5 flex items-start gap-2">
-            <span className="text-sm mt-0.5">🏆</span>
+            <span className="text-sm mt-0.5">ðŸ†</span>
             <p className="text-[10px] text-ink/70 leading-relaxed">
               <span className="font-bold text-ink">Leaderboard entries</span> are counted when{" "}
               <span className="font-bold text-marigold">both toggles are ON</span>. Study data is always saved regardless.
@@ -555,15 +555,15 @@ export default function StudyPage() {
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${faceVerificationEnabled ? "bg-teal/15" : "bg-ink/5"}`}>
-                  <span className="text-lg">🎥</span>
+                  <span className="text-lg">ðŸŽ¥</span>
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-ink">Face Verification</p>
                   <p className="text-[10px] text-slate mt-0.5 leading-relaxed">
                     {faceVerificationEnabled
                       ? overlayGranted
-                        ? "✓ Active — native cam tracking, works in background"
-                        : "⏳ Please allow 'Display over other apps'..."
+                        ? "âœ“ Active â€” native cam tracking, works in background"
+                        : "â³ Please allow 'Display over other apps'..."
                       : "Native camera confirms you're present. Works even when screen is off."}
                   </p>
                 </div>
@@ -581,15 +581,15 @@ export default function StudyPage() {
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${appBlockerEnabled ? "bg-rose-50" : "bg-ink/5"}`}>
-                  <span className="text-lg">🛡️</span>
+                  <span className="text-lg">ðŸ›¡ï¸</span>
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-ink">App Blocker</p>
                   <p className="text-[10px] text-slate mt-0.5 leading-relaxed">
                     {appBlockerEnabled
                       ? usageGranted
-                        ? `✓ Active — ${allowedApps.length === 0 ? "all apps blocked" : `${allowedApps.length} app allowed`}`
-                        : "⏳ Waiting for Usage Access..."
+                        ? `âœ“ Active â€” ${allowedApps.length === 0 ? "all apps blocked" : `${allowedApps.length} app allowed`}`
+                        : "â³ Waiting for Usage Access..."
                       : "Blocks distracting apps during study. Needs Usage Access."}
                   </p>
                 </div>
@@ -605,25 +605,25 @@ export default function StudyPage() {
               <div className="mt-3 ml-12">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-[10px] text-slate font-medium">
-                    {allowedApps.length === 0 ? "🔒 All apps blocked" : `${allowedApps.length} app(s) allowed`}
+                    {allowedApps.length === 0 ? "ðŸ”’ All apps blocked" : `${allowedApps.length} app(s) allowed`}
                   </p>
                   <button
                     type="button"
                     onClick={() => { setShowAppsModal(true); setAppsSearch(""); }}
                     className="text-[11px] font-bold text-teal bg-teal/10 hover:bg-teal/20 px-2.5 py-1 rounded-lg border border-teal/20 transition-all flex items-center gap-1 shadow-2xs"
                   >
-                    <span>⚙️</span>
+                    <span>âš™ï¸</span>
                     <span>Manage Allowed Apps</span>
                   </button>
                 </div>
                 {allowedApps.length > 0 && (
                   <div className="flex flex-wrap gap-1 pt-0.5">
                     {allowedApps.map((id) => {
-                      const app = allApps.find((a) => a.id === id) || { name: id, icon: "📱" };
+                      const app = allApps.find((a) => a.id === id) || { name: id, icon: "ðŸ“±" };
                       return (
                         <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[10px] font-bold">
                           <span>{app.icon} {app.name}</span>
-                          <button type="button" onClick={() => toggleAppAllowed(id)} className="hover:text-rose-500 ml-0.5 font-bold">✕</button>
+                          <button type="button" onClick={() => toggleAppAllowed(id)} className="hover:text-rose-500 ml-0.5 font-bold">âœ•</button>
                         </span>
                       );
                     })}
@@ -642,14 +642,14 @@ export default function StudyPage() {
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
               <div>
                 <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
-                  <span>🛡️</span> Select Allowed Apps
+                  <span>ðŸ›¡ï¸</span> Select Allowed Apps
                 </h3>
                 <p className="text-[10px] text-slate mt-0.5">
                   Keep select apps unlocked. All other apps stay blocked.
-                  {isNativeApp && <span className="ml-1 text-teal font-bold">• {allApps.length} installed</span>}
+                  {isNativeApp && <span className="ml-1 text-teal font-bold">â€¢ {allApps.length} installed</span>}
                 </p>
               </div>
-              <button onClick={() => setShowAppsModal(false)} className="w-7 h-7 rounded-full bg-ink/5 text-xs text-ink/70 flex items-center justify-center font-bold">✕</button>
+              <button onClick={() => setShowAppsModal(false)} className="w-7 h-7 rounded-full bg-ink/5 text-xs text-ink/70 flex items-center justify-center font-bold">âœ•</button>
             </div>
             <div className="relative">
               <input
@@ -659,7 +659,7 @@ export default function StudyPage() {
                 placeholder="Search installed apps..."
                 className="w-full px-3 py-2 text-xs rounded-xl border border-ink/15 focus:border-teal outline-none pl-7"
               />
-              <span className="absolute left-2.5 top-2.5 text-slate/50 text-xs">🔍</span>
+              <span className="absolute left-2.5 top-2.5 text-slate/50 text-xs">ðŸ”</span>
             </div>
             <div className="flex items-center justify-between gap-2">
               <p className="text-[11px] text-slate font-medium">Tap app to Whitelist/Block:</p>
@@ -680,7 +680,7 @@ export default function StudyPage() {
             </div>
             <div className="overflow-y-auto flex-1 pr-1">
               {!appsLoaded ? (
-                <p className="text-[11px] text-slate text-center py-6">Loading apps…</p>
+                <p className="text-[11px] text-slate text-center py-6">Loading appsâ€¦</p>
               ) : filteredApps.length === 0 ? (
                 <p className="text-[11px] text-slate text-center py-6">No apps found</p>
               ) : (
@@ -696,7 +696,7 @@ export default function StudyPage() {
                       >
                         <span className="text-base">{app.icon}</span>
                         <span className="truncate flex-1 text-left">{app.name}</span>
-                        <span className={`text-[11px] font-black ${isAllowed ? "text-teal" : "text-rose-500"}`}>{isAllowed ? "✓" : "⛔"}</span>
+                        <span className={`text-[11px] font-black ${isAllowed ? "text-teal" : "text-rose-500"}`}>{isAllowed ? "âœ“" : "â›”"}</span>
                       </button>
                     );
                   })}
@@ -716,7 +716,7 @@ export default function StudyPage() {
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
               <h3 className="text-sm font-bold text-ink">Choose Subject</h3>
-              <button onClick={() => setShowPreModal(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60">✕</button>
+              <button onClick={() => setShowPreModal(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60">âœ•</button>
             </div>
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">Subject</label>
@@ -732,7 +732,7 @@ export default function StudyPage() {
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">Category</label>
               <div className="grid grid-cols-3 gap-1.5">
-                {[{ id: "theory", label: "🎥 Theory" }, { id: "questions", label: "✍️ Practice" }, { id: "revision", label: "🔄 Revision" }].map((item) => (
+                {[{ id: "theory", label: "ðŸŽ¥ Theory" }, { id: "questions", label: "âœï¸ Practice" }, { id: "revision", label: "ðŸ”„ Revision" }].map((item) => (
                   <button key={item.id} type="button" onClick={() => setSelectedTask(item.id as StudyTaskType)}
                     className={`py-2 rounded-xl text-[11px] font-bold border transition-all ${selectedTask === item.id ? "bg-marigold/20 text-ink border-marigold shadow-xs" : "bg-paper/60 border-ink/10 text-slate"}`}>
                     {item.label}
@@ -742,14 +742,14 @@ export default function StudyPage() {
             </div>
             <div className={`rounded-xl px-3 py-2.5 border text-[10px] leading-relaxed ${isVerifiedSession ? "bg-teal/8 border-teal/25 text-teal" : "bg-ink/5 border-ink/10 text-slate"}`}>
               {isVerifiedSession
-                ? "✅ Verified session — counts for Leaderboard!"
-                : `ℹ️ ${!faceVerificationEnabled && !appBlockerEnabled ? "Both toggles off" : !faceVerificationEnabled ? "Face Verification off" : "App Blocker off"}. Study data is saved to your personal stats.`}
+                ? "âœ… Verified session â€” counts for Leaderboard!"
+                : `â„¹ï¸ ${!faceVerificationEnabled && !appBlockerEnabled ? "Both toggles off" : !faceVerificationEnabled ? "Face Verification off" : "App Blocker off"}. Study data is saved to your personal stats.`}
             </div>
             <button
               onClick={handleStartSession}
               className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90"
             >
-              ▶ Start Study Timer
+              â–¶ Start Study Timer
             </button>
           </div>
         </div>
@@ -761,9 +761,9 @@ export default function StudyPage() {
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
               <h3 className="text-sm font-bold text-ink">Log Offline Study</h3>
-              <button onClick={() => setShowManualModal(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60">✕</button>
+              <button onClick={() => setShowManualModal(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60">âœ•</button>
             </div>
-            {manualError && <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2 rounded-lg">⚠️ {manualError}</p>}
+            {manualError && <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2 rounded-lg">âš ï¸ {manualError}</p>}
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">Subject</label>
               <div className="grid grid-cols-3 gap-1.5">
@@ -778,7 +778,7 @@ export default function StudyPage() {
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">Category</label>
               <div className="grid grid-cols-3 gap-1.5">
-                {[{ id: "theory", label: "🎥 Theory" }, { id: "questions", label: "✍️ Practice" }, { id: "revision", label: "🔄 Revision" }].map((item) => (
+                {[{ id: "theory", label: "ðŸŽ¥ Theory" }, { id: "questions", label: "âœï¸ Practice" }, { id: "revision", label: "ðŸ”„ Revision" }].map((item) => (
                   <button key={item.id} type="button" onClick={() => setManualTask(item.id as StudyTaskType)}
                     className={`py-1.5 rounded-lg text-[11px] font-bold border transition-all ${manualTask === item.id ? "bg-marigold/20 text-ink border-marigold shadow-xs" : "bg-paper/60 border-ink/10 text-slate"}`}>
                     {item.label}
@@ -814,8 +814,8 @@ export default function StudyPage() {
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <h3 className="text-sm font-bold text-ink flex items-center gap-2">🛡️ Enable App Blocker</h3>
-              <button onClick={() => setShowUsageSteps(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60 flex items-center justify-center">✕</button>
+              <h3 className="text-sm font-bold text-ink flex items-center gap-2">ðŸ›¡ï¸ Enable App Blocker</h3>
+              <button onClick={() => setShowUsageSteps(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60 flex items-center justify-center">âœ•</button>
             </div>
             <p className="text-[11px] text-slate leading-relaxed">
               App Blocker needs <span className="font-bold text-ink">Usage Access</span> permission to detect which apps you open and block them during study.
@@ -825,10 +825,10 @@ export default function StudyPage() {
                 onClick={() => { try { window.AppBridge!.postMessage(JSON.stringify({ action: "requestUsagePermission" })); } catch (_) {} }}
                 className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20"
               >
-                Open Settings →
+                Open Settings â†’
               </button>
               <button onClick={handleUsagePermissionGranted} className="w-full py-2.5 rounded-xl bg-ink/8 text-ink font-bold text-xs">
-                ✓ Done, I granted it
+                âœ“ Done, I granted it
               </button>
             </div>
           </div>
