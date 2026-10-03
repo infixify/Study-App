@@ -29,21 +29,30 @@ export default function LeaderboardPage() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [groups, setGroups] = useState<GroupRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const { data: authData } = await supabase.auth.getUser();
-      setCurrentUserId(authData?.user?.id ?? null);
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        setCurrentUserId(authData?.user?.id ?? null);
 
-      const [{ data: studentRows }, { data: groupRows }] = await Promise.all([
-        supabase.rpc("get_leaderboard_students"),
-        supabase.rpc("get_leaderboard_groups"),
-      ]);
+        const [studentRes, groupRes] = await Promise.all([
+          supabase.rpc("get_leaderboard_students"),
+          supabase.rpc("get_leaderboard_groups"),
+        ]);
 
-      setStudents((studentRows as StudentRow[]) ?? []);
-      setGroups((groupRows as GroupRow[]) ?? []);
-      setLoading(false);
+        if (studentRes.error) throw new Error(studentRes.error.message);
+        if (groupRes.error) throw new Error(groupRes.error.message);
+
+        setStudents((studentRes.data as StudentRow[]) ?? []);
+        setGroups((groupRes.data as GroupRow[]) ?? []);
+      } catch (e: any) {
+        setError(e?.message ?? "Failed to load leaderboard");
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);
@@ -56,7 +65,7 @@ export default function LeaderboardPage() {
         <div>
           <h1 className="font-display text-2xl text-ink">🏆 Leaderboard</h1>
           <p className="text-[11px] text-slate mt-0.5">
-            Points = streak days × 10 + this week's study hours × 5
+            Points = streak days × 10 + this week&apos;s study hours × 5
           </p>
         </div>
 
@@ -85,6 +94,17 @@ export default function LeaderboardPage() {
 
         {loading ? (
           <p className="text-center py-10 text-xs text-slate">Loading…</p>
+        ) : error ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center">
+            <p className="text-xs font-bold text-red-600 mb-1">Failed to load</p>
+            <p className="text-[10px] text-red-400">{error}</p>
+            <button
+              onClick={() => { setError(null); setLoading(true); }}
+              className="mt-3 text-xs text-teal font-semibold underline"
+            >
+              Retry
+            </button>
+          </div>
         ) : tab === "students" ? (
           <div className="flex flex-col gap-2">
             {students.length === 0 && (
@@ -160,4 +180,4 @@ export default function LeaderboardPage() {
       <BottomNav />
     </div>
   );
-            }
+}
