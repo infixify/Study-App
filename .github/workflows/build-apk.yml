@@ -542,14 +542,15 @@ jobs:
                           }
                           "requestOverlayPermission" -> {
                               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                                  Toast.makeText(applicationContext, "App info mein 'Display over other apps' allow karein", Toast.LENGTH_LONG).show()
                                   try {
-                                      val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                                      val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                           data = Uri.parse("package:$packageName")
                                           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                       }
                                       startActivity(intent)
                                   } catch (e: Exception) {
-                                      val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                      val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
                                           data = Uri.parse("package:$packageName")
                                           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                       }
