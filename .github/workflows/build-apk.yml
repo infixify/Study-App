@@ -174,6 +174,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
               <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
               <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -190,7 +191,7 @@ jobs:
           fcm_service = """
                   <service
                       android:name=".FocusBlockerService"
-                      android:foregroundServiceType="specialUse"
+                      android:foregroundServiceType="camera|specialUse"
                       android:exported="false" />
                   <receiver
                       android:name=".BootReceiver"
@@ -346,6 +347,47 @@ jobs:
       - name: Write Native Kotlin Files
         run: |
           mkdir -p prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise
+
+          python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'PY_MLKIT' > patch_mlkit.py
+          import re, os
+
+          # Patch app/build.gradle.kts to add ML Kit + CameraX
+          if os.path.exists("android/app/build.gradle.kts"):
+              with open("android/app/build.gradle.kts", "r") as f:
+                  a = f.read()
+              mlkit_deps = (
+                  "\ndependencies {\n"
+                  "    implementation(\"com.google.mlkit:face-detection:16.1.7\")\n"
+                  "    implementation(\"androidx.camera:camera-core:1.3.4\")\n"
+                  "    implementation(\"androidx.camera:camera-camera2:1.3.4\")\n"
+                  "    implementation(\"androidx.camera:camera-lifecycle:1.3.4\")\n"
+                  "    implementation(\"com.google.android.gms:play-services-tasks:18.2.0\")\n"
+                  "}\n"
+              )
+              if "mlkit:face-detection" not in a:
+                  a += mlkit_deps
+              with open("android/app/build.gradle.kts", "w") as f:
+                  f.write(a)
+          elif os.path.exists("android/app/build.gradle"):
+              with open("android/app/build.gradle", "r") as f:
+                  a = f.read()
+              mlkit_deps = (
+                  "\ndependencies {\n"
+                  "    implementation 'com.google.mlkit:face-detection:16.1.7'\n"
+                  "    implementation 'androidx.camera:camera-core:1.3.4'\n"
+                  "    implementation 'androidx.camera:camera-camera2:1.3.4'\n"
+                  "    implementation 'androidx.camera:camera-lifecycle:1.3.4'\n"
+                  "    implementation 'com.google.android.gms:play-services-tasks:18.2.0'\n"
+                  "}\n"
+              )
+              if "mlkit:face-detection" not in a:
+                  a += mlkit_deps
+              with open("android/app/build.gradle", "w") as f:
+                  f.write(a)
+          print("ML Kit + CameraX dependencies injected.")
+          PY_MLKIT
+          python3 patch_mlkit.py
+
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_MAIN_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/MainActivity.kt
           package com.prepwise.prepwise
 
@@ -383,7 +425,6 @@ jobs:
 
               private var flutterEngineRef: FlutterEngine? = null
 
-              // Broadcast receiver: FocusBlockerService -> MainActivity -> WebView bridge
               private val stopFocusReceiver = object : android.content.BroadcastReceiver() {
                   override fun onReceive(context: Context, intent: Intent) {
                       if (intent.action == "com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST") {
@@ -398,42 +439,28 @@ jobs:
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   isAppAlive = true
-                  // Hardware acceleration for ultra-smooth scrolling and transitions
                   window.setFlags(
                       WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                       WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
                   )
               }
 
-              override fun onResume() {
-                  super.onResume()
-                  isAppForeground = true
-              }
-
-              override fun onPause() {
-                  super.onPause()
-                  isAppForeground = false
-              }
+              override fun onResume() { super.onResume(); isAppForeground = true }
+              override fun onPause()  { super.onPause();  isAppForeground = false }
 
               override fun onDestroy() {
                   isAppAlive = false
                   isAppForeground = false
-                  try {
-                      unregisterReceiver(stopFocusReceiver)
-                  } catch (_: Exception) {}
+                  try { unregisterReceiver(stopFocusReceiver) } catch (_: Exception) {}
                   super.onDestroy()
               }
 
-              override fun onNewIntent(intent: Intent) {
-                  super.onNewIntent(intent)
-                  setIntent(intent)
-              }
+              override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent) }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   flutterEngineRef = flutterEngine
 
-                  // Register broadcast receiver for focus stop relay
                   val filter = IntentFilter("com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST")
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                       registerReceiver(stopFocusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -441,22 +468,17 @@ jobs:
                       registerReceiver(stopFocusReceiver, filter)
                   }
 
-                  // MainActivity Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_MAIN)
                       .setMethodCallHandler { _, _ -> }
 
-                  // Toast Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST).setMethodCallHandler { call, result ->
                       if (call.method == "showToast") {
                           val msg = call.argument<String>("message") ?: ""
                           Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
                           result.success(true)
-                      } else {
-                          result.notImplemented()
-                      }
+                      } else result.notImplemented()
                   }
 
-                  // Apps Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_APPS).setMethodCallHandler { call, result ->
                       if (call.method == "getInstalledApps") {
                           try {
@@ -471,26 +493,19 @@ jobs:
                                   })
                               }
                               result.success(arr.toString())
-                          } catch (e: Exception) {
-                              result.error("APPS_ERROR", e.message, null)
-                          }
-                      } else {
-                          result.notImplemented()
-                      }
+                          } catch (e: Exception) { result.error("APPS_ERROR", e.message, null) }
+                      } else result.notImplemented()
                   }
 
-                  // Overlay Permission Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_OVERLAY).setMethodCallHandler { call, result ->
                       when (call.method) {
-                          "canDrawOverlays" -> {
-                              val canDraw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true
-                              result.success(canDraw)
-                          }
+                          "canDrawOverlays" -> result.success(
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true
+                          )
                           "requestOverlayPermission" -> {
                               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
                                   Toast.makeText(applicationContext, "Please allow 'Display over other apps' to enable Face Verification", Toast.LENGTH_LONG).show()
-                                  val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-                                  startActivity(intent)
+                                  startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
                               }
                               result.success(true)
                           }
@@ -498,31 +513,25 @@ jobs:
                       }
                   }
 
-                  // Accessibility / Usage Access Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_BLOCKER).setMethodCallHandler { call, result ->
                       when (call.method) {
                           "isAccessibilityEnabled", "hasUsagePermission" -> result.success(hasUsageStatsPermission())
                           "openAccessibilitySettings", "openUsageSettings" -> {
-                              try {
-                                  startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                                  result.success(true)
-                              } catch (e: Exception) {
-                                  result.error("SETTINGS_ERROR", e.message, null)
-                              }
+                              try { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)); result.success(true) }
+                              catch (e: Exception) { result.error("SETTINGS_ERROR", e.message, null) }
                           }
                           "setBlockedApps", "setBlockingEnabled" -> result.success(true)
                           else -> result.notImplemented()
                       }
                   }
 
-                  // FocusBlockerService Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_FOCUS_SVC).setMethodCallHandler { call, result ->
                       when (call.method) {
                           "startFocusBlocker" -> {
-                              val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
-                              val subject = call.argument<String>("subject") ?: "General"
-                              val mode = call.argument<String>("mode") ?: "Study"
-                              val camEnabled = call.argument<Boolean>("camEnabled") ?: false
+                              val blocked      = call.argument<List<String>>("blockedApps") ?: emptyList()
+                              val subject      = call.argument<String>("subject") ?: "General"
+                              val mode         = call.argument<String>("mode") ?: "Study"
+                              val camEnabled   = call.argument<Boolean>("camEnabled") ?: false
                               val blockerEnabled = call.argument<Boolean>("blockerEnabled") ?: false
                               val intent = Intent(this, FocusBlockerService::class.java).apply {
                                   action = FocusBlockerService.ACTION_START
@@ -532,17 +541,12 @@ jobs:
                                   putExtra(FocusBlockerService.EXTRA_CAM_ENABLED, camEnabled)
                                   putExtra(FocusBlockerService.EXTRA_BLOCKER_ENABLED, blockerEnabled)
                               }
-                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                  startForegroundService(intent)
-                              } else {
-                                  startService(intent)
-                              }
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+                              else startService(intent)
                               result.success(true)
                           }
                           "stopFocusBlocker" -> {
-                              startService(Intent(this, FocusBlockerService::class.java).apply {
-                                  action = FocusBlockerService.ACTION_STOP
-                              })
+                              startService(Intent(this, FocusBlockerService::class.java).apply { action = FocusBlockerService.ACTION_STOP })
                               result.success(true)
                           }
                           "updateBlockedApps" -> {
@@ -561,30 +565,23 @@ jobs:
                               })
                               result.success(true)
                           }
-                          "getElapsedSeconds" -> {
-                              result.success(FocusBlockerService.currentElapsedSeconds)
-                          }
+                          "getElapsedSeconds" -> result.success(FocusBlockerService.currentElapsedSeconds)
                           "getPendingSession" -> {
                               val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
                               val hasPending = prefs.getBoolean("has_pending_session", false)
                               if (hasPending) {
                                   val map = HashMap<String, Any>()
                                   map["hasPending"] = true
-                                  map["seconds"] = prefs.getInt("pending_session_seconds", 0)
-                                  map["subject"] = prefs.getString("pending_session_subject", "General") ?: "General"
-                                  map["mode"] = prefs.getString("pending_session_mode", "Study") ?: "Study"
+                                  map["seconds"]   = prefs.getInt("pending_session_seconds", 0)
+                                  map["subject"]   = prefs.getString("pending_session_subject", "General") ?: "General"
+                                  map["mode"]      = prefs.getString("pending_session_mode", "Study") ?: "Study"
                                   map["timestamp"] = prefs.getLong("pending_session_timestamp", System.currentTimeMillis())
                                   prefs.edit()
-                                      .remove("has_pending_session")
-                                      .remove("pending_session_seconds")
-                                      .remove("pending_session_subject")
-                                      .remove("pending_session_mode")
-                                      .remove("pending_session_timestamp")
-                                      .apply()
+                                      .remove("has_pending_session").remove("pending_session_seconds")
+                                      .remove("pending_session_subject").remove("pending_session_mode")
+                                      .remove("pending_session_timestamp").apply()
                                   result.success(map)
-                              } else {
-                                  result.success(null)
-                              }
+                              } else result.success(null)
                           }
                           else -> result.notImplemented()
                       }
@@ -594,16 +591,12 @@ jobs:
               private fun hasUsageStatsPermission(): Boolean {
                   return try {
                       val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-                      val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                           appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
-                      } else {
-                          @Suppress("DEPRECATION")
-                          appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
-                      }
+                      else
+                          @Suppress("DEPRECATION") appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
                       mode == AppOpsManager.MODE_ALLOWED
-                  } catch (_: Exception) {
-                      false
-                  }
+                  } catch (_: Exception) { false }
               }
           }
           KT_MAIN_EOF
@@ -611,6 +604,7 @@ jobs:
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_SERVICE_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/FocusBlockerService.kt
           package com.prepwise.prepwise
 
+          import android.annotation.SuppressLint
           import android.app.Notification
           import android.app.NotificationChannel
           import android.app.NotificationManager
@@ -626,16 +620,31 @@ jobs:
           import android.os.Handler
           import android.os.IBinder
           import android.os.Looper
+          import android.os.PowerManager
           import android.provider.Settings
+          import android.util.Size
           import android.view.Gravity
           import android.view.View
           import android.view.WindowManager
           import android.widget.LinearLayout
           import android.widget.TextView
           import android.widget.Toast
+          import androidx.camera.core.CameraSelector
+          import androidx.camera.core.ImageAnalysis
+          import androidx.camera.core.ImageProxy
+          import androidx.camera.lifecycle.ProcessCameraProvider
           import androidx.core.app.NotificationCompat
+          import androidx.core.content.ContextCompat
+          import androidx.lifecycle.Lifecycle
+          import androidx.lifecycle.LifecycleOwner
+          import androidx.lifecycle.LifecycleRegistry
+          import com.google.mlkit.vision.common.InputImage
+          import com.google.mlkit.vision.face.FaceDetection
+          import com.google.mlkit.vision.face.FaceDetectorOptions
+          import java.util.concurrent.ExecutorService
+          import java.util.concurrent.Executors
 
-          class FocusBlockerService : Service() {
+          class FocusBlockerService : Service(), LifecycleOwner {
 
               companion object {
                   const val ACTION_START            = "com.prepwise.ACTION_FOCUS_START"
@@ -652,44 +661,59 @@ jobs:
                   const val NOTIF_ID                = 9901
                   const val CHANNEL_ID              = "prepwise_focus_blocker"
 
-                  // Shared elapsed seconds - readable from MainActivity for sync
                   @Volatile var currentElapsedSeconds: Int = 0
               }
 
+              // LifecycleOwner for CameraX (required to bind camera from a Service)
+              private val lifecycleRegistry = LifecycleRegistry(this)
+              override val lifecycle: Lifecycle get() = lifecycleRegistry
+
               private val handler = Handler(Looper.getMainLooper())
               private var blockedApps: List<String> = emptyList()
-              private var subject = "General"
-              private var mode = "Study"
-              private var camEnabled = false
+              private var subject   = "General"
+              private var mode      = "Study"
+              private var camEnabled    = false
               private var blockerEnabled = false
               private var camPaused = false
 
-              // Epoch timestamp-based stopwatch (eliminates drift & 2x speed bug)
+              // Epoch-based stopwatch
               private var startTimestampMs: Long = 0L
               private var pausedDurationMs: Long = 0L
-              private var pauseStartMs: Long = 0L
+              private var pauseStartMs:     Long = 0L
               private var lastReportedSecond: Int = -1
 
-              // Blocking overlay state
+              // App blocking overlay
               private var windowManager: WindowManager? = null
               private var overlayView: View? = null
               private var lastBlockedPkg: String? = null
               private val overlayDismissHandler = Handler(Looper.getMainLooper())
 
-              // Persistent floating dot overlay (strictly only shown when camEnabled is true)
-              private var dotView: View? = null
+              // Floating cam-status dot
+              private var dotView:   View? = null
               private var dotParams: WindowManager.LayoutParams? = null
+              private var dotExpanded = false
               private var camVerified = true
+
+              // ── Native CameraX + ML Kit face detection ───────────────────────────────
+              private var cameraExecutor: ExecutorService? = null
+              private var cameraProvider: ProcessCameraProvider? = null
+              // Consecutive non-detection counter (checked every ~500 ms frame tick)
+              private var nativeMissCount = 0
+              private val MAX_MISS = 3          // 3 missed frames → cam-lost
+              private val FACE_CHECK_MS = 2000L // run face detection every 2 s
+              private var lastFaceCheckMs = 0L
+
+              // WakeLock: keeps CPU alive even when screen is OFF
+              private var wakeLock: PowerManager.WakeLock? = null
 
               private val tickRunnable = object : Runnable {
                   override fun run() {
                       if (startTimestampMs > 0) {
                           val now = System.currentTimeMillis()
-                          val elapsedMs = if (camPaused) {
+                          val elapsedMs = if (camPaused)
                               (pauseStartMs - startTimestampMs - pausedDurationMs)
-                          } else {
+                          else
                               (now - startTimestampMs - pausedDurationMs)
-                          }
                           val secs = Math.max(0, (elapsedMs / 1000).toInt())
                           currentElapsedSeconds = secs
                           if (secs != lastReportedSecond) {
@@ -698,9 +722,7 @@ jobs:
                               if (camEnabled) updateDotTimer()
                           }
                       }
-                      if (blockerEnabled) {
-                          checkAndBlock()
-                      }
+                      if (blockerEnabled) checkAndBlock()
                       handler.postDelayed(this, 500)
                   }
               }
@@ -709,11 +731,28 @@ jobs:
 
               override fun onCreate() {
                   super.onCreate()
+                  lifecycleRegistry.currentState = Lifecycle.State.CREATED
                   windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
                   createNotificationChannel()
+                  acquireWakeLock()
               }
 
-              // -- Survive swipe-from-recents kill (Option 2) --------------------------------
+              // Acquire PARTIAL_WAKE_LOCK so CPU keeps running even with screen off
+              private fun acquireWakeLock() {
+                  try {
+                      val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                      wakeLock = pm.newWakeLock(
+                          PowerManager.PARTIAL_WAKE_LOCK,
+                          "PrepWise::FocusWakeLock"
+                      ).also { it.acquire(12 * 60 * 60 * 1000L) } // max 12 hours
+                  } catch (_: Exception) {}
+              }
+
+              private fun releaseWakeLock() {
+                  try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
+                  wakeLock = null
+              }
+
               override fun onTaskRemoved(rootIntent: Intent?) {
                   super.onTaskRemoved(rootIntent)
                   if (currentElapsedSeconds > 0) {
@@ -729,59 +768,63 @@ jobs:
                           applicationContext, 1, restartIntent,
                           android.app.PendingIntent.FLAG_ONE_SHOT or android.app.PendingIntent.FLAG_IMMUTABLE
                       )
-                      val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
-                      alarmManager.set(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                          android.os.SystemClock.elapsedRealtime() + 500, pi)
+                      (getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager)
+                          .set(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                              android.os.SystemClock.elapsedRealtime() + 500, pi)
                   }
               }
 
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
                   when (intent?.action) {
                       ACTION_START -> {
-                          val apps = intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: arrayListOf()
-                          blockedApps = apps.toList()
-                          subject = intent.getStringExtra(EXTRA_SUBJECT) ?: "General"
-                          mode = intent.getStringExtra(EXTRA_MODE) ?: "Study"
-                          camEnabled = intent.getBooleanExtra(EXTRA_CAM_ENABLED, false)
+                          val apps       = intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: arrayListOf()
+                          blockedApps    = apps.toList()
+                          subject        = intent.getStringExtra(EXTRA_SUBJECT) ?: "General"
+                          mode           = intent.getStringExtra(EXTRA_MODE) ?: "Study"
+                          camEnabled     = intent.getBooleanExtra(EXTRA_CAM_ENABLED, false)
                           blockerEnabled = intent.getBooleanExtra(EXTRA_BLOCKER_ENABLED, false)
 
-                          startTimestampMs = System.currentTimeMillis()
-                          pausedDurationMs = 0L
-                          pauseStartMs = 0L
+                          startTimestampMs   = System.currentTimeMillis()
+                          pausedDurationMs   = 0L
+                          pauseStartMs       = 0L
                           lastReportedSecond = -1
                           currentElapsedSeconds = 0
-                          camPaused = false
+                          camPaused  = false
                           camVerified = true
+                          nativeMissCount = 0
+                          lastFaceCheckMs = 0L
 
                           startForeground(NOTIF_ID, buildNotification())
                           handler.removeCallbacks(tickRunnable)
                           handler.post(tickRunnable)
 
-                          // Point 5: ONLY show floating dot if camera verification toggle is ON!
-                          if (camEnabled && canDrawOverlay()) {
-                              showFloatingDot()
+                          // Lifecycle to STARTED so CameraX can bind
+                          lifecycleRegistry.currentState = Lifecycle.State.STARTED
+
+                          if (camEnabled) {
+                              startNativeFaceDetection()
+                              if (canDrawOverlay()) showFloatingDot()
                           } else {
                               removeFloatingDot()
                           }
                       }
                       ACTION_STOP_REQUEST -> {
-                          if (MainActivity.isAppForeground) {
-                              sendStopRequestToWebApp()
-                          } else {
-                              directBackgroundStopAndLog()
-                          }
+                          if (MainActivity.isAppForeground) sendStopRequestToWebApp()
+                          else directBackgroundStopAndLog()
                       }
                       ACTION_STOP -> {
                           handler.removeCallbacks(tickRunnable)
+                          stopNativeFaceDetection()
                           removeOverlay()
                           removeFloatingDot()
                           startTimestampMs = 0L
                           currentElapsedSeconds = 0
-                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                          lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+                          releaseWakeLock()
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
                               stopForeground(STOP_FOREGROUND_REMOVE)
-                          } else {
+                          else
                               @Suppress("DEPRECATION") stopForeground(true)
-                          }
                           stopSelf()
                       }
                       ACTION_UPDATE_BLOCKED -> {
@@ -789,33 +832,113 @@ jobs:
                           blockedApps = apps.toList()
                       }
                       ACTION_SET_CAM_STATUS -> {
+                          // This action is now only used as fallback from web; native detection drives cam status
                           val status = intent.getStringExtra(EXTRA_CAM_STATUS) ?: "verified"
-                          val wasPaused = camPaused
-                          camPaused = status != "verified"
-                          camVerified = !camPaused
-
-                          val now = System.currentTimeMillis()
-                          if (!wasPaused && camPaused) {
-                              pauseStartMs = now
-                          } else if (wasPaused && !camPaused) {
-                              pausedDurationMs += (now - pauseStartMs)
-                          }
-
-                          if (camEnabled) updateFloatingDotColor()
-                          updateNotification()
+                          applyCamStatus(status == "verified")
                       }
                   }
                   return START_STICKY
               }
 
-              // -- Core blocking logic -----------------------------------------------------
+              // ── Native Face Detection via CameraX + ML Kit ──────────────────────────
+
+              @SuppressLint("UnsafeOptInUsageError")
+              private fun startNativeFaceDetection() {
+                  cameraExecutor = Executors.newSingleThreadExecutor()
+                  val options = FaceDetectorOptions.Builder()
+                      .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                      .setMinFaceSize(0.15f)
+                      .build()
+                  val detector = FaceDetection.getClient(options)
+
+                  val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+                  cameraProviderFuture.addListener({
+                      try {
+                          cameraProvider = cameraProviderFuture.get()
+
+                          val imageAnalysis = ImageAnalysis.Builder()
+                              .setTargetResolution(Size(320, 240))
+                              .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                              .build()
+
+                          imageAnalysis.setAnalyzer(cameraExecutor!!) { imageProxy ->
+                              val now = System.currentTimeMillis()
+                              // Only run ML Kit face detection every FACE_CHECK_MS to save battery
+                              if (now - lastFaceCheckMs < FACE_CHECK_MS) {
+                                  imageProxy.close()
+                                  return@setAnalyzer
+                              }
+                              lastFaceCheckMs = now
+
+                              @SuppressLint("UnsafeOptInUsageError")
+                              val mediaImage = imageProxy.image
+                              if (mediaImage != null) {
+                                  val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                                  detector.process(image)
+                                      .addOnSuccessListener { faces ->
+                                          val faceFound = faces.isNotEmpty()
+                                          handler.post { handleFaceResult(faceFound) }
+                                          imageProxy.close()
+                                      }
+                                      .addOnFailureListener {
+                                          imageProxy.close()
+                                      }
+                              } else {
+                                  imageProxy.close()
+                              }
+                          }
+
+                          cameraProvider?.unbindAll()
+                          cameraProvider?.bindToLifecycle(
+                              this,
+                              CameraSelector.DEFAULT_FRONT_CAMERA,
+                              imageAnalysis
+                          )
+                      } catch (e: Exception) {
+                          // Camera unavailable — don't crash, just skip face detection
+                      }
+                  }, ContextCompat.getMainExecutor(this))
+              }
+
+              private fun handleFaceResult(faceFound: Boolean) {
+                  if (!camEnabled) return
+                  if (faceFound) {
+                      nativeMissCount = 0
+                      if (camPaused) applyCamStatus(true)   // resume
+                  } else {
+                      nativeMissCount++
+                      if (nativeMissCount >= MAX_MISS && !camPaused) applyCamStatus(false) // pause
+                  }
+              }
+
+              private fun applyCamStatus(verified: Boolean) {
+                  val wasPaused = camPaused
+                  camPaused   = !verified
+                  camVerified  = verified
+                  val now = System.currentTimeMillis()
+                  if (!wasPaused && camPaused) {
+                      pauseStartMs = now
+                  } else if (wasPaused && !camPaused) {
+                      pausedDurationMs += (now - pauseStartMs)
+                  }
+                  if (camEnabled) updateFloatingDotColor()
+                  updateNotification()
+              }
+
+              private fun stopNativeFaceDetection() {
+                  try { cameraProvider?.unbindAll() } catch (_: Exception) {}
+                  cameraExecutor?.shutdown()
+                  cameraExecutor = null
+                  cameraProvider = null
+              }
+
+              // ── App Blocking ─────────────────────────────────────────────────────────
 
               private fun checkAndBlock() {
                   if (!blockerEnabled || !hasUsagePermission()) return
                   val foreground = getForegroundPackage() ?: return
 
                   if (foreground == packageName) {
-                      // User is in PrepWise - remove blocking overlay, keep single unified native dot visible
                       if (overlayView != null) removeOverlay()
                       if (camEnabled && canDrawOverlay()) showDotView()
                       return
@@ -823,19 +946,15 @@ jobs:
 
                   if (foreground == "com.android.systemui" || foreground == "com.android.launcher" ||
                       foreground.startsWith("com.google.android.inputmethod")) {
-                      if (camEnabled) showDotView() // show dot on launcher/sysui too
+                      if (camEnabled) showDotView()
                       return
                   }
 
                   if (blockedApps.contains(foreground)) {
-                      if (camEnabled) hideDotView() // blocking overlay covers everything - dot not needed
-                      if (canDrawOverlay()) {
-                          showBlockingOverlay(foreground)
-                      } else {
-                          redirectToPrepWise()
-                      }
+                      if (camEnabled) hideDotView()
+                      if (canDrawOverlay()) showBlockingOverlay(foreground)
+                      else redirectToPrepWise()
                   } else {
-                      // Allowed app - show dot as reminder
                       if (overlayView != null) removeOverlay()
                       if (camEnabled) showDotView()
                   }
@@ -845,254 +964,120 @@ jobs:
                   Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
 
               private fun showBlockingOverlay(blockedPkg: String) {
-                  if (overlayView != null && lastBlockedPkg == blockedPkg) return // already showing for same app
+                  if (overlayView != null && lastBlockedPkg == blockedPkg) return
                   removeOverlay()
                   lastBlockedPkg = blockedPkg
 
                   val appName = try {
-                      packageManager.getApplicationLabel(
-                          packageManager.getApplicationInfo(blockedPkg, 0)
-                      ).toString()
+                      packageManager.getApplicationLabel(packageManager.getApplicationInfo(blockedPkg, 0)).toString()
                   } catch (e: Exception) { blockedPkg }
 
-                  // Build a full-screen overlay layout programmatically
                   val layout = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       gravity = Gravity.CENTER
-                      setBackgroundColor(Color.parseColor("#EF0F172A")) // dark navy, semi-opaque
+                      setBackgroundColor(Color.parseColor("#EF0F172A"))
                       setPadding(64, 64, 64, 64)
                   }
-
-                  val lockIcon = TextView(this).apply {
-                      text = "\uD83D\uDD12" // lock emoji
-                      textSize = 56f
-                      gravity = Gravity.CENTER
-                      setTextColor(Color.WHITE)
-                  }
-
-                  val titleText = TextView(this).apply {
-                      text = "Focus Mode Active"
-                      textSize = 22f
-                      setTextColor(Color.WHITE)
-                      gravity = Gravity.CENTER
-                      typeface = android.graphics.Typeface.DEFAULT_BOLD
-                      setPadding(0, 24, 0, 12)
-                  }
-
-                  val bodyText = TextView(this).apply {
-                      text = "\"$appName\" is blocked during your study session.\nStay focused - you are doing great!"
-                      textSize = 15f
-                      setTextColor(Color.parseColor("#94A3B8"))
-                      gravity = Gravity.CENTER
-                      setPadding(0, 0, 0, 40)
-                  }
-
+                  layout.addView(TextView(this).apply { text = "\uD83D\uDD12"; textSize = 56f; gravity = Gravity.CENTER; setTextColor(Color.WHITE) })
+                  layout.addView(TextView(this).apply { text = "Focus Mode Active"; textSize = 22f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD; setPadding(0, 24, 0, 12) })
+                  layout.addView(TextView(this).apply { text = "\"$appName\" is blocked during your study session.\nStay focused - you are doing great!"; textSize = 15f; setTextColor(Color.parseColor("#94A3B8")); gravity = Gravity.CENTER; setPadding(0, 0, 0, 40) })
                   val returnBtn = TextView(this).apply {
-                      text = "Return to PrepWise \u2192"
-                      textSize = 16f
-                      setTextColor(Color.WHITE)
-                      gravity = Gravity.CENTER
-                      setPadding(48, 28, 48, 28)
-                      background = android.graphics.drawable.GradientDrawable().apply {
-                          setColor(Color.parseColor("#0D9488")) // teal
-                          cornerRadius = 36f
-                      }
-                      setOnClickListener {
-                          removeOverlay()
-                          redirectToPrepWise()
-                      }
+                      text = "Return to PrepWise \u2192"; textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; setPadding(48, 28, 48, 28)
+                      background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.parseColor("#0D9488")); cornerRadius = 36f }
+                      setOnClickListener { redirectToPrepWise(); removeOverlay() }
                   }
-
-                  layout.addView(lockIcon)
-                  layout.addView(titleText)
-                  layout.addView(bodyText)
                   layout.addView(returnBtn)
 
                   val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                  else
-                      @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+                  else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
 
                   val params = WindowManager.LayoutParams(
-                      WindowManager.LayoutParams.MATCH_PARENT,
-                      WindowManager.LayoutParams.MATCH_PARENT,
+                      WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                       overlayType,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                          WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                       PixelFormat.TRANSLUCENT
-                  ).apply {
-                      gravity = Gravity.TOP or Gravity.START
-                      x = 0; y = 0
-                  }
-
+                  )
                   try {
                       windowManager?.addView(layout, params)
                       overlayView = layout
-                      // No auto-redirect - user taps "Return to PrepWise" when ready
-                  } catch (e: Exception) {
-                      // WindowManager failed - fall back to redirect
-                      redirectToPrepWise()
-                  }
+                      overlayDismissHandler.postDelayed({ if (lastBlockedPkg == blockedPkg) removeOverlay() }, 4000)
+                  } catch (_: Exception) {}
               }
 
               private fun removeOverlay() {
-                  overlayDismissHandler.removeCallbacksAndMessages(null)
-                  overlayView?.let {
-                      try { windowManager?.removeView(it) } catch (_: Exception) {}
-                      overlayView = null
-                      lastBlockedPkg = null
-                  }
+                  overlayView?.let { try { windowManager?.removeView(it) } catch (_: Exception) {} }
+                  overlayView = null
+                  lastBlockedPkg = null
               }
 
-              // -- Floating Dot (Interactive, draggable, expandable) --------------------
+              // ── Floating Dot ─────────────────────────────────────────────────────────
 
-              // Dot has two states: compact (44dp circle) and expanded (card with timer + stop)
-              private var dotExpanded = false
-
-              private fun buildDotView(): android.widget.FrameLayout {
+              private fun buildDotView(): View {
                   val density = resources.displayMetrics.density
-                  val dotPx = (44 * density).toInt()
 
                   val container = android.widget.FrameLayout(this)
 
-                  // -- Compact circle --
-                  val compactView = android.widget.FrameLayout(this).apply {
-                      val circle = android.view.View(this@FocusBlockerService).apply {
-                          background = android.graphics.drawable.GradientDrawable().apply {
-                              shape = android.graphics.drawable.GradientDrawable.OVAL
-                              setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
-                              setStroke((3 * density).toInt(), Color.parseColor("#1E293B"))
-                          }
-                      }
-                      addView(circle, android.widget.FrameLayout.LayoutParams(dotPx, dotPx))
-                  }
-                  compactView.tag = "compact"
-                  container.addView(compactView, android.widget.FrameLayout.LayoutParams(dotPx, dotPx))
-
-                  // -- Expanded card --
-                  val cardWidth = (260 * density).toInt()
-                  val expandedCard = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                      background = android.graphics.drawable.GradientDrawable().apply {
-                          setColor(Color.parseColor("#F01E293B"))
-                          cornerRadius = 18 * density
-                          setStroke((2 * density).toInt(), Color.parseColor("#0D9488"))
-                      }
-                      setPadding((14 * density).toInt(), (14 * density).toInt(), (14 * density).toInt(), (14 * density).toInt())
-                      visibility = View.GONE
-                      elevation = 12 * density
-                  }
-                  expandedCard.tag = "expanded"
-
-                  // Header row: dot + title + close
-                  val headerRow = android.widget.RelativeLayout(this)
-                  val statusDot = android.view.View(this).apply {
+                  // Compact circle
+                  val compact = android.widget.FrameLayout(this).apply { tag = "compact" }
+                  val circle = View(this).apply {
                       background = android.graphics.drawable.GradientDrawable().apply {
                           shape = android.graphics.drawable.GradientDrawable.OVAL
                           setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
                       }
-                      id = android.view.View.generateViewId()
                   }
-                  statusDot.tag = "statusDot"
-                  val sdSize = (10 * density).toInt()
-                  val sdParams = android.widget.RelativeLayout.LayoutParams(sdSize, sdSize)
-                  sdParams.addRule(android.widget.RelativeLayout.ALIGN_PARENT_START)
-                  sdParams.addRule(android.widget.RelativeLayout.CENTER_VERTICAL)
-                  headerRow.addView(statusDot, sdParams)
-
-                  val titleTv = TextView(this).apply {
-                      text = "Focus: $subject"
-                      textSize = 12f
-                      setTextColor(Color.WHITE)
-                      typeface = android.graphics.Typeface.DEFAULT_BOLD
-                      id = android.view.View.generateViewId()
-                      setPadding((14 * density).toInt(), 0, 0, 0)
-                  }
-                  titleTv.tag = "titleTv"
-                  val titleParams = android.widget.RelativeLayout.LayoutParams(
-                      android.widget.RelativeLayout.LayoutParams.WRAP_CONTENT,
-                      android.widget.RelativeLayout.LayoutParams.WRAP_CONTENT
-                  )
-                  titleParams.addRule(android.widget.RelativeLayout.CENTER_VERTICAL)
-                  titleParams.addRule(android.widget.RelativeLayout.END_OF, statusDot.id)
-                  headerRow.addView(titleTv, titleParams)
-
-                  val closeTv = TextView(this).apply {
-                      text = "\u2715"
-                      textSize = 14f
-                      setTextColor(Color.parseColor("#94A3B8"))
-                      gravity = Gravity.CENTER
-                      id = android.view.View.generateViewId()
-                  }
-                  val closeParams = android.widget.RelativeLayout.LayoutParams(
-                      (28 * density).toInt(), (28 * density).toInt()
-                  )
-                  closeParams.addRule(android.widget.RelativeLayout.ALIGN_PARENT_END)
-                  closeParams.addRule(android.widget.RelativeLayout.CENTER_VERTICAL)
-                  closeTv.setOnClickListener { collapseNativeDot() }
-                  headerRow.addView(closeTv, closeParams)
-
-                  val headerLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (32 * density).toInt())
-                  expandedCard.addView(headerRow, headerLp)
-
-                  // Timer display
+                  val px44 = (44 * density).toInt()
+                  compact.addView(circle, android.widget.FrameLayout.LayoutParams(px44, px44))
                   val timerTv = TextView(this).apply {
-                      text = formatElapsed(currentElapsedSeconds)
-                      textSize = 28f
+                      tag = "timerTv"
+                      text = "00:00"
+                      textSize = 8f
                       setTextColor(Color.WHITE)
                       gravity = Gravity.CENTER
                       typeface = android.graphics.Typeface.MONOSPACE
-                      setPadding(0, (8 * density).toInt(), 0, (4 * density).toInt())
                   }
-                  timerTv.tag = "timerTv"
-                  expandedCard.addView(timerTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                  compact.addView(timerTv, android.widget.FrameLayout.LayoutParams(px44, px44))
+                  container.addView(compact, android.widget.FrameLayout.LayoutParams(px44, px44))
 
-                  // Mode + cam status row
-                  val statusTv = TextView(this).apply {
-                      text = if (camVerified) "\u2713 $mode - Cam Verified" else "\u23F8 $mode - Cam Lost"
-                      textSize = 10f
-                      setTextColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
-                      gravity = Gravity.CENTER
-                      setPadding(0, 0, 0, (10 * density).toInt())
+                  // Expanded card
+                  val cardWidth = (260 * density).toInt()
+                  val expandedCard = LinearLayout(this).apply {
+                      tag = "expanded"; orientation = LinearLayout.VERTICAL; visibility = View.GONE
+                      setBackgroundColor(Color.parseColor("#F01E293B")); setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
+                      background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.parseColor("#F01E293B")); cornerRadius = 16 * density }
                   }
-                  statusTv.tag = "statusTv"
-                  expandedCard.addView(statusTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                  val subjectTv = TextView(this).apply { text = "\uD83C\uDFAF $subject | $mode"; textSize = 13f; setTextColor(Color.WHITE); typeface = android.graphics.Typeface.DEFAULT_BOLD; setPadding(0, 0, 0, (4 * density).toInt()) }
+                  expandedCard.addView(subjectTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-                  // Stop Focus Mode button
+                  val expandTimerTv = TextView(this).apply { tag = "timerTv"; text = formatElapsed(currentElapsedSeconds); textSize = 28f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; typeface = android.graphics.Typeface.MONOSPACE; setPadding(0, 0, 0, (8 * density).toInt()) }
+                  expandedCard.addView(expandTimerTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+                  val statusDot = View(this).apply {
+                      tag = "statusDot"
+                      val sz = (8 * density).toInt()
+                      background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444")) }
+                      val lp = LinearLayout.LayoutParams(sz, sz)
+                      lp.gravity = Gravity.CENTER_VERTICAL; layoutParams = lp
+                  }
+                  val statusRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, (10 * density).toInt()) }
+                  statusRow.addView(statusDot)
+                  val statusTv = TextView(this).apply { tag = "statusTv"; text = if (camVerified) "\u2713 $mode - Cam Verified" else "\u23F8 $mode - Cam Lost"; textSize = 10f; setTextColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444")); setPadding((6 * density).toInt(), 0, 0, 0) }
+                  statusRow.addView(statusTv)
+                  expandedCard.addView(statusRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
                   val stopBtn = TextView(this).apply {
-                      text = "Stop Focus Mode"
-                      textSize = 12f
-                      setTextColor(Color.WHITE)
-                      gravity = Gravity.CENTER
+                      text = "Stop Focus Mode"; textSize = 12f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
                       setPadding((16 * density).toInt(), (10 * density).toInt(), (16 * density).toInt(), (10 * density).toInt())
-                      background = android.graphics.drawable.GradientDrawable().apply {
-                          setColor(Color.parseColor("#DC2626"))
-                          cornerRadius = 10 * density
-                      }
+                      background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.parseColor("#DC2626")); cornerRadius = 10 * density }
                       typeface = android.graphics.Typeface.DEFAULT_BOLD
-                      setOnClickListener {
-                          if (MainActivity.isAppForeground) {
-                              sendStopRequestToWebApp()
-                          } else {
-                              directBackgroundStopAndLog()
-                          }
-                      }
+                      setOnClickListener { if (MainActivity.isAppForeground) sendStopRequestToWebApp() else directBackgroundStopAndLog() }
                   }
                   expandedCard.addView(stopBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-                  // Hint
-                  val hintTv = TextView(this).apply {
-                      text = "Drag anywhere"
-                      textSize = 9f
-                      setTextColor(Color.parseColor("#475569"))
-                      gravity = Gravity.CENTER
-                      setPadding(0, (6 * density).toInt(), 0, 0)
-                  }
+                  val hintTv = TextView(this).apply { text = "Drag anywhere"; textSize = 9f; setTextColor(Color.parseColor("#475569")); gravity = Gravity.CENTER; setPadding(0, (6 * density).toInt(), 0, 0) }
                   expandedCard.addView(hintTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
                   container.addView(expandedCard, android.widget.FrameLayout.LayoutParams(cardWidth, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
-
                   return container
               }
 
@@ -1104,14 +1089,13 @@ jobs:
               private fun expandNativeDot() {
                   dotExpanded = true
                   val container = dotView ?: return
-                  container.findViewWithTag<android.view.View>("compact")?.visibility = View.GONE
-                  container.findViewWithTag<android.view.View>("expanded")?.visibility = View.VISIBLE
-                  // Resize WindowManager params to fit card
+                  container.findViewWithTag<View>("compact")?.visibility  = View.GONE
+                  container.findViewWithTag<View>("expanded")?.visibility = View.VISIBLE
                   dotParams?.let { p ->
-                      val density = resources.displayMetrics.density
-                      p.width = (260 * density).toInt()
+                      val d = resources.displayMetrics.density
+                      p.width  = (260 * d).toInt()
                       p.height = android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-                      p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                      p.flags  = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
                       try { windowManager?.updateViewLayout(container, p) } catch (_: Exception) {}
                   }
               }
@@ -1119,12 +1103,12 @@ jobs:
               private fun collapseNativeDot() {
                   dotExpanded = false
                   val container = dotView ?: return
-                  container.findViewWithTag<android.view.View>("compact")?.visibility = View.VISIBLE
-                  container.findViewWithTag<android.view.View>("expanded")?.visibility = View.GONE
+                  container.findViewWithTag<View>("compact")?.visibility  = View.VISIBLE
+                  container.findViewWithTag<View>("expanded")?.visibility = View.GONE
                   val px = (44 * resources.displayMetrics.density).toInt()
                   dotParams?.let { p ->
-                      p.width = px; p.height = px
-                      p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                      p.width  = px; p.height = px
+                      p.flags  = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                       try { windowManager?.updateViewLayout(container, p) } catch (_: Exception) {}
                   }
               }
@@ -1133,77 +1117,44 @@ jobs:
                   if (dotView != null) return
                   val density = resources.displayMetrics.density
                   val px = (44 * density).toInt()
-
                   val dot = buildDotView()
 
-                  // Touch: tap = expand/collapse, drag = reposition
                   var startX = 0f; var startY = 0f
                   var initialX = 0; var initialY = 0
                   var moved = false
                   dot.setOnTouchListener { v, event ->
                       val p = dotParams ?: return@setOnTouchListener false
                       when (event.action) {
-                          android.view.MotionEvent.ACTION_DOWN -> {
-                              startX = event.rawX; startY = event.rawY
-                              initialX = p.x; initialY = p.y
-                              moved = false; true
-                          }
+                          android.view.MotionEvent.ACTION_DOWN -> { startX = event.rawX; startY = event.rawY; initialX = p.x; initialY = p.y; moved = false; true }
                           android.view.MotionEvent.ACTION_MOVE -> {
-                              val dx = (event.rawX - startX).toInt()
-                              val dy = (event.rawY - startY).toInt()
-                              if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
-                                  moved = true
-                                  p.x = initialX + dx; p.y = initialY + dy
-                                  try { windowManager?.updateViewLayout(v, p) } catch (_: Exception) {}
-                              }
+                              val dx = (event.rawX - startX).toInt(); val dy = (event.rawY - startY).toInt()
+                              if (Math.abs(dx) > 8 || Math.abs(dy) > 8) { moved = true; p.x = initialX + dx; p.y = initialY + dy; try { windowManager?.updateViewLayout(v, p) } catch (_: Exception) {} }
                               true
                           }
-                          android.view.MotionEvent.ACTION_UP -> {
-                              if (!moved) {
-                                  if (dotExpanded) collapseNativeDot() else expandNativeDot()
-                              }
-                              true
-                          }
+                          android.view.MotionEvent.ACTION_UP -> { if (!moved) { if (dotExpanded) collapseNativeDot() else expandNativeDot() }; true }
                           else -> false
                       }
                   }
 
                   val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                  else
-                      @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+                  else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
 
-                  val params = WindowManager.LayoutParams(
-                      px, px, overlayType,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                  val params = WindowManager.LayoutParams(px, px, overlayType,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                       PixelFormat.TRANSLUCENT
-                  ).apply {
-                      gravity = Gravity.TOP or Gravity.START
-                      x = 24; y = 180
-                  }
+                  ).apply { gravity = Gravity.TOP or Gravity.START; x = 24; y = 180 }
 
-                  try {
-                      windowManager?.addView(dot, params)
-                      dotView = dot
-                      dotParams = params
-                  } catch (_: Exception) {}
+                  try { windowManager?.addView(dot, params); dotView = dot; dotParams = params } catch (_: Exception) {}
               }
 
               private fun updateFloatingDotColor() {
                   val container = dotView ?: return
                   val color = if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444")
-                  // Update compact circle color
                   val compact = container.findViewWithTag<android.widget.FrameLayout>("compact")
                   (compact?.getChildAt(0)?.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
-                  // Update expanded status dot + text
-                  container.findViewWithTag<android.view.View>("statusDot")?.let {
-                      (it.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
-                  }
-                  container.findViewWithTag<TextView>("statusTv")?.let {
-                      it.text = if (camVerified) "\u2713 $mode - Cam Verified" else "\u23F8 $mode - Cam Lost"
-                      it.setTextColor(color)
-                  }
+                  container.findViewWithTag<View>("statusDot")?.let { (it.background as? android.graphics.drawable.GradientDrawable)?.setColor(color) }
+                  container.findViewWithTag<TextView>("statusTv")?.let { it.text = if (camVerified) "\u2713 $mode - Cam Verified" else "\u23F8 $mode - Cam Lost"; it.setTextColor(color) }
               }
 
               private fun updateDotTimer() {
@@ -1216,16 +1167,11 @@ jobs:
                       ?: run { if (canDrawOverlay()) showFloatingDot() }
               }
 
-              private fun hideDotView() {
-                  dotView?.visibility = View.GONE
-              }
+              private fun hideDotView() { dotView?.visibility = View.GONE }
 
               private fun removeFloatingDot() {
-                  dotView?.let {
-                      try { windowManager?.removeView(it) } catch (_: Exception) {}
-                      dotView = null
-                      dotParams = null
-                  }
+                  dotView?.let { try { windowManager?.removeView(it) } catch (_: Exception) {} }
+                  dotView = null; dotParams = null
               }
 
               private fun redirectToPrepWise() {
@@ -1234,21 +1180,13 @@ jobs:
                   startActivity(launch)
               }
 
-              // -- Helpers -----------------------------------------------------------------
-
               private fun getForegroundPackage(): String? {
                   return try {
                       val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
                       val now = System.currentTimeMillis()
                       val events = usm.queryEvents(now - 2000, now)
-                      val event = UsageEvents.Event()
-                      var pkg: String? = null
-                      while (events.hasNextEvent()) {
-                          events.getNextEvent(event)
-                          if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
-                              pkg = event.packageName
-                          }
-                      }
+                      val event = UsageEvents.Event(); var pkg: String? = null
+                      while (events.hasNextEvent()) { events.getNextEvent(event); if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) pkg = event.packageName }
                       pkg
                   } catch (e: Exception) { null }
               }
@@ -1264,60 +1202,30 @@ jobs:
                   } catch (e: Exception) { false }
               }
 
-              // -- Notification -------------------------------------------------------------
-
               private fun buildNotification(): Notification {
                   val e = currentElapsedSeconds
-                  val h = e / 3600
-                  val m = (e % 3600) / 60
-                  val s = e % 60
-                  val time = if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
-
-                  // Exact 4-State Notification Specification
+                  val time = formatElapsed(e)
                   val (title, text, buttonLabel) = when {
-                      !camEnabled && !blockerEnabled -> Triple(
-                          "Focus: $subject | $mode  $time",
-                          "Live study timer running. Tap to open PrepWise.",
-                          "Stop Timer"
-                      )
-                      camEnabled && !blockerEnabled -> Triple(
-                          "Focus: $subject | $mode  $time",
-                          if (camPaused) "Face not detected • Timer paused" else "Face under detection • Timer running",
-                          "Stop Timer"
-                      )
-                      !camEnabled && blockerEnabled -> Triple(
-                          "Focus: $subject | $mode  $time",
-                          "App blocking is enabled. Tap to open PrepWise.",
-                          "Stop Focus Mode"
-                      )
-                      else -> Triple(
-                          "Focus: $subject | $mode  $time",
-                          (if (camPaused) "Face not detected" else "Face under detection") + " • App blocking is ON",
-                          "Stop Session"
-                      )
+                      !camEnabled && !blockerEnabled -> Triple("Focus: $subject | $mode  $time", "Live study timer running. Tap to open PrepWise.", "Stop Timer")
+                      camEnabled && !blockerEnabled  -> Triple("Focus: $subject | $mode  $time", if (camPaused) "Face not detected \u2022 Timer paused" else "Face under detection \u2022 Timer running", "Stop Timer")
+                      !camEnabled && blockerEnabled  -> Triple("Focus: $subject | $mode  $time", "App blocking is enabled. Tap to open PrepWise.", "Stop Focus Mode")
+                      else -> Triple("Focus: $subject | $mode  $time", (if (camPaused) "Face not detected" else "Face detected") + " \u2022 App blocking ON", "Stop Session")
                   }
-
-                  val openIntent = Intent(this, MainActivity::class.java).apply {
-                      flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                  }
+                  val openIntent = Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP }
                   val pi = PendingIntent.getActivity(this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                   val stopReqIntent = Intent(this, FocusBlockerService::class.java).apply { action = ACTION_STOP_REQUEST }
                   val stopPi = PendingIntent.getService(this, 1, stopReqIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                   return NotificationCompat.Builder(this, CHANNEL_ID)
                       .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-                      .setContentTitle(title)
-                      .setContentText(text)
-                      .setContentIntent(pi)
-                      .setOngoing(true)
-                      .setOnlyAlertOnce(true)
+                      .setContentTitle(title).setContentText(text).setContentIntent(pi)
+                      .setOngoing(true).setOnlyAlertOnce(true)
                       .setPriority(NotificationCompat.PRIORITY_LOW)
                       .addAction(android.R.drawable.ic_delete, buttonLabel, stopPi)
                       .build()
               }
 
               private fun updateNotification() {
-                  val nm = getSystemService(NotificationManager::class.java)
-                  nm.notify(NOTIF_ID, buildNotification())
+                  getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification())
               }
 
               private fun createNotificationChannel() {
@@ -1330,23 +1238,18 @@ jobs:
                   }
               }
 
-              // -- Stop Request -> Web App ------------------------------------------------
-              // When user taps Stop while app is foreground, signal the web app via broadcast.
               private fun sendStopRequestToWebApp() {
                   val intent = Intent("com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST")
                   intent.setPackage(packageName)
                   sendBroadcast(intent)
               }
 
-              // Task 3: When user taps Stop while app is killed, dead, or background:
-              // Directly stop service & notification, save session to SharedPreferences, and show toast.
-              // NEVER launch MainActivity or redirect!
               private fun directBackgroundStopAndLog() {
                   handler.removeCallbacks(tickRunnable)
+                  stopNativeFaceDetection()
                   removeOverlay()
                   removeFloatingDot()
                   val elapsed = currentElapsedSeconds
-
                   try {
                       val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
                       prefs.edit()
@@ -1357,33 +1260,30 @@ jobs:
                           .putLong("pending_session_timestamp", System.currentTimeMillis())
                           .apply()
                   } catch (_: Exception) {}
-
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                      stopForeground(STOP_FOREGROUND_REMOVE)
-                  } else {
-                      @Suppress("DEPRECATION") stopForeground(true)
-                  }
-
-                  val mins = elapsed / 60
-                  val secs = elapsed % 60
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
+                  else @Suppress("DEPRECATION") stopForeground(true)
+                  val mins = elapsed / 60; val secs = elapsed % 60
                   val timeLabel = if (mins > 0) "${mins}m ${secs}s" else "${secs}s"
                   Toast.makeText(applicationContext, "Study session stopped & saved ($timeLabel logged)!", Toast.LENGTH_LONG).show()
-
-                  currentElapsedSeconds = 0
-                  startTimestampMs = 0L
+                  currentElapsedSeconds = 0; startTimestampMs = 0L
+                  releaseWakeLock()
                   stopSelf()
               }
 
               override fun onDestroy() {
                   handler.removeCallbacks(tickRunnable)
                   overlayDismissHandler.removeCallbacksAndMessages(null)
+                  stopNativeFaceDetection()
                   removeOverlay()
                   removeFloatingDot()
                   currentElapsedSeconds = 0
+                  lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+                  releaseWakeLock()
                   super.onDestroy()
               }
           }
           KT_SERVICE_EOF
+
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_BOOT_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/BootReceiver.kt
           package com.prepwise.prepwise
