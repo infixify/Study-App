@@ -52,12 +52,6 @@ function nativeToAppItem(n: { name: string; packageName: string }): AppItem {
 }
 
 const SYNC_INTERVAL_SECONDS = 60;
-const FACE_API_MODEL_URL = "https://justadudewhohacks.github.io/face-api.js/models";
-const PRESENCE_CHECK_INTERVAL_SECONDS = 2;
-const MAX_CONSECUTIVE_MISSES = 3;
-const PRESENCE_LOG_INTERVAL_SECONDS = 60;
-const LIVENESS_CHALLENGE_INTERVAL_SECONDS = 1200;
-const LIVENESS_CHALLENGE_WINDOW_SECONDS = 20;
 
 export default function StudyPage() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -107,22 +101,8 @@ export default function StudyPage() {
   const [usageGranted, setUsageGranted] = useState(false);
   const [showUsageSteps, setShowUsageSteps] = useState(false);
 
-  // Camera / face-api state
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [presencePaused, setPresencePaused] = useState(false);
-  const [livenessPromptOpen, setLivenessPromptOpen] = useState(false);
-  const [livenessSecondsLeft, setLivenessSecondsLeft] = useState(LIVENESS_CHALLENGE_WINDOW_SECONDS);
-
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const faceapiRef = useRef<any>(null);
-  const presenceIntervalRef = useRef<any>(null);
-  const missedChecksRef = useRef(0);
-  const lastPresenceLogSecondsRef = useRef(0);
-  const livenessIntervalRef = useRef<any>(null);
-  const livenessCountdownRef = useRef<any>(null);
-  const sessionIdRef = useRef<string | null>(null);
+  // Native cam status (driven by Kotlin FocusBlockerService — no face-api.js)
+  const [nativeCamPaused, setNativeCamPaused] = useState(false);
 
   const availableSubjects: SubjectType[] =
     targetExam === "NEET"
@@ -169,7 +149,6 @@ export default function StudyPage() {
     });
   }
 
-  // 1. Direct Stop without popup
   const handleDirectStopAndSave = async () => {
     if (typeof window !== "undefined" && window.AppBridge) {
       try {
@@ -181,7 +160,7 @@ export default function StudyPage() {
 
     const duration = seconds;
     setIsActive(false);
-    if (faceVerificationEnabled) cleanupVerifiedMode();
+    setNativeCamPaused(false);
 
     if (!userId || !startTime) {
       setSeconds(0);
@@ -212,17 +191,9 @@ export default function StudyPage() {
     }
 
     if (typeof window !== "undefined") {
-      // Direct stop action from Notification
-      window.onNativeDirectStopFocus = () => {
-        handleDirectStopAndSave();
-      };
-      window.onNativeRequestStopFocus = () => {
-        handleDirectStopAndSave();
-      };
-      window.onNativeFocusTimerSync = (secs: number) => {
-        setSeconds(secs);
-      };
-      // Option 2 Restore
+      window.onNativeDirectStopFocus = () => { handleDirectStopAndSave(); };
+      window.onNativeRequestStopFocus = () => { handleDirectStopAndSave(); };
+      window.onNativeFocusTimerSync = (secs: number) => { setSeconds(secs); };
       window.onNativeRestoreActiveSession = (sess) => {
         if (sess && sess.elapsedSeconds > 0) {
           setIsActive(true);
@@ -253,9 +224,7 @@ export default function StudyPage() {
         .eq("uid", user.id)
         .maybeSingle();
 
-      if (profile?.target_exam) {
-        setTargetExam(profile.target_exam);
-      }
+      if (profile?.target_exam) setTargetExam(profile.target_exam);
 
       try {
         const streakInfo = await loadAndReconcileStreak(user.id);
@@ -291,26 +260,20 @@ export default function StudyPage() {
     checkUsagePermission();
   }, [isNativeApp]);
 
-  // Point 1: Cam toggle with overlay redirect & toast
   async function handleFaceToggle() {
     const next = !faceVerificationEnabled;
     if (next) {
       if (isNativeApp) {
         const granted = await checkOverlayPermission();
         if (!granted) {
-          try {
-            window.AppBridge!.postMessage(JSON.stringify({ action: "requestOverlayPermission" }));
-          } catch (_) {}
+          try { window.AppBridge!.postMessage(JSON.stringify({ action: "requestOverlayPermission" })); } catch (_) {}
           let tries = 0;
           const poll = setInterval(async () => {
             tries++;
             const g = await checkOverlayPermission();
             if (g || tries > 30) {
               clearInterval(poll);
-              if (g) {
-                setFaceVerificationEnabled(true);
-                localStorage.setItem("prepwise_face_toggle", "true");
-              }
+              if (g) { setFaceVerificationEnabled(true); localStorage.setItem("prepwise_face_toggle", "true"); }
             }
           }, 1000);
           return;
@@ -329,10 +292,7 @@ export default function StudyPage() {
     if (next) {
       if (isNativeApp) {
         const granted = await checkUsagePermission();
-        if (!granted) {
-          setShowUsageSteps(true);
-          return;
-        }
+        if (!granted) { setShowUsageSteps(true); return; }
       }
       setAppBlockerEnabled(true);
       localStorage.setItem("prepwise_blocker_toggle", "true");
@@ -361,11 +321,8 @@ export default function StudyPage() {
       : [...allowedApps, appId];
     setAllowedApps(updated);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
-
     if (isActive && appBlockerEnabled && typeof window !== "undefined" && window.AppBridge) {
-      try {
-        window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: updated }));
-      } catch (err) {}
+      try { window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: updated })); } catch (err) {}
     }
   };
 
@@ -373,9 +330,7 @@ export default function StudyPage() {
     setAllowedApps([]);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify([]));
     if (isActive && appBlockerEnabled && typeof window !== "undefined" && window.AppBridge) {
-      try {
-        window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: [] }));
-      } catch (err) {}
+      try { window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: [] })); } catch (err) {}
     }
   };
 
@@ -407,13 +362,14 @@ export default function StudyPage() {
   }
 
   useEffect(() => {
-    if (isActive && !presencePaused) {
+    // Timer driven by native service sync when native; JS interval as fallback on web
+    if (isActive) {
       timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
-  }, [isActive, presencePaused]);
+  }, [isActive]);
 
   useEffect(() => {
     if (isActive) {
@@ -429,103 +385,7 @@ export default function StudyPage() {
     return () => clearInterval(syncIntervalRef.current);
   }, [isActive, userId, selectedTask]);
 
-  async function loadFaceModels() {
-    if (faceapiRef.current) return faceapiRef.current;
-    setModelsLoading(true);
-    try {
-      const faceapi = await import("face-api.js");
-      await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_API_MODEL_URL);
-      faceapiRef.current = faceapi;
-      return faceapi;
-    } finally {
-      setModelsLoading(false);
-    }
-  }
-
-  async function startCamera(): Promise<boolean> {
-    try {
-      if (typeof window !== "undefined" && window.AppBridge) {
-        try { window.AppBridge.postMessage(JSON.stringify({ action: "requestCamera" })); } catch (_) {}
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setCameraError(null);
-      return true;
-    } catch (e: any) {
-      setCameraError("Camera permission required for Face Verification.");
-      return false;
-    }
-  }
-
-  function stopCamera() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-  }
-
-  async function runPresenceCheck() {
-    const faceapi = faceapiRef.current;
-    if (!faceapi || !videoRef.current || videoRef.current.readyState < 2) return;
-    let detected = false;
-    try {
-      const result = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 128, scoreThreshold: 0.4 }));
-      detected = !!result;
-    } catch (e) { detected = false; }
-
-    if (detected) {
-      missedChecksRef.current = 0;
-      setPresencePaused((prev) => {
-        if (prev) {
-          if (typeof window !== "undefined" && window.AppBridge) {
-            try { window.AppBridge.postMessage(JSON.stringify({ action: "updateCamStatus", status: "verified" })); } catch (_) {}
-          }
-          return false;
-        }
-        return prev;
-      });
-    } else {
-      missedChecksRef.current += 1;
-      if (missedChecksRef.current >= MAX_CONSECUTIVE_MISSES) {
-        setPresencePaused((prev) => {
-          if (!prev) {
-            if (typeof window !== "undefined" && window.AppBridge) {
-              try { window.AppBridge.postMessage(JSON.stringify({ action: "updateCamStatus", status: "lost" })); } catch (_) {}
-            }
-            return true;
-          }
-          return prev;
-        });
-      }
-    }
-  }
-
-  function cleanupVerifiedMode() {
-    if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
-    if (livenessIntervalRef.current) clearInterval(livenessIntervalRef.current);
-    if (livenessCountdownRef.current) clearInterval(livenessCountdownRef.current);
-    stopCamera();
-    setLivenessPromptOpen(false);
-    setPresencePaused(false);
-    sessionIdRef.current = null;
-  }
-
   const handleStartSession = async () => {
-    if (faceVerificationEnabled) {
-      setCameraError(null);
-      const camOk = await startCamera();
-      if (!camOk) return;
-      await loadFaceModels();
-      missedChecksRef.current = 0;
-      lastPresenceLogSecondsRef.current = 0;
-      sessionIdRef.current = `${Date.now()}`;
-      presenceIntervalRef.current = setInterval(runPresenceCheck, PRESENCE_CHECK_INTERVAL_SECONDS * 1000);
-    }
-
     if (typeof window !== "undefined" && window.AppBridge) {
       try {
         window.AppBridge.postMessage(JSON.stringify({
@@ -546,7 +406,7 @@ export default function StudyPage() {
     lastSyncedSecondsRef.current = 0;
     setStartTime(new Date());
     setIsActive(true);
-    setPresencePaused(false);
+    setNativeCamPaused(false);
     setPostStreakResult(null);
   };
 
@@ -560,12 +420,10 @@ export default function StudyPage() {
       const newTheory = (dailyRow?.theory_minutes || 0) + (manualTask === "theory" ? manualMinutes : 0);
       const newPractice = (dailyRow?.practice_minutes || 0) + (manualTask === "questions" ? manualMinutes : 0);
       const newRevision = (dailyRow?.revision_minutes || 0) + (manualTask === "revision" ? manualMinutes : 0);
-
       await supabase.from("daily_logs").upsert(
         { user_id: userId, log_date: manualDate, study_time_minutes: newMins, theory_minutes: newTheory, practice_minutes: newPractice, revision_minutes: newRevision },
         { onConflict: "user_id,log_date" }
       );
-
       const today = new Date().toISOString().split("T")[0];
       if (manualDate === today && newMins * 60 >= MIN_STREAK_SECONDS) {
         const syntheticEnd = new Date();
@@ -573,7 +431,6 @@ export default function StudyPage() {
         const streakResult = await saveFocusSession(userId, syntheticStart, syntheticEnd);
         if (streakResult.countedForStreak) setCurrentStreak(streakResult.newStreak);
       }
-
       setSaving(false);
       setShowManualModal(false);
     } catch (err) {
@@ -605,7 +462,6 @@ export default function StudyPage() {
   return (
     <div className="min-h-screen bg-paper pb-28">
       <AppHeader />
-      <video ref={videoRef} muted playsInline className="hidden" />
 
       <main className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-5">
         {/* Header */}
@@ -636,26 +492,22 @@ export default function StudyPage() {
             <span className="text-xl">{postStreakResult.counted ? "🔥" : "⏱️"}</span>
             <div>
               <p className="text-xs font-bold text-ink">
-                {postStreakResult.counted ? `Streak updated: ${postStreakResult.newStreak} day${postStreakResult.newStreak !== 1 ? "s" : ""}!` : "Session saved & logged ✓ (min 2 min for streak count)"}
+                {postStreakResult.counted
+                  ? `Streak updated: ${postStreakResult.newStreak} day${postStreakResult.newStreak !== 1 ? "s" : ""}!`
+                  : "Session saved & logged ✓ (min 2 min for streak count)"}
               </p>
             </div>
           </div>
         )}
 
-        {/* Presence paused banner */}
-        {isActive && presencePaused && (
+        {/* Native cam-paused banner — status driven by Kotlin, not face-api.js */}
+        {isActive && faceVerificationEnabled && nativeCamPaused && (
           <div className="rounded-ticket border border-coral/30 bg-coral/10 px-4 py-3 flex items-center gap-3">
             <span className="text-xl">⏸️</span>
             <div>
-              <p className="text-xs font-bold text-ink">Paused — we can't see you</p>
+              <p className="text-xs font-bold text-ink">Paused — face not detected</p>
               <p className="text-[10px] text-slate">Come back into camera view to resume your timer.</p>
             </div>
-          </div>
-        )}
-
-        {cameraError && (
-          <div className="rounded-ticket border border-coral/30 bg-coral/10 px-4 py-3">
-            <p className="text-xs font-bold text-ink">⚠️ {cameraError}</p>
           </div>
         )}
 
@@ -663,7 +515,7 @@ export default function StudyPage() {
         <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
           <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2 flex items-center gap-1.5">
             {isActive && faceVerificationEnabled && (
-              <span className={`inline-block w-2 h-2 rounded-full ${presencePaused ? "bg-coral animate-pulse" : "bg-teal"}`} />
+              <span className={`inline-block w-2 h-2 rounded-full ${nativeCamPaused ? "bg-coral animate-pulse" : "bg-teal"}`} />
             )}
             {isActive ? `🔥 Studying ${selectedSub} (${selectedTask})` : "Ready to focus?"}
           </div>
@@ -710,9 +562,9 @@ export default function StudyPage() {
                   <p className="text-[10px] text-slate mt-0.5 leading-relaxed">
                     {faceVerificationEnabled
                       ? overlayGranted
-                        ? "✓ Active — timer pauses if you leave"
+                        ? "✓ Active — native cam tracking, works in background"
                         : "⏳ Please allow 'Display over other apps'..."
-                      : "Camera confirms you're present. Nothing recorded or uploaded."}
+                      : "Native camera confirms you're present. Works even when screen is off."}
                   </p>
                 </div>
               </div>
@@ -764,7 +616,6 @@ export default function StudyPage() {
                     <span>Manage Allowed Apps</span>
                   </button>
                 </div>
-
                 {allowedApps.length > 0 && (
                   <div className="flex flex-wrap gap-1 pt-0.5">
                     {allowedApps.map((id) => {
@@ -772,9 +623,7 @@ export default function StudyPage() {
                       return (
                         <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[10px] font-bold">
                           <span>{app.icon} {app.name}</span>
-                          <button type="button" onClick={() => toggleAppAllowed(id)} className="hover:text-rose-500 ml-0.5 font-bold">
-                            ✕
-                          </button>
+                          <button type="button" onClick={() => toggleAppAllowed(id)} className="hover:text-rose-500 ml-0.5 font-bold">✕</button>
                         </span>
                       );
                     })}
@@ -802,7 +651,6 @@ export default function StudyPage() {
               </div>
               <button onClick={() => setShowAppsModal(false)} className="w-7 h-7 rounded-full bg-ink/5 text-xs text-ink/70 flex items-center justify-center font-bold">✕</button>
             </div>
-
             <div className="relative">
               <input
                 type="text"
@@ -813,17 +661,12 @@ export default function StudyPage() {
               />
               <span className="absolute left-2.5 top-2.5 text-slate/50 text-xs">🔍</span>
             </div>
-
             <div className="flex items-center justify-between gap-2">
               <p className="text-[11px] text-slate font-medium">Tap app to Whitelist/Block:</p>
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    const allIds = filteredApps.map((a) => a.id);
-                    setAllowedApps(allIds);
-                    localStorage.setItem("prepwise_allowed_apps", JSON.stringify(allIds));
-                  }}
+                  onClick={() => { const allIds = filteredApps.map((a) => a.id); setAllowedApps(allIds); localStorage.setItem("prepwise_allowed_apps", JSON.stringify(allIds)); }}
                   className="text-[10px] font-bold text-teal bg-teal/10 px-2 py-1 rounded-lg border border-teal/20"
                 >
                   Select All
@@ -835,7 +678,6 @@ export default function StudyPage() {
                 )}
               </div>
             </div>
-
             <div className="overflow-y-auto flex-1 pr-1">
               {!appsLoaded ? (
                 <p className="text-[11px] text-slate text-center py-6">Loading apps…</p>
@@ -854,16 +696,13 @@ export default function StudyPage() {
                       >
                         <span className="text-base">{app.icon}</span>
                         <span className="truncate flex-1 text-left">{app.name}</span>
-                        <span className={`text-[11px] font-black ${isAllowed ? "text-teal" : "text-rose-500"}`}>
-                          {isAllowed ? "✓" : "⛔"}
-                        </span>
+                        <span className={`text-[11px] font-black ${isAllowed ? "text-teal" : "text-rose-500"}`}>{isAllowed ? "✓" : "⛔"}</span>
                       </button>
                     );
                   })}
                 </div>
               )}
             </div>
-
             <button type="button" onClick={() => setShowAppsModal(false)} className="w-full py-3 rounded-xl bg-ink text-white font-bold text-xs shadow-md">
               Save Allowed Apps ({allowedApps.length} Allowed)
             </button>
@@ -901,19 +740,16 @@ export default function StudyPage() {
                 ))}
               </div>
             </div>
-
             <div className={`rounded-xl px-3 py-2.5 border text-[10px] leading-relaxed ${isVerifiedSession ? "bg-teal/8 border-teal/25 text-teal" : "bg-ink/5 border-ink/10 text-slate"}`}>
               {isVerifiedSession
                 ? "✅ Verified session — counts for Leaderboard!"
                 : `ℹ️ ${!faceVerificationEnabled && !appBlockerEnabled ? "Both toggles off" : !faceVerificationEnabled ? "Face Verification off" : "App Blocker off"}. Study data is saved to your personal stats.`}
             </div>
-
             <button
               onClick={handleStartSession}
-              disabled={modelsLoading}
-              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90 disabled:opacity-50"
+              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90"
             >
-              {modelsLoading ? "Loading camera check…" : "▶ Start Study Timer"}
+              ▶ Start Study Timer
             </button>
           </div>
         </div>
@@ -978,9 +814,7 @@ export default function StudyPage() {
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <h3 className="text-sm font-bold text-ink flex items-center gap-2">
-                🛡️ Enable App Blocker
-              </h3>
+              <h3 className="text-sm font-bold text-ink flex items-center gap-2">🛡️ Enable App Blocker</h3>
               <button onClick={() => setShowUsageSteps(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60 flex items-center justify-center">✕</button>
             </div>
             <p className="text-[11px] text-slate leading-relaxed">
@@ -988,17 +822,12 @@ export default function StudyPage() {
             </p>
             <div className="space-y-2">
               <button
-                onClick={() => {
-                  try { window.AppBridge!.postMessage(JSON.stringify({ action: "requestUsagePermission" })); } catch (_) {}
-                }}
+                onClick={() => { try { window.AppBridge!.postMessage(JSON.stringify({ action: "requestUsagePermission" })); } catch (_) {} }}
                 className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20"
               >
                 Open Settings →
               </button>
-              <button
-                onClick={handleUsagePermissionGranted}
-                className="w-full py-2.5 rounded-xl bg-ink/8 text-ink font-bold text-xs"
-              >
+              <button onClick={handleUsagePermissionGranted} className="w-full py-2.5 rounded-xl bg-ink/8 text-ink font-bold text-xs">
                 ✓ Done, I granted it
               </button>
             </div>
