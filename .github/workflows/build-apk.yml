@@ -3467,8 +3467,7 @@ jobs:
             Timer? _syncTimer;
             static const _appsChannel = MethodChannel('com.prepwise/apps');
 
-            static const String appUrl = "https://study-app-infixify1.vercel.app";
-
+            static String get appUrl => "https://study-app-infixify1.vercel.app?v=${DateTime.now().millisecondsSinceEpoch}";
             @override
             void initState() {
               super.initState();
@@ -3851,7 +3850,6 @@ jobs:
                 AndroidWebViewController.enableDebugging(false);
                 final androidController = controller.platform as AndroidWebViewController;
                 androidController.setMediaPlaybackRequiresUserGesture(false);
-                androidController.setCacheMode(WebCacheMode.noCache);
               }
 
               _controller = controller;
