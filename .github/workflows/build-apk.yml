@@ -424,12 +424,12 @@ jobs:
 
           class MainActivity : FlutterActivity() {
               companion object {
-                  const val CHANNEL_APPS      = "com.prepwise/apps"
-                  const val CHANNEL_TOAST     = "com.prepwise/toast"
-                  const val CHANNEL_OVERLAY   = "com.prepwise/overlay"
-                  const val CHANNEL_BLOCKER   = "com.prepwise/accessibility"
+                  const val CHANNEL_APPS = "com.prepwise/apps"
+                  const val CHANNEL_TOAST = "com.prepwise/toast"
+                  const val CHANNEL_OVERLAY = "com.prepwise/overlay"
+                  const val CHANNEL_BLOCKER = "com.prepwise/accessibility"
                   const val CHANNEL_FOCUS_SVC = "com.prepwise/focusblocker"
-                  const val CHANNEL_MAIN      = "com.prepwise/mainactivity"
+                  const val CHANNEL_MAIN = "com.prepwise/mainactivity"
 
                   @Volatile var isAppForeground: Boolean = false
                   @Volatile var isAppAlive: Boolean = false
@@ -437,6 +437,7 @@ jobs:
 
               private var flutterEngineRef: FlutterEngine? = null
 
+              // Broadcast receiver: FocusBlockerService -> MainActivity -> WebView bridge
               private val stopFocusReceiver = object : android.content.BroadcastReceiver() {
                   override fun onReceive(context: Context, intent: Intent) {
                       if (intent.action == "com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST") {
@@ -451,28 +452,42 @@ jobs:
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   isAppAlive = true
+                  // Hardware acceleration for ultra-smooth scrolling and transitions
                   window.setFlags(
                       WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                       WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
                   )
               }
 
-              override fun onResume() { super.onResume(); isAppForeground = true }
-              override fun onPause()  { super.onPause();  isAppForeground = false }
+              override fun onResume() {
+                  super.onResume()
+                  isAppForeground = true
+              }
+
+              override fun onPause() {
+                  super.onPause()
+                  isAppForeground = false
+              }
 
               override fun onDestroy() {
                   isAppAlive = false
                   isAppForeground = false
-                  try { unregisterReceiver(stopFocusReceiver) } catch (_: Exception) {}
+                  try {
+                      unregisterReceiver(stopFocusReceiver)
+                  } catch (_: Exception) {}
                   super.onDestroy()
               }
 
-              override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent) }
+              override fun onNewIntent(intent: Intent) {
+                  super.onNewIntent(intent)
+                  setIntent(intent)
+              }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   flutterEngineRef = flutterEngine
 
+                  // Register broadcast receiver for focus stop relay
                   val filter = IntentFilter("com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST")
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                       registerReceiver(stopFocusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -480,17 +495,22 @@ jobs:
                       registerReceiver(stopFocusReceiver, filter)
                   }
 
+                  // MainActivity Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_MAIN)
                       .setMethodCallHandler { _, _ -> }
 
+                  // Toast Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST).setMethodCallHandler { call, result ->
                       if (call.method == "showToast") {
                           val msg = call.argument<String>("message") ?: ""
                           Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
                           result.success(true)
-                      } else result.notImplemented()
+                      } else {
+                          result.notImplemented()
+                      }
                   }
 
+                  // Apps Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_APPS).setMethodCallHandler { call, result ->
                       if (call.method == "getInstalledApps") {
                           try {
@@ -505,19 +525,29 @@ jobs:
                                   })
                               }
                               result.success(arr.toString())
-                          } catch (e: Exception) { result.error("APPS_ERROR", e.message, null) }
-                      } else result.notImplemented()
+                          } catch (e: Exception) {
+                              result.error("APPS_ERROR", e.message, null)
+                          }
+                      } else {
+                          result.notImplemented()
+                      }
                   }
 
+                  // Overlay Permission Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_OVERLAY).setMethodCallHandler { call, result ->
                       when (call.method) {
-                          "canDrawOverlays" -> result.success(
-                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true
-                          )
+                          "canDrawOverlays" -> {
+                              val canDraw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true
+                              result.success(canDraw)
+                          }
                           "requestOverlayPermission" -> {
                               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                                  Toast.makeText(applicationContext, "Please allow 'Display over other apps' to enable Face Verification", Toast.LENGTH_LONG).show()
-                                  startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                                  Toast.makeText(applicationContext, "App Info mein 'Display over other apps' allow karein", Toast.LENGTH_LONG).show()
+                                  val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                      data = Uri.parse("package:$packageName")
+                                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                  }
+                                  startActivity(intent)
                               }
                               result.success(true)
                           }
@@ -525,25 +555,31 @@ jobs:
                       }
                   }
 
+                  // Accessibility / Usage Access Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_BLOCKER).setMethodCallHandler { call, result ->
                       when (call.method) {
                           "isAccessibilityEnabled", "hasUsagePermission" -> result.success(hasUsageStatsPermission())
                           "openAccessibilitySettings", "openUsageSettings" -> {
-                              try { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)); result.success(true) }
-                              catch (e: Exception) { result.error("SETTINGS_ERROR", e.message, null) }
+                              try {
+                                  startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                                  result.success(true)
+                              } catch (e: Exception) {
+                                  result.error("SETTINGS_ERROR", e.message, null)
+                              }
                           }
                           "setBlockedApps", "setBlockingEnabled" -> result.success(true)
                           else -> result.notImplemented()
                       }
                   }
 
+                  // FocusBlockerService Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_FOCUS_SVC).setMethodCallHandler { call, result ->
                       when (call.method) {
                           "startFocusBlocker" -> {
-                              val blocked      = call.argument<List<String>>("blockedApps") ?: emptyList()
-                              val subject      = call.argument<String>("subject") ?: "General"
-                              val mode         = call.argument<String>("mode") ?: "Study"
-                              val camEnabled   = call.argument<Boolean>("camEnabled") ?: false
+                              val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
+                              val subject = call.argument<String>("subject") ?: "General"
+                              val mode = call.argument<String>("mode") ?: "Study"
+                              val camEnabled = call.argument<Boolean>("camEnabled") ?: false
                               val blockerEnabled = call.argument<Boolean>("blockerEnabled") ?: false
                               val intent = Intent(this, FocusBlockerService::class.java).apply {
                                   action = FocusBlockerService.ACTION_START
@@ -553,12 +589,17 @@ jobs:
                                   putExtra(FocusBlockerService.EXTRA_CAM_ENABLED, camEnabled)
                                   putExtra(FocusBlockerService.EXTRA_BLOCKER_ENABLED, blockerEnabled)
                               }
-                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
-                              else startService(intent)
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                  startForegroundService(intent)
+                              } else {
+                                  startService(intent)
+                              }
                               result.success(true)
                           }
                           "stopFocusBlocker" -> {
-                              startService(Intent(this, FocusBlockerService::class.java).apply { action = FocusBlockerService.ACTION_STOP })
+                              startService(Intent(this, FocusBlockerService::class.java).apply {
+                                  action = FocusBlockerService.ACTION_STOP
+                              })
                               result.success(true)
                           }
                           "updateBlockedApps" -> {
@@ -577,23 +618,54 @@ jobs:
                               })
                               result.success(true)
                           }
-                          "getElapsedSeconds" -> result.success(FocusBlockerService.currentElapsedSeconds)
+                          "getElapsedSeconds" -> {
+                              result.success(FocusBlockerService.currentElapsedSeconds)
+                          }
+                          "getActiveSession" -> {
+                              val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                              val running = FocusBlockerService.isRunning || prefs.getBoolean("is_service_running", false)
+                              val elapsed = FocusBlockerService.currentElapsedSeconds
+                              if (running && elapsed >= 0) {
+                                  val map = HashMap<String, Any>()
+                                  map["isActive"] = true
+                                  map["elapsedSeconds"] = elapsed
+                                  map["subject"] = FocusBlockerService.currentSubject.ifEmpty { prefs.getString("active_subject", "General") ?: "General" }
+                                  map["mode"] = FocusBlockerService.currentMode.ifEmpty { prefs.getString("active_mode", "Study") ?: "Study" }
+                                  map["camEnabled"] = FocusBlockerService.currentCamEnabled || prefs.getBoolean("active_cam_enabled", false)
+                                  map["blockerEnabled"] = FocusBlockerService.currentBlockerEnabled || prefs.getBoolean("active_blocker_enabled", false)
+                                  result.success(map)
+                              } else {
+                                  val map = HashMap<String, Any>()
+                                  map["isActive"] = false
+                                  map["elapsedSeconds"] = 0
+                                  result.success(map)
+                              }
+                          }
                           "getPendingSession" -> {
                               val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
                               val hasPending = prefs.getBoolean("has_pending_session", false)
                               if (hasPending) {
                                   val map = HashMap<String, Any>()
                                   map["hasPending"] = true
-                                  map["seconds"]   = prefs.getInt("pending_session_seconds", 0)
-                                  map["subject"]   = prefs.getString("pending_session_subject", "General") ?: "General"
-                                  map["mode"]      = prefs.getString("pending_session_mode", "Study") ?: "Study"
+                                  map["seconds"] = prefs.getInt("pending_session_seconds", 0)
+                                  map["subject"] = prefs.getString("pending_session_subject", "General") ?: "General"
+                                  map["mode"] = prefs.getString("pending_session_mode", "Study") ?: "Study"
+                                  map["camEnabled"] = prefs.getBoolean("pending_session_cam_enabled", false)
+                                  map["blockerEnabled"] = prefs.getBoolean("pending_session_blocker_enabled", false)
                                   map["timestamp"] = prefs.getLong("pending_session_timestamp", System.currentTimeMillis())
                                   prefs.edit()
-                                      .remove("has_pending_session").remove("pending_session_seconds")
-                                      .remove("pending_session_subject").remove("pending_session_mode")
-                                      .remove("pending_session_timestamp").apply()
+                                      .remove("has_pending_session")
+                                      .remove("pending_session_seconds")
+                                      .remove("pending_session_subject")
+                                      .remove("pending_session_mode")
+                                      .remove("pending_session_cam_enabled")
+                                      .remove("pending_session_blocker_enabled")
+                                      .remove("pending_session_timestamp")
+                                      .apply()
                                   result.success(map)
-                              } else result.success(null)
+                              } else {
+                                  result.success(null)
+                              }
                           }
                           else -> result.notImplemented()
                       }
@@ -603,12 +675,16 @@ jobs:
               private fun hasUsageStatsPermission(): Boolean {
                   return try {
                       val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-                      val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                      val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                           appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
-                      else
-                          @Suppress("DEPRECATION") appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
+                      } else {
+                          @Suppress("DEPRECATION")
+                          appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
+                      }
                       mode == AppOpsManager.MODE_ALLOWED
-                  } catch (_: Exception) { false }
+                  } catch (_: Exception) {
+                      false
+                  }
               }
           }
           KT_MAIN_EOF
@@ -616,57 +692,52 @@ jobs:
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_SERVICE_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/FocusBlockerService.kt
           package com.prepwise.prepwise
 
-          import android.annotation.SuppressLint
+          import android.Manifest
           import android.app.Notification
           import android.app.NotificationChannel
           import android.app.NotificationManager
           import android.app.PendingIntent
           import android.app.Service
-          import android.app.usage.UsageEvents
           import android.app.usage.UsageStatsManager
           import android.content.Context
           import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.content.pm.ServiceInfo
           import android.graphics.Color
           import android.graphics.PixelFormat
+          import android.graphics.SurfaceTexture
+          import android.hardware.camera2.CameraCaptureSession
+          import android.hardware.camera2.CameraCharacteristics
+          import android.hardware.camera2.CameraDevice
+          import android.hardware.camera2.CameraManager
+          import android.hardware.camera2.CaptureRequest
+          import android.hardware.camera2.CaptureResult
+          import android.hardware.camera2.TotalCaptureResult
+          import android.net.Uri
           import android.os.Build
           import android.os.Handler
+          import android.os.HandlerThread
           import android.os.IBinder
           import android.os.Looper
-          import android.os.PowerManager
           import android.provider.Settings
-          import android.util.Size
           import android.view.Gravity
+          import android.view.Surface
           import android.view.View
           import android.view.WindowManager
+          import android.widget.FrameLayout
           import android.widget.LinearLayout
           import android.widget.TextView
           import android.widget.Toast
-          import androidx.camera.core.CameraSelector
-          import androidx.camera.core.ImageAnalysis
-          import androidx.camera.core.ImageProxy
-          import androidx.camera.lifecycle.ProcessCameraProvider
           import androidx.core.app.NotificationCompat
-          import androidx.core.content.ContextCompat
-          import androidx.lifecycle.Lifecycle
-          import androidx.lifecycle.LifecycleOwner
-          import androidx.lifecycle.LifecycleRegistry
-          import com.google.mlkit.vision.common.InputImage
-          import com.google.mlkit.vision.face.FaceDetection
-          import com.google.mlkit.vision.face.FaceDetectorOptions
-          import java.util.concurrent.ExecutorService
-          import java.util.concurrent.Executors
 
-          class FocusBlockerService : Service(), LifecycleOwner {
+          class FocusBlockerService : Service() {
 
               companion object {
                   const val ACTION_START            = "com.prepwise.ACTION_FOCUS_START"
-                  const val ACTION_RESUME           = "com.prepwise.ACTION_FOCUS_RESUME"
                   const val ACTION_STOP             = "com.prepwise.ACTION_FOCUS_STOP"
                   const val ACTION_STOP_REQUEST     = "com.prepwise.ACTION_FOCUS_STOP_REQUEST"
                   const val ACTION_UPDATE_BLOCKED   = "com.prepwise.ACTION_UPDATE_BLOCKED"
                   const val ACTION_SET_CAM_STATUS   = "com.prepwise.ACTION_SET_CAM_STATUS"
-
-                  @Volatile var isStopping: Boolean = false
                   const val EXTRA_BLOCKED_APPS      = "blocked_apps"
                   const val EXTRA_SUBJECT           = "subject"
                   const val EXTRA_MODE              = "mode"
@@ -676,59 +747,60 @@ jobs:
                   const val NOTIF_ID                = 9901
                   const val CHANNEL_ID              = "prepwise_focus_blocker"
 
+                  // Shared elapsed seconds and session state - readable from MainActivity for sync
+                  @Volatile var isRunning: Boolean = false
                   @Volatile var currentElapsedSeconds: Int = 0
+                  @Volatile var currentSubject: String = "General"
+                  @Volatile var currentMode: String = "Study"
+                  @Volatile var currentCamEnabled: Boolean = false
+                  @Volatile var currentBlockerEnabled: Boolean = false
               }
-
-              // LifecycleOwner for CameraX (required to bind camera from a Service)
-              private val lifecycleRegistry = LifecycleRegistry(this)
-              override val lifecycle: Lifecycle get() = lifecycleRegistry
 
               private val handler = Handler(Looper.getMainLooper())
               private var blockedApps: List<String> = emptyList()
-              private var subject   = "General"
-              private var mode      = "Study"
-              private var camEnabled    = false
+              private var subject = "General"
+              private var mode = "Study"
+              private var camEnabled = false
               private var blockerEnabled = false
               private var camPaused = false
 
-              // Epoch-based stopwatch
+              // Epoch timestamp-based stopwatch (eliminates drift & 2x speed bug)
               private var startTimestampMs: Long = 0L
               private var pausedDurationMs: Long = 0L
-              private var pauseStartMs:     Long = 0L
+              private var pauseStartMs: Long = 0L
               private var lastReportedSecond: Int = -1
 
-              // App blocking overlay
+              // Blocking overlay state
               private var windowManager: WindowManager? = null
               private var overlayView: View? = null
               private var lastBlockedPkg: String? = null
               private val overlayDismissHandler = Handler(Looper.getMainLooper())
 
-              // Floating cam-status dot
-              private var dotView:   View? = null
+              // Persistent floating dot overlay (strictly only shown when camEnabled is true)
+              private var dotView: View? = null
               private var dotParams: WindowManager.LayoutParams? = null
               private var dotExpanded = false
               private var camVerified = true
 
-              // ── Native CameraX + ML Kit face detection ───────────────────────────────
-              private var cameraExecutor: ExecutorService? = null
-              private var cameraProvider: ProcessCameraProvider? = null
-              // Consecutive non-detection counter (checked every ~500 ms frame tick)
-              private var nativeMissCount = 0
-              private val MAX_MISS = 3          // 3 missed frames → cam-lost
-              private val FACE_CHECK_MS = 2000L // run face detection every 2 s
-              private var lastFaceCheckMs = 0L
-
-              // WakeLock: keeps CPU alive even when screen is OFF
-              private var wakeLock: PowerManager.WakeLock? = null
+              // Native Camera2 Face Tracker for Live Background & Swiped Face Detection
+              private var cameraThread: HandlerThread? = null
+              private var cameraHandler: Handler? = null
+              private var cameraDevice: CameraDevice? = null
+              private var captureSession: CameraCaptureSession? = null
+              private var surfaceTexture: SurfaceTexture? = null
+              private var cameraSurface: Surface? = null
+              private var isCameraRunning = false
+              private var lastFaceSeenTimestamp: Long = 0L
 
               private val tickRunnable = object : Runnable {
                   override fun run() {
                       if (startTimestampMs > 0) {
                           val now = System.currentTimeMillis()
-                          val elapsedMs = if (camPaused)
+                          val elapsedMs = if (camPaused) {
                               (pauseStartMs - startTimestampMs - pausedDurationMs)
-                          else
+                          } else {
                               (now - startTimestampMs - pausedDurationMs)
+                          }
                           val secs = Math.max(0, (elapsedMs / 1000).toInt())
                           currentElapsedSeconds = secs
                           if (secs != lastReportedSecond) {
@@ -737,7 +809,9 @@ jobs:
                               if (camEnabled) updateDotTimer()
                           }
                       }
-                      if (blockerEnabled) checkAndBlock()
+                      if (blockerEnabled) {
+                          checkAndBlock()
+                      }
                       handler.postDelayed(this, 500)
                   }
               }
@@ -746,173 +820,117 @@ jobs:
 
               override fun onCreate() {
                   super.onCreate()
-                  lifecycleRegistry.currentState = Lifecycle.State.CREATED
                   windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
                   createNotificationChannel()
-                  acquireWakeLock()
               }
 
-              // Acquire PARTIAL_WAKE_LOCK so CPU keeps running even with screen off
-              private fun acquireWakeLock() {
-                  try {
-                      val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-                      wakeLock = pm.newWakeLock(
-                          PowerManager.PARTIAL_WAKE_LOCK,
-                          "PrepWise::FocusWakeLock"
-                      ).also { it.acquire(12 * 60 * 60 * 1000L) } // max 12 hours
-                  } catch (_: Exception) {}
-              }
-
-              private fun releaseWakeLock() {
-                  try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
-                  wakeLock = null
-              }
-
+              // Survive swipe-from-recents kill only if session is actively running
               override fun onTaskRemoved(rootIntent: Intent?) {
                   super.onTaskRemoved(rootIntent)
-                  if (currentElapsedSeconds > 0 && startTimestampMs > 0) {
-                      // Save current epoch-based timer state so restart can resume without reset
-                      val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
-                      prefs.edit()
-                          .putLong("focus_start_ts", startTimestampMs)
-                          .putLong("focus_paused_duration", pausedDurationMs)
-                          .putBoolean("focus_cam_paused", camPaused)
-                          .putLong("focus_pause_start", pauseStartMs)
-                          .putBoolean("focus_was_running", true)
-                          .apply()
+                  val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                  val active = prefs.getBoolean("is_service_running", false)
+                  if (active && currentElapsedSeconds > 0) {
                       val restartIntent = Intent(applicationContext, FocusBlockerService::class.java).apply {
-                          action = ACTION_RESUME
+                          action = ACTION_START
                           putStringArrayListExtra(EXTRA_BLOCKED_APPS, ArrayList(blockedApps))
                           putExtra(EXTRA_SUBJECT, subject)
                           putExtra(EXTRA_MODE, mode)
                           putExtra(EXTRA_CAM_ENABLED, camEnabled)
                           putExtra(EXTRA_BLOCKER_ENABLED, blockerEnabled)
                       }
-                      val pi = android.app.PendingIntent.getService(
+                      val pi = PendingIntent.getService(
                           applicationContext, 1, restartIntent,
-                          android.app.PendingIntent.FLAG_ONE_SHOT or android.app.PendingIntent.FLAG_IMMUTABLE
+                          PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
                       )
-                      (getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager)
-                          .set(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                              android.os.SystemClock.elapsedRealtime() + 500, pi)
+                      val alarmMgr = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+                      alarmMgr?.set(android.app.AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1000, pi)
                   }
               }
 
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+
+                  // Prevent zombie restart if service was intentionally stopped
+                  if (intent == null) {
+                      val shouldRun = prefs.getBoolean("is_service_running", false)
+                      if (!shouldRun) {
+                          stopForegroundSafely()
+                          stopSelf()
+                          return START_NOT_STICKY
+                      }
+                  }
+
                   when (intent?.action) {
                       ACTION_START -> {
-                          if (isStopping) { isStopping = false }
-                          val apps       = intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: arrayListOf()
-                          blockedApps    = apps.toList()
-                          subject        = intent.getStringExtra(EXTRA_SUBJECT) ?: "General"
-                          mode           = intent.getStringExtra(EXTRA_MODE) ?: "Study"
-                          camEnabled     = intent.getBooleanExtra(EXTRA_CAM_ENABLED, false)
+                          blockedApps = intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: emptyList()
+                          subject = intent.getStringExtra(EXTRA_SUBJECT) ?: "General"
+                          mode = intent.getStringExtra(EXTRA_MODE) ?: "Study"
+                          camEnabled = intent.getBooleanExtra(EXTRA_CAM_ENABLED, false)
                           blockerEnabled = intent.getBooleanExtra(EXTRA_BLOCKER_ENABLED, false)
 
-                          // Only reset timer if not already running (prevent double-start reset)
-                          if (startTimestampMs == 0L) {
-                              startTimestampMs   = System.currentTimeMillis()
-                              pausedDurationMs   = 0L
-                              pauseStartMs       = 0L
-                              lastReportedSecond = -1
-                              currentElapsedSeconds = 0
-                              camPaused  = false
-                              camVerified = true
-                              nativeMissCount = 0
-                              lastFaceCheckMs = 0L
-                          }
-
-                          startForeground(NOTIF_ID, buildNotification())
-                          handler.removeCallbacks(tickRunnable)
-                          handler.post(tickRunnable)
-                          lifecycleRegistry.currentState = Lifecycle.State.STARTED
-
-                          if (camEnabled) {
-                              if (cameraProvider == null) startNativeFaceDetection()
-                              if (canDrawOverlay()) showFloatingDot()
-                          } else {
-                              removeFloatingDot()
-                          }
-                      }
-                      ACTION_RESUME -> {
-                          // Restore epoch-based timer from saved prefs (after app was killed)
-                          if (isStopping) { isStopping = false }
-                          val apps       = intent?.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: arrayListOf()
-                          blockedApps    = apps.toList()
-                          subject        = intent?.getStringExtra(EXTRA_SUBJECT) ?: "General"
-                          mode           = intent?.getStringExtra(EXTRA_MODE) ?: "Study"
-                          camEnabled     = intent?.getBooleanExtra(EXTRA_CAM_ENABLED, false) ?: false
-                          blockerEnabled = intent?.getBooleanExtra(EXTRA_BLOCKER_ENABLED, false) ?: false
-
-                          val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
-                          val savedStart = prefs.getLong("focus_start_ts", 0L)
-                          val savedPaused = prefs.getLong("focus_paused_duration", 0L)
-                          val savedCamPaused = prefs.getBoolean("focus_cam_paused", false)
-                          val savedPauseStart = prefs.getLong("focus_pause_start", 0L)
-                          prefs.edit()
-                              .remove("focus_start_ts").remove("focus_paused_duration")
-                              .remove("focus_cam_paused").remove("focus_pause_start")
-                              .remove("focus_was_running").apply()
-
-                          if (savedStart > 0L) {
-                              // Restore epoch-based timing — timer continues from where it left off
-                              startTimestampMs = savedStart
-                              pausedDurationMs = savedPaused
-                              camPaused = savedCamPaused
-                              pauseStartMs = savedPauseStart
-                              // If was cam-paused when killed, keep that pause time accumulating correctly
-                              if (camPaused && pauseStartMs == 0L) pauseStartMs = System.currentTimeMillis()
-                          } else {
-                              // Fallback: start fresh if no saved state
-                              startTimestampMs   = System.currentTimeMillis()
-                              pausedDurationMs   = 0L
-                              pauseStartMs       = 0L
-                              camPaused = false
-                          }
-                          camVerified = !camPaused
+                          startTimestampMs = System.currentTimeMillis()
+                          pausedDurationMs = 0L
+                          pauseStartMs = 0L
                           lastReportedSecond = -1
-                          nativeMissCount = 0
-                          lastFaceCheckMs = 0L
+                          currentElapsedSeconds = 0
+                          camPaused = false
+                          camVerified = true
+                          lastFaceSeenTimestamp = System.currentTimeMillis()
 
-                          startForeground(NOTIF_ID, buildNotification())
+                          isRunning = true
+                          currentSubject = subject
+                          currentMode = mode
+                          currentCamEnabled = camEnabled
+                          currentBlockerEnabled = blockerEnabled
+
+                          prefs.edit()
+                              .putBoolean("is_service_running", true)
+                              .putString("active_subject", subject)
+                              .putString("active_mode", mode)
+                              .putBoolean("active_cam_enabled", camEnabled)
+                              .putBoolean("active_blocker_enabled", blockerEnabled)
+                              .putLong("active_start_timestamp_ms", startTimestampMs)
+                              .apply()
+
+                          startForegroundSafely()
                           handler.removeCallbacks(tickRunnable)
                           handler.post(tickRunnable)
-                          lifecycleRegistry.currentState = Lifecycle.State.STARTED
 
                           if (camEnabled) {
-                              if (cameraProvider == null) startNativeFaceDetection()
-                              if (canDrawOverlay()) showFloatingDot()
+                              if (canDrawOverlay()) {
+                                  showFloatingDot()
+                              }
+                              startNativeFaceTracker()
                           } else {
                               removeFloatingDot()
+                              stopNativeFaceTracker()
                           }
                       }
                       ACTION_STOP_REQUEST -> {
-                          if (!isStopping) {
-                              if (MainActivity.isAppForeground) sendStopRequestToWebApp()
-                              else directBackgroundStopAndLog()
-                          }
+                          // Immediate 1-tap termination and logging
+                          sendStopRequestToWebApp()
+                          directBackgroundStopAndLog()
                       }
                       ACTION_STOP -> {
-                          if (isStopping) return START_NOT_STICKY
-                          isStopping = true
+                          cancelScheduledRestart()
                           handler.removeCallbacks(tickRunnable)
-                          stopNativeFaceDetection()
+                          stopNativeFaceTracker()
                           removeOverlay()
                           removeFloatingDot()
-                          // Clear any saved resume state since we are intentionally stopping
-                          val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
-                          prefs.edit()
-                              .remove("focus_start_ts").remove("focus_paused_duration")
-                              .remove("focus_cam_paused").remove("focus_pause_start")
-                              .remove("focus_was_running").apply()
                           startTimestampMs = 0L
                           currentElapsedSeconds = 0
-                          lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
-                          releaseWakeLock()
-                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
-                              stopForeground(STOP_FOREGROUND_REMOVE)
-                          else
-                              @Suppress("DEPRECATION") stopForeground(true)
+                          isRunning = false
+
+                          prefs.edit()
+                              .putBoolean("is_service_running", false)
+                              .remove("active_subject")
+                              .remove("active_mode")
+                              .remove("active_cam_enabled")
+                              .remove("active_blocker_enabled")
+                              .remove("active_start_timestamp_ms")
+                              .apply()
+
+                          stopForegroundSafely()
                           stopSelf()
                       }
                       ACTION_UPDATE_BLOCKED -> {
@@ -921,106 +939,177 @@ jobs:
                       }
                       ACTION_SET_CAM_STATUS -> {
                           val status = intent.getStringExtra(EXTRA_CAM_STATUS) ?: "verified"
-                          applyCamStatus(status == "verified")
+                          val detected = (status == "verified")
+                          if (detected) {
+                              lastFaceSeenTimestamp = System.currentTimeMillis()
+                          }
+                          onFaceDetectionResult(detected)
                       }
                   }
                   return START_STICKY
               }
 
-              // ── Native Face Detection via CameraX + ML Kit ──────────────────────────
-
-              @SuppressLint("UnsafeOptInUsageError")
-              private fun startNativeFaceDetection() {
-                  cameraExecutor = Executors.newSingleThreadExecutor()
-                  val options = FaceDetectorOptions.Builder()
-                      .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-                      .setMinFaceSize(0.15f)
-                      .build()
-                  val detector = FaceDetection.getClient(options)
-
-                  val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-                  cameraProviderFuture.addListener({
-                      try {
-                          cameraProvider = cameraProviderFuture.get()
-
-                          val imageAnalysis = ImageAnalysis.Builder()
-                              .setTargetResolution(Size(320, 240))
-                              .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                              .build()
-
-                          imageAnalysis.setAnalyzer(cameraExecutor!!) { imageProxy ->
-                              val now = System.currentTimeMillis()
-                              // Only run ML Kit face detection every FACE_CHECK_MS to save battery
-                              if (now - lastFaceCheckMs < FACE_CHECK_MS) {
-                                  imageProxy.close()
-                                  return@setAnalyzer
-                              }
-                              lastFaceCheckMs = now
-
-                              @SuppressLint("UnsafeOptInUsageError")
-                              val mediaImage = imageProxy.image
-                              if (mediaImage != null) {
-                                  val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                                  detector.process(image)
-                                      .addOnSuccessListener { faces ->
-                                          val faceFound = faces.isNotEmpty()
-                                          handler.post { handleFaceResult(faceFound) }
-                                          imageProxy.close()
-                                      }
-                                      .addOnFailureListener {
-                                          imageProxy.close()
-                                      }
-                              } else {
-                                  imageProxy.close()
-                              }
+              private fun startForegroundSafely() {
+                  val notif = buildNotification()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      var fgsType = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                          if (camEnabled && checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                              fgsType = fgsType or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
                           }
-
-                          cameraProvider?.unbindAll()
-                          cameraProvider?.bindToLifecycle(
-                              this,
-                              CameraSelector.DEFAULT_FRONT_CAMERA,
-                              imageAnalysis
-                          )
-                      } catch (e: Exception) {
-                          // Camera unavailable — don't crash, just skip face detection
                       }
-                  }, ContextCompat.getMainExecutor(this))
-              }
-
-              private fun handleFaceResult(faceFound: Boolean) {
-                  if (!camEnabled) return
-                  if (faceFound) {
-                      nativeMissCount = 0
-                      if (camPaused) applyCamStatus(true)   // resume
+                      startForeground(NOTIF_ID, notif, fgsType)
                   } else {
-                      nativeMissCount++
-                      if (nativeMissCount >= MAX_MISS && !camPaused) applyCamStatus(false) // pause
+                      startForeground(NOTIF_ID, notif)
                   }
               }
 
-              private fun applyCamStatus(verified: Boolean) {
+              // Native Camera2 Face Tracker
+              private fun startNativeFaceTracker() {
+                  if (isCameraRunning || !camEnabled) return
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                      if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                          return
+                      }
+                  }
+
+                  try {
+                      val cameraManager = getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return
+                      var frontCamId: String? = null
+                      for (id in cameraManager.cameraIdList) {
+                          val chars = cameraManager.getCameraCharacteristics(id)
+                          val facing = chars.get(CameraCharacteristics.LENS_FACING)
+                          if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                              frontCamId = id
+                              break
+                          }
+                      }
+                      if (frontCamId == null) {
+                          if (cameraManager.cameraIdList.isNotEmpty()) {
+                              frontCamId = cameraManager.cameraIdList[0]
+                          } else {
+                              return
+                          }
+                      }
+
+                      cameraThread = HandlerThread("PrepWiseCamTracker").apply { start() }
+                      val cHandler = Handler(cameraThread!!.looper)
+                      cameraHandler = cHandler
+
+                      surfaceTexture = SurfaceTexture(42).apply {
+                          setDefaultBufferSize(320, 240)
+                      }
+                      cameraSurface = Surface(surfaceTexture)
+
+                      cameraManager.openCamera(frontCamId, object : CameraDevice.StateCallback() {
+                          override fun onOpened(camera: CameraDevice) {
+                              cameraDevice = camera
+                              isCameraRunning = true
+                              try {
+                                  val surface = cameraSurface ?: return
+                                  val surfaces = listOf(surface)
+                                  camera.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
+                                      override fun onConfigured(session: CameraCaptureSession) {
+                                          captureSession = session
+                                          try {
+                                              val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                                              requestBuilder.addTarget(surface)
+
+                                              val chars = cameraManager.getCameraCharacteristics(frontCamId)
+                                              val fdModes = chars.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES)
+                                              val chosenMode = when {
+                                                  fdModes?.contains(CameraCharacteristics.STATISTICS_FACE_DETECT_MODE_FULL) == true ->
+                                                      CameraCharacteristics.STATISTICS_FACE_DETECT_MODE_FULL
+                                                  fdModes?.contains(CameraCharacteristics.STATISTICS_FACE_DETECT_MODE_SIMPLE) == true ->
+                                                      CameraCharacteristics.STATISTICS_FACE_DETECT_MODE_SIMPLE
+                                                  else -> CameraCharacteristics.STATISTICS_FACE_DETECT_MODE_OFF
+                                              }
+
+                                              if (chosenMode != CameraCharacteristics.STATISTICS_FACE_DETECT_MODE_OFF) {
+                                                  requestBuilder.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, chosenMode)
+                                              }
+
+                                              session.setRepeatingRequest(requestBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+                                                  override fun onCaptureCompleted(
+                                                      session: CameraCaptureSession,
+                                                      request: CaptureRequest,
+                                                      result: TotalCaptureResult
+                                                  ) {
+                                                      val faces = result.get(CaptureResult.STATISTICS_FACES)
+                                                      val now = System.currentTimeMillis()
+                                                      val hasFace = faces != null && faces.isNotEmpty()
+                                                      if (hasFace) {
+                                                          lastFaceSeenTimestamp = now
+                                                          handler.post { onFaceDetectionResult(true) }
+                                                      } else {
+                                                          if (now - lastFaceSeenTimestamp > 2500) {
+                                                              handler.post { onFaceDetectionResult(false) }
+                                                          }
+                                                      }
+                                                  }
+                                              }, cHandler)
+                                          } catch (_: Exception) {}
+                                      }
+
+                                      override fun onConfigureFailed(session: CameraCaptureSession) {
+                                          isCameraRunning = false
+                                      }
+                                  }, cHandler)
+                              } catch (_: Exception) {
+                                  isCameraRunning = false
+                              }
+                          }
+
+                          override fun onDisconnected(camera: CameraDevice) {
+                              camera.close()
+                              cameraDevice = null
+                              isCameraRunning = false
+                          }
+
+                          override fun onError(camera: CameraDevice, error: Int) {
+                              try { camera.close() } catch (_: Exception) {}
+                              cameraDevice = null
+                              isCameraRunning = false
+                          }
+                      }, cHandler)
+                  } catch (_: Exception) {
+                      isCameraRunning = false
+                  }
+              }
+
+              private fun stopNativeFaceTracker() {
+                  try { captureSession?.stopRepeating(); captureSession?.close() } catch (_: Exception) {}
+                  captureSession = null
+                  try { cameraDevice?.close() } catch (_: Exception) {}
+                  cameraDevice = null
+                  try { cameraSurface?.release() } catch (_: Exception) {}
+                  cameraSurface = null
+                  try { surfaceTexture?.release() } catch (_: Exception) {}
+                  surfaceTexture = null
+                  try { cameraThread?.quitSafely() } catch (_: Exception) {}
+                  cameraThread = null
+                  cameraHandler = null
+                  isCameraRunning = false
+              }
+
+              private fun onFaceDetectionResult(detected: Boolean) {
+                  if (!camEnabled) return
                   val wasPaused = camPaused
-                  camPaused   = !verified
-                  camVerified  = verified
+                  camPaused = !detected
+                  camVerified = detected
+
                   val now = System.currentTimeMillis()
                   if (!wasPaused && camPaused) {
                       pauseStartMs = now
                   } else if (wasPaused && !camPaused) {
                       pausedDurationMs += (now - pauseStartMs)
                   }
-                  if (camEnabled) updateFloatingDotColor()
+
+                  updateFloatingDotColor()
                   updateNotification()
               }
 
-              private fun stopNativeFaceDetection() {
-                  try { cameraProvider?.unbindAll() } catch (_: Exception) {}
-                  cameraExecutor?.shutdown()
-                  cameraExecutor = null
-                  cameraProvider = null
-              }
-
-              // ── App Blocking ─────────────────────────────────────────────────────────
-
+              // Core blocking logic
               private fun checkAndBlock() {
                   if (!blockerEnabled || !hasUsagePermission()) return
                   val foreground = getForegroundPackage() ?: return
@@ -1039,8 +1128,11 @@ jobs:
 
                   if (blockedApps.contains(foreground)) {
                       if (camEnabled) hideDotView()
-                      if (canDrawOverlay()) showBlockingOverlay(foreground)
-                      else redirectToPrepWise()
+                      if (canDrawOverlay()) {
+                          showBlockingOverlay(foreground)
+                      } else {
+                          redirectToPrepWise()
+                      }
                   } else {
                       if (overlayView != null) removeOverlay()
                       if (camEnabled) showDotView()
@@ -1055,116 +1147,278 @@ jobs:
                   removeOverlay()
                   lastBlockedPkg = blockedPkg
 
-                  val appName = try {
-                      packageManager.getApplicationLabel(packageManager.getApplicationInfo(blockedPkg, 0)).toString()
-                  } catch (e: Exception) { blockedPkg }
+                  val wm = windowManager ?: return
+                  val density = resources.displayMetrics.density
 
-                  val layout = LinearLayout(this).apply {
+                  val root = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       gravity = Gravity.CENTER
-                      setBackgroundColor(Color.parseColor("#EF0F172A"))
-                      setPadding(64, 64, 64, 64)
+                      setBackgroundColor(Color.parseColor("#0B0F19"))
+                      setPadding((32 * density).toInt(), (48 * density).toInt(), (32 * density).toInt(), (48 * density).toInt())
                   }
-                  layout.addView(TextView(this).apply { text = "\uD83D\uDD12"; textSize = 56f; gravity = Gravity.CENTER; setTextColor(Color.WHITE) })
-                  layout.addView(TextView(this).apply { text = "Focus Mode Active"; textSize = 22f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD; setPadding(0, 24, 0, 12) })
-                  layout.addView(TextView(this).apply { text = "\"$appName\" is blocked during your study session.\nStay focused - you are doing great!"; textSize = 15f; setTextColor(Color.parseColor("#94A3B8")); gravity = Gravity.CENTER; setPadding(0, 0, 0, 40) })
-                  val returnBtn = TextView(this).apply {
-                      text = "Return to PrepWise \u2192"; textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; setPadding(48, 28, 48, 28)
-                      background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.parseColor("#0D9488")); cornerRadius = 36f }
-                      setOnClickListener { redirectToPrepWise(); removeOverlay() }
-                  }
-                  layout.addView(returnBtn)
 
-                  val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                  val badge = TextView(this).apply {
+                      text = "FOCUS MODE ACTIVE"
+                      textSize = 11f
+                      setTextColor(Color.parseColor("#10B981"))
+                      gravity = Gravity.CENTER
+                      setPadding((12 * density).toInt(), (4 * density).toInt(), (12 * density).toInt(), (4 * density).toInt())
+                      background = android.graphics.drawable.GradientDrawable().apply {
+                          setColor(Color.parseColor("#064E3B"))
+                          cornerRadius = 20 * density
+                      }
+                  }
+                  root.addView(badge, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                      bottomMargin = (20 * density).toInt()
+                  })
+
+                  val title = TextView(this).apply {
+                      text = "Stay Focused on Your Goal!"
+                      textSize = 22f
+                      setTextColor(Color.WHITE)
+                      typeface = android.graphics.Typeface.DEFAULT_BOLD
+                      gravity = Gravity.CENTER
+                  }
+                  root.addView(title, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                      bottomMargin = (12 * density).toInt()
+                  })
+
+                  val appName = getAppName(blockedPkg)
+                  val msg = TextView(this).apply {
+                      text = "$appName is blocked during this session.\nEvery minute counts towards your dream rank."
+                      textSize = 14f
+                      setTextColor(Color.parseColor("#94A3B8"))
+                      gravity = Gravity.CENTER
+                      setLineSpacing(4 * density, 1f)
+                  }
+                  root.addView(msg, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                      bottomMargin = (32 * density).toInt()
+                  })
+
+                  val btn = TextView(this).apply {
+                      text = "Back to Study"
+                      textSize = 15f
+                      setTextColor(Color.WHITE)
+                      typeface = android.graphics.Typeface.DEFAULT_BOLD
+                      gravity = Gravity.CENTER
+                      setPadding((28 * density).toInt(), (14 * density).toInt(), (28 * density).toInt(), (14 * density).toInt())
+                      background = android.graphics.drawable.GradientDrawable().apply {
+                          setColor(Color.parseColor("#2563EB"))
+                          cornerRadius = 14 * density
+                      }
+                      setOnClickListener {
+                          removeOverlay()
+                          redirectToPrepWise()
+                      }
+                  }
+                  root.addView(btn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+                  val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                  else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+                  } else {
+                      @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+                  }
 
                   val params = WindowManager.LayoutParams(
-                      WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
-                      overlayType,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                      WindowManager.LayoutParams.MATCH_PARENT,
+                      WindowManager.LayoutParams.MATCH_PARENT,
+                      layoutType,
+                      WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                       PixelFormat.TRANSLUCENT
                   )
+
                   try {
-                      windowManager?.addView(layout, params)
-                      overlayView = layout
-                      overlayDismissHandler.postDelayed({ if (lastBlockedPkg == blockedPkg) removeOverlay() }, 4000)
+                      wm.addView(root, params)
+                      overlayView = root
+                      overlayDismissHandler.removeCallbacksAndMessages(null)
+                      overlayDismissHandler.postDelayed({
+                          removeOverlay()
+                          redirectToPrepWise()
+                      }, 5000)
                   } catch (_: Exception) {}
               }
 
               private fun removeOverlay() {
-                  overlayView?.let { try { windowManager?.removeView(it) } catch (_: Exception) {} }
-                  overlayView = null
-                  lastBlockedPkg = null
+                  overlayDismissHandler.removeCallbacksAndMessages(null)
+                  overlayView?.let { view ->
+                      try { windowManager?.removeView(view) } catch (_: Exception) {}
+                      overlayView = null
+                      lastBlockedPkg = null
+                  }
               }
 
-              // ── Floating Dot ─────────────────────────────────────────────────────────
+              private fun redirectToPrepWise() {
+                  try {
+                      val intent = Intent(this, MainActivity::class.java).apply {
+                          flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                  Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                  Intent.FLAG_ACTIVITY_CLEAR_TOP
+                      }
+                      startActivity(intent)
+                  } catch (_: Exception) {}
+              }
 
+              private fun hasUsagePermission(): Boolean {
+                  val appOps = getSystemService(Context.APP_OPS_SERVICE) as? android.app.AppOpsManager ?: return false
+                  val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      appOps.unsafeCheckOpNoThrow(
+                          android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                          android.os.Process.myUid(),
+                          packageName
+                      )
+                  } else {
+                      @Suppress("DEPRECATION")
+                      appOps.checkOpNoThrow(
+                          android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                          android.os.Process.myUid(),
+                          packageName
+                      )
+                  }
+                  return mode == android.app.AppOpsManager.MODE_ALLOWED
+              }
+
+              private fun getForegroundPackage(): String? {
+                  val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
+                  val time = System.currentTimeMillis()
+                  val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, time - 1000 * 10, time)
+                  return stats?.maxByOrNull { it.lastTimeUsed }?.packageName
+              }
+
+              private fun getAppName(pkg: String): String {
+                  return try {
+                      val pm = packageManager
+                      val info = pm.getApplicationInfo(pkg, 0)
+                      pm.getApplicationLabel(info).toString()
+                  } catch (_: Exception) {
+                      pkg
+                  }
+              }
+
+              // Floating dot view building & handling
               private fun buildDotView(): View {
                   val density = resources.displayMetrics.density
+                  val cardWidth = (260 * density).toInt()
 
-                  val container = android.widget.FrameLayout(this)
+                  val container = FrameLayout(this)
 
-                  // Compact circle
-                  val compact = android.widget.FrameLayout(this).apply { tag = "compact" }
-                  val circle = View(this).apply {
+                  val compactCircle = FrameLayout(this).apply {
+                      tag = "compact"
+                      val px = (44 * density).toInt()
+                      layoutParams = FrameLayout.LayoutParams(px, px)
+                      background = android.graphics.drawable.GradientDrawable().apply {
+                          shape = android.graphics.drawable.GradientDrawable.OVAL
+                          setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
+                          setStroke((3 * density).toInt(), Color.parseColor("#0F172A"))
+                      }
+                      val dotCenter = View(context).apply {
+                          val dotPx = (14 * density).toInt()
+                          layoutParams = FrameLayout.LayoutParams(dotPx, dotPx, Gravity.CENTER)
+                          background = android.graphics.drawable.GradientDrawable().apply {
+                              shape = android.graphics.drawable.GradientDrawable.OVAL
+                              setColor(Color.WHITE)
+                          }
+                      }
+                      addView(dotCenter)
+                  }
+                  container.addView(compactCircle)
+
+                  val expandedCard = LinearLayout(this).apply {
+                      tag = "expanded"
+                      orientation = LinearLayout.VERTICAL
+                      visibility = View.GONE
+                      setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
+                      background = android.graphics.drawable.GradientDrawable().apply {
+                          setColor(Color.parseColor("#0F172A"))
+                          cornerRadius = 16 * density
+                          setStroke((2 * density).toInt(), if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
+                      }
+                  }
+
+                  val topRow = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+
+                  val dotIndicator = View(this).apply {
+                      tag = "cardDotIndicator"
+                      val px = (10 * density).toInt()
+                      layoutParams = LinearLayout.LayoutParams(px, px).apply { rightMargin = (8 * density).toInt() }
                       background = android.graphics.drawable.GradientDrawable().apply {
                           shape = android.graphics.drawable.GradientDrawable.OVAL
                           setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
                       }
                   }
-                  val px44 = (44 * density).toInt()
-                  compact.addView(circle, android.widget.FrameLayout.LayoutParams(px44, px44))
+                  topRow.addView(dotIndicator)
+
+                  val titleTv = TextView(this).apply {
+                      text = subject
+                      textSize = 13f
+                      setTextColor(Color.WHITE)
+                      typeface = android.graphics.Typeface.DEFAULT_BOLD
+                      layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                  }
+                  topRow.addView(titleTv)
+
+                  val closeBtn = TextView(this).apply {
+                      text = "\u2715"
+                      textSize = 14f
+                      setTextColor(Color.parseColor("#94A3B8"))
+                      setPadding((8 * density).toInt(), 0, 0, 0)
+                      setOnClickListener { collapseNativeDot() }
+                  }
+                  topRow.addView(closeBtn)
+                  expandedCard.addView(topRow)
+
                   val timerTv = TextView(this).apply {
                       tag = "timerTv"
-                      text = "00:00"
-                      textSize = 8f
+                      text = formatElapsed(currentElapsedSeconds)
+                      textSize = 28f
                       setTextColor(Color.WHITE)
-                      gravity = Gravity.CENTER
                       typeface = android.graphics.Typeface.MONOSPACE
+                      gravity = Gravity.CENTER
+                      setPadding(0, (10 * density).toInt(), 0, (6 * density).toInt())
                   }
-                  compact.addView(timerTv, android.widget.FrameLayout.LayoutParams(px44, px44))
-                  container.addView(compact, android.widget.FrameLayout.LayoutParams(px44, px44))
+                  expandedCard.addView(timerTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-                  // Expanded card
-                  val cardWidth = (260 * density).toInt()
-                  val expandedCard = LinearLayout(this).apply {
-                      tag = "expanded"; orientation = LinearLayout.VERTICAL; visibility = View.GONE
-                      setBackgroundColor(Color.parseColor("#F01E293B")); setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
-                      background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.parseColor("#F01E293B")); cornerRadius = 16 * density }
+                  val statusTv = TextView(this).apply {
+                      tag = "statusTv"
+                      text = if (camVerified) "\u2713 $mode - Face Detected (Live)" else "\u23F8 $mode - No Face Detected!"
+                      textSize = 10f
+                      setTextColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444"))
+                      gravity = Gravity.CENTER
+                      setPadding(0, 0, 0, (10 * density).toInt())
                   }
-                  val subjectTv = TextView(this).apply { text = "\uD83C\uDFAF $subject | $mode"; textSize = 13f; setTextColor(Color.WHITE); typeface = android.graphics.Typeface.DEFAULT_BOLD; setPadding(0, 0, 0, (4 * density).toInt()) }
-                  expandedCard.addView(subjectTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-
-                  val expandTimerTv = TextView(this).apply { tag = "timerTv"; text = formatElapsed(currentElapsedSeconds); textSize = 28f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; typeface = android.graphics.Typeface.MONOSPACE; setPadding(0, 0, 0, (8 * density).toInt()) }
-                  expandedCard.addView(expandTimerTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-
-                  val statusDot = View(this).apply {
-                      tag = "statusDot"
-                      val sz = (8 * density).toInt()
-                      background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444")) }
-                      val lp = LinearLayout.LayoutParams(sz, sz)
-                      lp.gravity = Gravity.CENTER_VERTICAL; layoutParams = lp
-                  }
-                  val statusRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, (10 * density).toInt()) }
-                  statusRow.addView(statusDot)
-                  val statusTv = TextView(this).apply { tag = "statusTv"; text = if (camVerified) "\u2713 $mode - Cam Verified" else "\u23F8 $mode - Cam Lost"; textSize = 10f; setTextColor(if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444")); setPadding((6 * density).toInt(), 0, 0, 0) }
-                  statusRow.addView(statusTv)
-                  expandedCard.addView(statusRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                  expandedCard.addView(statusTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
                   val stopBtn = TextView(this).apply {
-                      text = "Stop Focus Mode"; textSize = 12f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+                      text = "Stop Focus Mode"
+                      textSize = 12f
+                      setTextColor(Color.WHITE)
+                      gravity = Gravity.CENTER
                       setPadding((16 * density).toInt(), (10 * density).toInt(), (16 * density).toInt(), (10 * density).toInt())
-                      background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.parseColor("#DC2626")); cornerRadius = 10 * density }
+                      background = android.graphics.drawable.GradientDrawable().apply {
+                          setColor(Color.parseColor("#DC2626"))
+                          cornerRadius = 10 * density
+                      }
                       typeface = android.graphics.Typeface.DEFAULT_BOLD
-                      setOnClickListener { if (MainActivity.isAppForeground) sendStopRequestToWebApp() else directBackgroundStopAndLog() }
+                      setOnClickListener {
+                          sendStopRequestToWebApp()
+                          directBackgroundStopAndLog()
+                      }
                   }
                   expandedCard.addView(stopBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-                  val hintTv = TextView(this).apply { text = "Drag anywhere"; textSize = 9f; setTextColor(Color.parseColor("#475569")); gravity = Gravity.CENTER; setPadding(0, (6 * density).toInt(), 0, 0) }
+                  val hintTv = TextView(this).apply {
+                      text = "Drag anywhere"
+                      textSize = 9f
+                      setTextColor(Color.parseColor("#475569"))
+                      gravity = Gravity.CENTER
+                      setPadding(0, (6 * density).toInt(), 0, 0)
+                  }
                   expandedCard.addView(hintTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-                  container.addView(expandedCard, android.widget.FrameLayout.LayoutParams(cardWidth, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
+                  container.addView(expandedCard, FrameLayout.LayoutParams(cardWidth, FrameLayout.LayoutParams.WRAP_CONTENT))
+
                   return container
               }
 
@@ -1176,13 +1430,13 @@ jobs:
               private fun expandNativeDot() {
                   dotExpanded = true
                   val container = dotView ?: return
-                  container.findViewWithTag<View>("compact")?.visibility  = View.GONE
+                  container.findViewWithTag<View>("compact")?.visibility = View.GONE
                   container.findViewWithTag<View>("expanded")?.visibility = View.VISIBLE
                   dotParams?.let { p ->
-                      val d = resources.displayMetrics.density
-                      p.width  = (260 * d).toInt()
-                      p.height = android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-                      p.flags  = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                      val density = resources.displayMetrics.density
+                      p.width = (260 * density).toInt()
+                      p.height = FrameLayout.LayoutParams.WRAP_CONTENT
+                      p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
                       try { windowManager?.updateViewLayout(container, p) } catch (_: Exception) {}
                   }
               }
@@ -1190,12 +1444,12 @@ jobs:
               private fun collapseNativeDot() {
                   dotExpanded = false
                   val container = dotView ?: return
-                  container.findViewWithTag<View>("compact")?.visibility  = View.VISIBLE
+                  container.findViewWithTag<View>("compact")?.visibility = View.VISIBLE
                   container.findViewWithTag<View>("expanded")?.visibility = View.GONE
                   val px = (44 * resources.displayMetrics.density).toInt()
                   dotParams?.let { p ->
-                      p.width  = px; p.height = px
-                      p.flags  = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                      p.width = px; p.height = px
+                      p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                       try { windowManager?.updateViewLayout(container, p) } catch (_: Exception) {}
                   }
               }
@@ -1204,187 +1458,260 @@ jobs:
                   if (dotView != null) return
                   val density = resources.displayMetrics.density
                   val px = (44 * density).toInt()
+
                   val dot = buildDotView()
 
                   var startX = 0f; var startY = 0f
                   var initialX = 0; var initialY = 0
                   var moved = false
-                  dot.setOnTouchListener { v, event ->
+                  dot.setOnTouchListener { _, event ->
                       val p = dotParams ?: return@setOnTouchListener false
                       when (event.action) {
-                          android.view.MotionEvent.ACTION_DOWN -> { startX = event.rawX; startY = event.rawY; initialX = p.x; initialY = p.y; moved = false; true }
+                          android.view.MotionEvent.ACTION_DOWN -> {
+                              startX = event.rawX; startY = event.rawY
+                              initialX = p.x; initialY = p.y
+                              moved = false; true
+                          }
                           android.view.MotionEvent.ACTION_MOVE -> {
-                              val dx = (event.rawX - startX).toInt(); val dy = (event.rawY - startY).toInt()
-                              if (Math.abs(dx) > 8 || Math.abs(dy) > 8) { moved = true; p.x = initialX + dx; p.y = initialY + dy; try { windowManager?.updateViewLayout(v, p) } catch (_: Exception) {} }
+                              val dx = (event.rawX - startX).toInt()
+                              val dy = (event.rawY - startY).toInt()
+                              if (Math.abs(dx) > 8 || Math.abs(dy) > 8) moved = true
+                              p.x = initialX + dx; p.y = initialY + dy
+                              try { windowManager?.updateViewLayout(dot, p) } catch (_: Exception) {}
                               true
                           }
-                          android.view.MotionEvent.ACTION_UP -> { if (!moved) { if (dotExpanded) collapseNativeDot() else expandNativeDot() }; true }
+                          android.view.MotionEvent.ACTION_UP -> {
+                              if (!moved) {
+                                  if (dotExpanded) collapseNativeDot() else expandNativeDot()
+                              }
+                              true
+                          }
                           else -> false
                       }
                   }
 
-                  val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                  val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                  else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+                  } else {
+                      @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+                  }
 
-                  val params = WindowManager.LayoutParams(px, px, overlayType,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                  val params = WindowManager.LayoutParams(
+                      px, px,
+                      layoutType,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                       PixelFormat.TRANSLUCENT
-                  ).apply { gravity = Gravity.TOP or Gravity.START; x = 24; y = 180 }
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                      x = (resources.displayMetrics.widthPixels - px - (16 * density).toInt())
+                      y = (resources.displayMetrics.heightPixels / 4)
+                  }
 
-                  try { windowManager?.addView(dot, params); dotView = dot; dotParams = params } catch (_: Exception) {}
+                  try {
+                      windowManager?.addView(dot, params)
+                      dotView = dot
+                      dotParams = params
+                      dotExpanded = false
+                  } catch (_: Exception) {}
+              }
+
+              private fun showDotView() {
+                  dotView?.visibility = View.VISIBLE
+              }
+
+              private fun hideDotView() {
+                  dotView?.visibility = View.GONE
+              }
+
+              private fun removeFloatingDot() {
+                  dotView?.let { dot ->
+                      try { windowManager?.removeView(dot) } catch (_: Exception) {}
+                      dotView = null
+                      dotParams = null
+                      dotExpanded = false
+                  }
               }
 
               private fun updateFloatingDotColor() {
                   val container = dotView ?: return
-                  val color = if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444")
-                  val compact = container.findViewWithTag<android.widget.FrameLayout>("compact")
-                  (compact?.getChildAt(0)?.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
-                  container.findViewWithTag<View>("statusDot")?.let { (it.background as? android.graphics.drawable.GradientDrawable)?.setColor(color) }
-                  container.findViewWithTag<TextView>("statusTv")?.let { it.text = if (camVerified) "\u2713 $mode - Cam Verified" else "\u23F8 $mode - Cam Lost"; it.setTextColor(color) }
+                  val colorInt = if (camVerified) Color.parseColor("#10B981") else Color.parseColor("#EF4444")
+                  val density = resources.displayMetrics.density
+
+                  container.findViewWithTag<View>("compact")?.background = android.graphics.drawable.GradientDrawable().apply {
+                      shape = android.graphics.drawable.GradientDrawable.OVAL
+                      setColor(colorInt)
+                      setStroke((3 * density).toInt(), Color.parseColor("#0F172A"))
+                  }
+
+                  container.findViewWithTag<View>("cardDotIndicator")?.background = android.graphics.drawable.GradientDrawable().apply {
+                      shape = android.graphics.drawable.GradientDrawable.OVAL
+                      setColor(colorInt)
+                  }
+
+                  container.findViewWithTag<TextView>("statusTv")?.apply {
+                      text = if (camVerified) "\u2713 $mode - Face Detected (Live)" else "\u23F8 $mode - No Face Detected!"
+                      setTextColor(colorInt)
+                  }
+
+                  container.findViewWithTag<View>("expanded")?.background = android.graphics.drawable.GradientDrawable().apply {
+                      setColor(Color.parseColor("#0F172A"))
+                      cornerRadius = 16 * density
+                      setStroke((2 * density).toInt(), colorInt)
+                  }
               }
 
               private fun updateDotTimer() {
                   val container = dotView ?: return
-                  val formatted = formatElapsed(currentElapsedSeconds)
-                  // Update ALL timerTv tags (compact dot has one, expanded card has another)
-                  fun updateAllTimerViews(v: android.view.ViewGroup) {
-                      for (i in 0 until v.childCount) {
-                          val child = v.getChildAt(i)
-                          if (child is TextView && child.tag == "timerTv") {
-                              child.text = formatted
-                          } else if (child is android.view.ViewGroup) {
-                              updateAllTimerViews(child)
-                          }
+                  container.findViewWithTag<TextView>("timerTv")?.text = formatElapsed(currentElapsedSeconds)
+              }
+
+              // Foreground Notification
+              private fun createNotificationChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val channel = NotificationChannel(
+                          CHANNEL_ID,
+                          "Focus Session Active",
+                          NotificationManager.IMPORTANCE_LOW
+                      ).apply {
+                          description = "Shows live focus session progress, face tracking state, and stop controls"
+                          setShowBadge(false)
+                          lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                       }
+                      val nm = getSystemService(NotificationManager::class.java)
+                      nm.createNotificationChannel(channel)
                   }
-                  if (container is android.view.ViewGroup) updateAllTimerViews(container)
-              }
-
-              private fun showDotView() {
-                  dotView?.let { if (it.visibility != View.VISIBLE) it.visibility = View.VISIBLE }
-                      ?: run { if (canDrawOverlay()) showFloatingDot() }
-              }
-
-              private fun hideDotView() { dotView?.visibility = View.GONE }
-
-              private fun removeFloatingDot() {
-                  dotView?.let { try { windowManager?.removeView(it) } catch (_: Exception) {} }
-                  dotView = null; dotParams = null
-              }
-
-              private fun redirectToPrepWise() {
-                  val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
-                  launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                  startActivity(launch)
-              }
-
-              private fun getForegroundPackage(): String? {
-                  return try {
-                      val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-                      val now = System.currentTimeMillis()
-                      val events = usm.queryEvents(now - 2000, now)
-                      val event = UsageEvents.Event(); var pkg: String? = null
-                      while (events.hasNextEvent()) { events.getNextEvent(event); if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) pkg = event.packageName }
-                      pkg
-                  } catch (e: Exception) { null }
-              }
-
-              private fun hasUsagePermission(): Boolean {
-                  return try {
-                      val appOps = getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
-                      val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-                          appOps.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
-                      else
-                          appOps.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
-                      mode == android.app.AppOpsManager.MODE_ALLOWED
-                  } catch (e: Exception) { false }
               }
 
               private fun buildNotification(): Notification {
-                  val e = currentElapsedSeconds
-                  val time = formatElapsed(e)
-                  val (title, text, buttonLabel) = when {
-                      !camEnabled && !blockerEnabled -> Triple("Focus: $subject | $mode  $time", "Live study timer running. Tap to open PrepWise.", "Stop Timer")
-                      camEnabled && !blockerEnabled  -> Triple("Focus: $subject | $mode  $time", if (camPaused) "Face not detected \u2022 Timer paused" else "Face under detection \u2022 Timer running", "Stop Timer")
-                      !camEnabled && blockerEnabled  -> Triple("Focus: $subject | $mode  $time", "App blocking is enabled. Tap to open PrepWise.", "Stop Focus Mode")
-                      else -> Triple("Focus: $subject | $mode  $time", (if (camPaused) "Face not detected" else "Face detected") + " \u2022 App blocking ON", "Stop Session")
+                  val m = currentElapsedSeconds / 60
+                  val s = currentElapsedSeconds % 60
+                  val timeStr = String.format("%02d:%02d", m, s)
+
+                  val title = when {
+                      camEnabled && !blockerEnabled -> "$timeStr   $subject"
+                      !camEnabled && blockerEnabled -> "$timeStr   $subject   Focus Active"
+                      camEnabled && blockerEnabled  -> "$timeStr   $subject   Focus Active"
+                      else                          -> "$timeStr   $subject   Study Session"
                   }
-                  val openIntent = Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP }
+
+                  val text = when {
+                      camEnabled && !blockerEnabled ->
+                          if (camPaused) "Face not detected   Timer paused" else "Face under detection   Timer running"
+                      !camEnabled && blockerEnabled ->
+                          "Focus Mode active   App blocking is ON"
+                      camEnabled && blockerEnabled ->
+                          (if (camPaused) "Face not detected" else "Face under detection") + "   App blocking is ON"
+                      else ->
+                          "Timer running   Stay focused on $subject"
+                  }
+
+                  val openIntent = Intent(this, MainActivity::class.java).apply {
+                      flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                  }
                   val pi = PendingIntent.getActivity(this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
                   val stopReqIntent = Intent(this, FocusBlockerService::class.java).apply { action = ACTION_STOP_REQUEST }
                   val stopPi = PendingIntent.getService(this, 1, stopReqIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
                   return NotificationCompat.Builder(this, CHANNEL_ID)
                       .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-                      .setContentTitle(title).setContentText(text).setContentIntent(pi)
-                      .setOngoing(true).setOnlyAlertOnce(true)
+                      .setContentTitle(title)
+                      .setContentText(text)
+                      .setContentIntent(pi)
+                      .setOngoing(true)
+                      .setSilent(true)
                       .setPriority(NotificationCompat.PRIORITY_LOW)
-                      .addAction(android.R.drawable.ic_delete, buttonLabel, stopPi)
+                      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                      .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Focus Mode", stopPi)
                       .build()
               }
 
               private fun updateNotification() {
-                  getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification())
+                  val nm = getSystemService(NotificationManager::class.java)
+                  nm.notify(NOTIF_ID, buildNotification())
               }
 
-              private fun createNotificationChannel() {
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      val ch = NotificationChannel(CHANNEL_ID, "Focus Session Blocker", NotificationManager.IMPORTANCE_LOW).apply {
-                          description = "Keeps focus session active and blocks distracting apps."
-                          setShowBadge(false)
-                      }
-                      getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
-                  }
-              }
-
+              // Stop Request -> Web App & Direct Background Stop
               private fun sendStopRequestToWebApp() {
                   val intent = Intent("com.prepwise.ACTION_FOCUS_STOP_WEB_REQUEST")
                   intent.setPackage(packageName)
                   sendBroadcast(intent)
               }
 
+              private fun cancelScheduledRestart() {
+                  try {
+                      val restartIntent = Intent(applicationContext, FocusBlockerService::class.java).apply { action = ACTION_START }
+                      val pi = PendingIntent.getService(
+                          applicationContext, 1, restartIntent,
+                          PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+                      )
+                      val alarmMgr = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+                      alarmMgr?.cancel(pi)
+                  } catch (_: Exception) {}
+              }
+
+              private fun stopForegroundSafely() {
+                  try {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                          stopForeground(STOP_FOREGROUND_REMOVE)
+                      } else {
+                          @Suppress("DEPRECATION") stopForeground(true)
+                      }
+                      val nm = getSystemService(NotificationManager::class.java)
+                      nm?.cancel(NOTIF_ID)
+                  } catch (_: Exception) {}
+              }
+
               private fun directBackgroundStopAndLog() {
-                  if (isStopping) return
-                  isStopping = true
+                  cancelScheduledRestart()
                   handler.removeCallbacks(tickRunnable)
-                  stopNativeFaceDetection()
+                  stopNativeFaceTracker()
                   removeOverlay()
                   removeFloatingDot()
                   val elapsed = currentElapsedSeconds
+                  isRunning = false
+
                   try {
                       val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
-                      prefs.edit()
-                          .putBoolean("has_pending_session", true)
-                          .putInt("pending_session_seconds", elapsed)
-                          .putString("pending_session_subject", subject)
-                          .putString("pending_session_mode", mode)
-                          .putLong("pending_session_timestamp", System.currentTimeMillis())
-                          // Clear resume state since session is being stopped
-                          .remove("focus_start_ts").remove("focus_paused_duration")
-                          .remove("focus_cam_paused").remove("focus_pause_start")
-                          .remove("focus_was_running")
-                          .apply()
+                      val edit = prefs.edit()
+                          .putBoolean("is_service_running", false)
+                          .remove("active_subject")
+                          .remove("active_mode")
+                          .remove("active_cam_enabled")
+                          .remove("active_blocker_enabled")
+                          .remove("active_start_timestamp_ms")
+
+                      if (elapsed > 0) {
+                          edit.putBoolean("has_pending_session", true)
+                              .putInt("pending_session_seconds", elapsed)
+                              .putString("pending_session_subject", subject)
+                              .putString("pending_session_mode", mode)
+                              .putBoolean("pending_session_cam_enabled", camEnabled)
+                              .putBoolean("pending_session_blocker_enabled", blockerEnabled)
+                              .putLong("pending_session_timestamp", System.currentTimeMillis())
+                      }
+                      edit.apply()
                   } catch (_: Exception) {}
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
-                  else @Suppress("DEPRECATION") stopForeground(true)
-                  val mins = elapsed / 60; val secs = elapsed % 60
+
+                  stopForegroundSafely()
+
+                  val mins = elapsed / 60
+                  val secs = elapsed % 60
                   val timeLabel = if (mins > 0) "${mins}m ${secs}s" else "${secs}s"
                   Toast.makeText(applicationContext, "Study session stopped & saved ($timeLabel logged)!", Toast.LENGTH_LONG).show()
-                  currentElapsedSeconds = 0; startTimestampMs = 0L
-                  releaseWakeLock()
+
+                  currentElapsedSeconds = 0
+                  startTimestampMs = 0L
                   stopSelf()
               }
 
               override fun onDestroy() {
                   handler.removeCallbacks(tickRunnable)
+                  stopNativeFaceTracker()
                   overlayDismissHandler.removeCallbacksAndMessages(null)
-                  stopNativeFaceDetection()
                   removeOverlay()
                   removeFloatingDot()
                   currentElapsedSeconds = 0
-                  isStopping = false  // Reset for next session
-                  lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
-                  releaseWakeLock()
                   super.onDestroy()
               }
           }
@@ -1555,143 +1882,224 @@ jobs:
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_FOCUS_EOF' > prepwise_app/lib/services/focus_session_service.dart
           import 'dart:async';
           import 'package:flutter/foundation.dart';
+          import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-          /// FocusSessionService - Flutter UI state only.
-          /// The actual notification + timer lives in FocusBlockerService (Kotlin foreground service),
-          /// which keeps running reliably in background. This class only tracks UI state:
-          /// the floating dot, cam status, and the in-app elapsed display (synced from Kotlin).
           class FocusSessionService {
             static final FocusSessionService _instance = FocusSessionService._internal();
             factory FocusSessionService() => _instance;
             FocusSessionService._internal();
 
+            static const int notificationId = 8801;
+            static const String channelId = 'prepwise_focus_live_timer';
+            static const String channelName = 'Active Focus Session';
+
+            final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+
             bool _isSessionActive = false;
             bool _camEnabled = false;
             bool _blockerEnabled = false;
             String _subject = 'General';
-            String _mode = 'Study';
-            String _camStatus = 'verified';
-            int _elapsedSeconds = 0;
-
-            // Paused state - cam lost or app in background
+            String _mode = 'Practice';
+            int _startTimestampMs = 0;
+            int _pausedDurationMs = 0;
+            int _pauseStartMs = 0;
             bool _isPaused = false;
-            Timer? _resumeTickerTimer;
+            String _camStatus = 'verified'; // 'verified' or 'lost'
+            Timer? _tickerTimer;
 
             bool get isSessionActive => _isSessionActive;
             bool get camEnabled => _camEnabled;
             bool get blockerEnabled => _blockerEnabled;
-            bool get isPaused => _isPaused;
             String get subject => _subject;
             String get mode => _mode;
             String get camStatus => _camStatus;
-            int get elapsedSeconds => _elapsedSeconds;
+            int get startTimestampMs => _startTimestampMs;
 
-            // UI notifiers
-            final ValueNotifier<String> camStatusNotifier = ValueNotifier<String>('verified');
-            final ValueNotifier<int> elapsedNotifier = ValueNotifier<int>(0);
+            void syncFromNative({
+              required String subject,
+              required String mode,
+              required int elapsedSeconds,
+              required bool camEnabled,
+              required bool blockerEnabled,
+            }) {
+              _isSessionActive = true;
+              _subject = subject.isNotEmpty ? subject : 'General';
+              _mode = mode.isNotEmpty ? mode : 'Study';
+              _camEnabled = camEnabled;
+              _blockerEnabled = blockerEnabled;
+              _isPaused = false;
+              _pausedDurationMs = 0;
+              _startTimestampMs = DateTime.now().millisecondsSinceEpoch - (elapsedSeconds * 1000);
+
+              activeNotifier.value = true;
+              camEnabledNotifier.value = camEnabled;
+              elapsedNotifier.value = elapsedSeconds;
+            }
+
+            int get elapsedSeconds {
+              if (!_isSessionActive || _startTimestampMs == 0) return 0;
+              final int now = DateTime.now().millisecondsSinceEpoch;
+              final int effectiveDuration = _isPaused
+                  ? (_pauseStartMs - _startTimestampMs - _pausedDurationMs)
+                  : (now - _startTimestampMs - _pausedDurationMs);
+              final int secs = effectiveDuration ~/ 1000;
+              return secs < 0 ? 0 : secs;
+            }
+
+            // Notifiers for UI listening
             final ValueNotifier<bool> activeNotifier = ValueNotifier<bool>(false);
             final ValueNotifier<bool> camEnabledNotifier = ValueNotifier<bool>(false);
-            final ValueNotifier<bool> pausedNotifier = ValueNotifier<bool>(false);
+            final ValueNotifier<String> camStatusNotifier = ValueNotifier<String>('verified');
+            final ValueNotifier<int> elapsedNotifier = ValueNotifier<int>(0);
 
-            // Callback triggered when stop is requested from notification (via Kotlin -> bridge)
+            // Callback triggered when stop action is clicked on notification
             Function()? onStopRequested;
+            Function(int seconds)? onTimerTick;
 
-            /// Called by bridge when web app starts a focus session.
-            /// [initialSeconds] = seconds already elapsed (e.g. resumed session).
-            void startSession({
+            Future<void> initializeNotificationChannel() async {
+              const AndroidNotificationChannel channel = AndroidNotificationChannel(
+                channelId,
+                channelName,
+                description: 'Live continuous notification during active Focus Mode study sessions.',
+                importance: Importance.low,
+                playSound: false,
+                enableVibration: false,
+                showBadge: false,
+              );
+
+              await _notifications
+                  .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+                  ?.createNotificationChannel(channel);
+            }
+
+            /// Start Focus Session Live Notification with Real-Time Epoch Stopwatch
+            Future<void> startSession({
               required String subject,
               required String mode,
               bool camEnabled = false,
               bool blockerEnabled = false,
-              int initialSeconds = 0,
+              int? initialSeconds,
               Function()? onStopClicked,
-            }) {
+              Function(int seconds)? onTick,
+            }) async {
               _isSessionActive = true;
               _camEnabled = camEnabled;
               _blockerEnabled = blockerEnabled;
-              _isPaused = false;
               _subject = subject.isNotEmpty ? subject : 'General';
-              _mode = mode.isNotEmpty ? mode : 'Study';
-              _elapsedSeconds = initialSeconds;
+              _mode = mode.isNotEmpty ? mode : 'Practice';
+              _isPaused = false;
               _camStatus = 'verified';
+              _pausedDurationMs = 0;
+
+              final int initSecs = initialSeconds ?? 0;
+              _startTimestampMs = DateTime.now().millisecondsSinceEpoch - (initSecs * 1000);
+
               onStopRequested = onStopClicked;
+              onTimerTick = onTick;
 
               activeNotifier.value = true;
               camEnabledNotifier.value = camEnabled;
-              pausedNotifier.value = false;
               camStatusNotifier.value = 'verified';
-              elapsedNotifier.value = _elapsedSeconds;
+              elapsedNotifier.value = initSecs;
 
-              // Local UI ticker - only increments when NOT paused.
-              // Does NOT post any notification (Kotlin service owns that).
-              _resumeTickerTimer?.cancel();
-              _resumeTickerTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-                if (!_isSessionActive) return;
-                if (_isPaused) return; // cam lost or background - do not count
-                _elapsedSeconds++;
-                elapsedNotifier.value = _elapsedSeconds;
+              // Persist active session in case app is swiped away (Option 2)
+              _persistSessionState();
+
+              debugPrint("[FocusSessionService] Starting session: $_subject ($_mode), cam: $camEnabled, blocker: $blockerEnabled");
+
+              await _updateNotification();
+
+              // Start 1-second ticker derived from Epoch Timestamp
+              _tickerTimer?.cancel();
+              _tickerTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+                if (!_isSessionActive) {
+                  timer.cancel();
+                  return;
+                }
+                final int currentSecs = elapsedSeconds;
+                elapsedNotifier.value = currentSecs;
+                if (onTimerTick != null) {
+                  onTimerTick!(currentSecs);
+                }
+                await _updateNotification();
               });
-
-              debugPrint("[FocusSessionService] UI session started: $_subject ($_mode), cam: $camEnabled, blocker: $blockerEnabled");
             }
 
-            /// Sync elapsed time from Kotlin service (called by bridge on resume/sync events).
-            void syncElapsed(int seconds) {
-              if (!_isSessionActive) return;
-              _elapsedSeconds = seconds;
-              elapsedNotifier.value = seconds;
-            }
-
-            /// Cam status update from web - pauses or resumes the UI timer.
-            void updateCamStatus(String status) {
-              if (_camStatus == status) return;
-              _camStatus = status;
-              camStatusNotifier.value = status;
-
-              final lost = status != 'verified';
-              if (_isPaused != lost) {
-                _isPaused = lost;
-                pausedNotifier.value = lost;
-                debugPrint("[FocusSessionService] Session ${lost ? 'PAUSED' : 'RESUMED'} - cam: $status");
+            void pauseSession() {
+              if (_isSessionActive && !_isPaused) {
+                _isPaused = true;
+                _pauseStartMs = DateTime.now().millisecondsSinceEpoch;
+                _updateNotification();
               }
             }
 
-            /// Called when app goes to background - pause UI ticker (Kotlin keeps counting).
-            void onBackground() {
-              if (!_isSessionActive || _isPaused) return;
-              _isPaused = true;
-              pausedNotifier.value = true;
-            }
-
-            /// Called when app comes back to foreground.
-            void onForeground(int syncedSeconds) {
-              if (!_isSessionActive) return;
-              _elapsedSeconds = syncedSeconds;
-              elapsedNotifier.value = syncedSeconds;
-              if (_camStatus == 'verified') {
+            void resumeSession() {
+              if (_isSessionActive && _isPaused) {
                 _isPaused = false;
-                pausedNotifier.value = false;
+                _pausedDurationMs += (DateTime.now().millisecondsSinceEpoch - _pauseStartMs);
+                _updateNotification();
               }
             }
 
-            /// Stop session - clears all UI state.
-            void stopSession() {
+            void updateCamStatus(String status) {
+              if (_camStatus != status) {
+                _camStatus = status;
+                camStatusNotifier.value = status;
+                if (status == 'lost') {
+                  pauseSession();
+                } else if (status == 'verified') {
+                  resumeSession();
+                }
+                _updateNotification();
+              }
+            }
+
+            String _formatTime(int totalSeconds) {
+              final int hours = totalSeconds ~/ 3600;
+              final int minutes = (totalSeconds % 3600) ~/ 60;
+              final int seconds = totalSeconds % 60;
+
+              final String mStr = minutes.toString().padLeft(2, '0');
+              final String sStr = seconds.toString().padLeft(2, '0');
+
+              if (hours > 0) {
+                final String hStr = hours.toString().padLeft(2, '0');
+                return "$hStr:$mStr:$sStr";
+              }
+              return "$mStr:$sStr";
+            }
+
+            Future<void> _updateNotification() async {
+              // Kotlin FocusBlockerService is the foreground service and owns the single notification (NOTIF_ID = 9901).
+              // Suppress Flutter duplicate notification to prevent dual notification banners.
+              return;
+            }
+
+            Future<void> stopSession() async {
               _isSessionActive = false;
-              _camEnabled = false;
-              _blockerEnabled = false;
               _isPaused = false;
-              _resumeTickerTimer?.cancel();
-              _resumeTickerTimer = null;
+              _tickerTimer?.cancel();
+              _tickerTimer = null;
+
               activeNotifier.value = false;
               camEnabledNotifier.value = false;
-              pausedNotifier.value = false;
-              elapsedNotifier.value = 0;
-              _elapsedSeconds = 0;
+
+              _clearPersistedSession();
+
+              try {
+                await _notifications.cancel(notificationId);
+              } catch (_) {}
+
               debugPrint("[FocusSessionService] Session stopped.");
             }
 
-            /// No-op kept for compatibility with NotificationService init call.
-            Future<void> initializeNotificationChannel() async {}
+            Future<void> _persistSessionState() async {
+              // Session state is persisted directly in native Android SharedPreferences by FocusBlockerService
+            }
+
+            Future<void> _clearPersistedSession() async {
+              // Cleared by FocusBlockerService / MainActivity
+            }
           }
           DART_FOCUS_EOF
 
@@ -2248,16 +2656,7 @@ jobs:
 
           class AppBridgeHandler {
             final WebViewController webViewController;
-            AppBridgeHandler({required this.webViewController}) {
-              // Listen for MainActivity relay - "Stop Focus Mode" notification button
-              const MethodChannel('com.prepwise/mainactivity')
-                  .setMethodCallHandler((call) async {
-                if (call.method == 'triggerDirectStopFocusInWeb' || call.method == 'triggerStopFocusInWeb') {
-                  triggerInAppStopDirect();
-                }
-                return null;
-              });
-            }
+            AppBridgeHandler({required this.webViewController});
 
             Future<void> handleMessage(JavaScriptMessage message) async {
               try {
@@ -2271,12 +2670,11 @@ jobs:
 
                   case 'startFocusNotification':
                     final String subject = data['subject'] ?? 'General';
-                    final String mode = data['mode'] ?? 'Study';
+                    final String mode = data['mode'] ?? 'Practice';
                     final int initialSeconds = data['initialSeconds'] ?? 0;
                     final bool camEnabled = data['camEnabled'] == true;
                     final bool blockerEnabled = data['blockerEnabled'] == true;
-                    final List<String> allowedApps = (data['allowedApps'] as List<dynamic>?)
-                        ?.map((e) => e.toString()).toList() ?? [];
+                    final List<String> allowed = (data['allowedApps'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
 
                     if (camEnabled) {
                       try {
@@ -2287,31 +2685,65 @@ jobs:
                       } catch (_) {}
                     }
 
-                    // 1. Update Flutter UI state only
-                    FocusSessionService().startSession(
+                    // Compute blocked apps list if blocker is enabled
+                    List<String> blockedPackages = [];
+                    if (blockerEnabled) {
+                      try {
+                        final allInstalledRaw = await const MethodChannel('com.prepwise/apps').invokeMethod('getInstalledApps') as String;
+                        final List<dynamic> allApps = AppBlockerService().parseJsonArray(allInstalledRaw);
+                        final Set<String> allowedSet = allowed.toSet();
+                        allowedSet.add('com.prepwise.prepwise');
+                        allowedSet.add('com.android.systemui');
+
+                        blockedPackages = allApps
+                            .map((a) => a['packageName']?.toString() ?? '')
+                            .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
+                            .toList();
+                      } catch (_) {}
+                    }
+
+                    // Start single unified Kotlin FocusBlockerService (owns foreground notification + native overlay dot + timer)
+                    try {
+                      await const MethodChannel('com.prepwise/focusblocker').invokeMethod('startFocusBlocker', {
+                        'blockedApps': blockedPackages,
+                        'subject': subject,
+                        'mode': mode,
+                        'camEnabled': camEnabled,
+                        'blockerEnabled': blockerEnabled,
+                      });
+                    } catch (e) {
+                      debugPrint('[Bridge] Error calling startFocusBlocker: $e');
+                    }
+
+                    await FocusSessionService().startSession(
                       subject: subject,
                       mode: mode,
                       camEnabled: camEnabled,
                       blockerEnabled: blockerEnabled,
                       initialSeconds: initialSeconds,
                       onStopClicked: () => triggerInAppStopDirect(),
+                      onTick: (secs) {
+                        webViewController.runJavaScript(
+                          "(function(){if(typeof window.onNativeFocusTimerSync==='function'){window.onNativeFocusTimerSync($secs);}})();",
+                        );
+                      },
                     );
 
-                    // 2. Start Kotlin ForegroundService - owns the notification + blocking + timer
-                    await AppBlockerService().startStrictTimer(
-                      allowedApps,
-                      subject: subject,
-                      mode: mode,
-                      camEnabled: camEnabled,
-                      blockerEnabled: blockerEnabled,
-                    );
+                    if (blockerEnabled) {
+                      await AppBlockerService().startStrictTimer(allowed);
+                    } else {
+                      await AppBlockerService().stopStrictTimer();
+                    }
 
                     await WakelockService.enable();
                     HapticFeedback.heavyImpact();
                     break;
 
                   case 'stopFocusNotification':
-                    FocusSessionService().stopSession();
+                    await FocusSessionService().stopSession();
+                    try {
+                      await const MethodChannel('com.prepwise/focusblocker').invokeMethod('stopFocusBlocker');
+                    } catch (_) {}
                     await AppBlockerService().stopStrictTimer();
                     await WakelockService.disable();
                     HapticFeedback.mediumImpact();
@@ -2320,17 +2752,9 @@ jobs:
                   case 'updateCamStatus':
                     final String status = data['status'] ?? 'verified';
                     FocusSessionService().updateCamStatus(status);
-                    // Also tell Kotlin service to pause/resume its notification timer
                     try {
-                      await const MethodChannel('com.prepwise/focusblocker')
-                          .invokeMethod('setCamStatus', {'status': status});
+                      await const MethodChannel('com.prepwise/focusblocker').invokeMethod('setCamStatus', {'status': status});
                     } catch (_) {}
-                    break;
-
-                  case 'syncFocusTimer':
-                    // Web app sends current elapsed seconds for sync
-                    final int secs = data['seconds'] ?? 0;
-                    FocusSessionService().syncElapsed(secs);
                     break;
 
                   case 'downloadPdf':
@@ -2343,11 +2767,7 @@ jobs:
 
                   case 'startStrictTimer':
                     final List<String> allowed = (data['allowedApps'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
-                    if (AppBlockerService().isStrictActive) {
-                      await AppBlockerService().updateBlockedApps(allowed);
-                    } else {
-                      await AppBlockerService().startStrictTimer(allowed);
-                    }
+                    await AppBlockerService().startStrictTimer(allowed);
                     break;
 
                   case 'stopStrictTimer':
@@ -2404,80 +2824,131 @@ jobs:
 
                   case 'getFCMToken':
                     final token = NotificationService().fcmToken;
-                    if (token != null) injectFCMToken(token);
+                    if (token != null) {
+                      await webViewController.runJavaScript("(function(){if(typeof window.onNativeFCMToken==='function'){window.onNativeFCMToken('$token');}})();");
+                    }
+                    break;
+
+                  case 'checkActiveSession':
+                    try {
+                      final activeMap = await const MethodChannel('com.prepwise/focusblocker')
+                          .invokeMethod<Map<dynamic, dynamic>>('getActiveSession');
+                      if (activeMap != null && activeMap['isActive'] == true) {
+                        final int secs = activeMap['elapsedSeconds'] as int? ?? 0;
+                        final String subj = activeMap['subject'] as String? ?? 'General';
+                        final String md = activeMap['mode'] as String? ?? 'Study';
+                        final bool cam = activeMap['camEnabled'] == true;
+                        final bool blk = activeMap['blockerEnabled'] == true;
+
+                        FocusSessionService().syncFromNative(
+                          subject: subj,
+                          mode: md,
+                          elapsedSeconds: secs,
+                          camEnabled: cam,
+                          blockerEnabled: blk,
+                        );
+
+                        await webViewController.runJavaScript("""
+                          (function(){
+                            window.__activeNativeSession = {
+                              subject: '$subj',
+                              mode: '$md',
+                              elapsedSeconds: $secs,
+                              camEnabled: $cam,
+                              blockerEnabled: $blk
+                            };
+                            if (typeof window.onNativeRestoreActiveSession === 'function') {
+                              window.onNativeRestoreActiveSession(window.__activeNativeSession);
+                            }
+                            if (typeof window.onNativeFocusTimerSync === 'function') {
+                              window.onNativeFocusTimerSync($secs);
+                            }
+                          })();
+                        """);
+                      }
+                    } catch (_) {}
                     break;
 
                   default:
-                    debugPrint("Unknown AppBridge action: $action");
+                    debugPrint("[AppBridge] Unhandled action: $action");
                 }
               } catch (e) {
-                debugPrint("AppBridge error: $e");
-              }
-            }
-
-            Future<void> triggerNativeGoogleSignIn() async {
-              try {
-                final result = await GoogleAuthService().signIn();
-                if (result.success && result.idToken != null) {
-                  final idToken = result.idToken!;
-                  final accessToken = result.accessToken ?? '';
-                  AppToast.show("Signed in as ${result.email ?? 'Google account'}!");
-                  // Encode tokens as base64 to avoid ALL JS string escape issues (JWT has +/= chars)
-                  final idTokenB64 = base64Encode(utf8.encode(idToken));
-                  final accessTokenB64 = base64Encode(utf8.encode(accessToken));
-                  await webViewController.runJavaScript(
-                    "(function(){"
-                    "var id=atob('$idTokenB64');"
-                    "var ac=atob('$accessTokenB64');"
-                    "window.__pendingGoogleTokens={idToken:id,accessToken:ac};"
-                    "if(typeof window.onNativeGoogleSignInSuccess==='function'){"
-                    "  window.onNativeGoogleSignInSuccess(id,ac);"
-                    "}"
-                    "})();"
-                  );
-                } else {
-                  final err = result.errorMessage ?? '';
-                  debugPrint("[GoogleAuth] Native Sign-In failed: $err");
-                  if (err.contains('User cancelled')) {
-                    AppToast.show("Sign-in cancelled.");
-                  } else {
-                    AppToast.show("Google Sign-In: $err");
-                  }
-                  await webViewController.runJavaScript(
-                    "(function(){"
-                    "if(typeof window.onNativeGoogleSignInFailure==='function'){"
-                    "  window.onNativeGoogleSignInFailure('$err');"
-                    "}"
-                    "})();"
-                  );
-                }
-              } catch (e) {
-                debugPrint("triggerNativeGoogleSignIn error: $e");
+                debugPrint("[AppBridge] Error handling message: $e");
               }
             }
 
             void triggerInAppStopDirect() {
+              // Immediately stop native session, floating dot, notification, and blocker
+              FocusSessionService().stopSession();
+              try {
+                const MethodChannel('com.prepwise/focusblocker').invokeMethod('stopFocusBlocker');
+              } catch (_) {}
+              AppBlockerService().stopStrictTimer();
+              WakelockService.disable();
+              HapticFeedback.mediumImpact();
+
+              // Stop button directly stops and auto-logs session in web app without confirmation modal
               webViewController.runJavaScript("""
                 (function(){
-                  if (typeof window.onNativeDirectStopFocus === 'function') {
+                  if(typeof window.onNativeDirectStopFocus === 'function') {
                     window.onNativeDirectStopFocus();
-                  } else if (typeof window.onNativeRequestStopFocus === 'function') {
+                  } else if(typeof window.onNativeRequestStopFocus === 'function') {
                     window.onNativeRequestStopFocus();
                   }
                 })();
               """);
             }
 
-            void triggerInAppStopConfirmation() {
-              triggerInAppStopDirect();
-            }
+            Future<void> triggerNativeGoogleSignIn() async {
+              try {
+                AppToast.show("Connecting to Google...");
+                final result = await GoogleAuthService().signIn();
 
-            void injectFCMToken(String token) {
-              webViewController.runJavaScript("(function(){if(typeof window.onNativeFCMToken==='function'){window.onNativeFCMToken('$token');}else{window.__pendingFcmToken='$token';}})();");
-            }
+                if (result.success && result.idToken != null) {
+                  final String idToken = result.idToken!;
+                  final String? accessToken = result.accessToken;
 
-            void handleNotificationClick(String payload) {
-              webViewController.runJavaScript("(function(){if(typeof window.onNotificationDeepLink==='function'){window.onNotificationDeepLink('$payload');}})();");
+                  debugPrint("[GoogleAuth] Native Sign-In success! Passing tokens to WebApp.");
+                  AppToast.show("Signed in! Syncing account...");
+
+                  final String js = """
+                    (function() {
+                      var idToken = ${jsonEncode(idToken)};
+                      var accessToken = ${jsonEncode(accessToken)};
+                      if (typeof window.__handleNativeGoogleAuth === 'function') {
+                        window.__handleNativeGoogleAuth(idToken, accessToken);
+                      } else {
+                        window.postMessage({
+                          type: 'NATIVE_GOOGLE_AUTH_SUCCESS',
+                          idToken: idToken,
+                          accessToken: accessToken
+                        }, '*');
+                      }
+                    })();
+                  """;
+                  await webViewController.runJavaScript(js);
+                } else {
+                  final err = result.errorMessage ?? '';
+                  debugPrint("[GoogleAuth] Native Sign-In failed: $err");
+                  if (err.contains('User cancelled')) {
+                    AppToast.show("Sign-in cancelled.");
+                  } else if (err.contains('10') || err.contains('DEVELOPER_ERROR') || err.contains('missing')) {
+                    AppToast.show("Config error: Add SHA-1 in Firebase Console ($err)");
+                  } else {
+                    AppToast.show("Google Sign-In: $err");
+                  }
+                  await webViewController.runJavaScript("""
+                    (function() {
+                      if (typeof window.__handleNativeGoogleAuthError === 'function') {
+                        window.__handleNativeGoogleAuthError(${jsonEncode(err)});
+                      }
+                    })();
+                  """);
+                }
+              } catch (e) {
+                debugPrint("[GoogleAuth] Exception in triggerNativeGoogleSignIn: $e");
+                AppToast.show("Sign-in failed. Please try again.");
+              }
             }
           }
           DART_BRIDGE_EOF
@@ -2543,6 +3014,7 @@ jobs:
           DART_MAIN_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_WEB_EOF' > prepwise_app/lib/screens/webview_screen.dart
+          import 'dart:async';
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:permission_handler/permission_handler.dart';
@@ -2554,7 +3026,6 @@ jobs:
           import '../services/app_blocker_service.dart';
           import '../services/pdf_download_service.dart';
           import '../services/focus_session_service.dart';
-          import '../widgets/floating_focus_dot.dart';
           import '../services/app_toast.dart';
 
           class WebViewScreen extends StatefulWidget {
@@ -2567,10 +3038,11 @@ jobs:
             late final WebViewController _controller;
             late final AppBridgeHandler _bridgeHandler;
 
+            final ValueNotifier<double> _progressNotifier = ValueNotifier<double>(0.0);
             bool _isLoading = true;
-            double _progress = 0.0;
             bool _hasError = false;
             DateTime? _lastBackPressTime;
+            Timer? _syncTimer;
             static const _appsChannel = MethodChannel('com.prepwise/apps');
 
             static const String appUrl = "https://study-app-infixify1.vercel.app";
@@ -2584,10 +3056,23 @@ jobs:
               _initNotifications();
             }
 
+            @override
+            void dispose() {
+              _syncTimer?.cancel();
+              WidgetsBinding.instance.removeObserver(this);
+              super.dispose();
+            }
+
+            @override
+            void didChangeAppLifecycleState(AppLifecycleState state) {
+              if (state == AppLifecycleState.resumed) {
+                _checkAndSyncActiveSession();
+                _checkAndLogPendingSessions();
+              }
+            }
+
             Future<void> _requestStartupPermissions() async {
               try {
-                // Prompt user for Camera, Microphone, and Notification permissions at launch
-                // so Camera Verified Focus Mode and Alerts work without background failure.
                 await [
                   Permission.camera,
                   Permission.microphone,
@@ -2613,10 +3098,22 @@ jobs:
                 ..setBackgroundColor(const Color(0xFF0F172A))
                 ..setUserAgent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36")
                 ..setNavigationDelegate(NavigationDelegate(
-                  onProgress: (int progress) => setState(() => _progress = progress / 100.0),
-                  onPageStarted: (String url) => setState(() { _isLoading = true; _hasError = false; }),
+                  onProgress: (int progress) {
+                    _progressNotifier.value = progress / 100.0;
+                  },
+                  onPageStarted: (String url) {
+                    if (!_isLoading) {
+                      setState(() {
+                        _isLoading = true;
+                        _hasError = false;
+                      });
+                    }
+                  },
                   onPageFinished: (String url) async {
                     setState(() => _isLoading = false);
+                    _progressNotifier.value = 1.0;
+
+                    // 1. Setup AppBridge & Intercepts & Performance CSS
                     controller.runJavaScript("""
                       (function(){
                         if(!window.AppBridge){
@@ -2689,217 +3186,587 @@ jobs:
                             }
                           }, true);
                         }
+
+                        // NCERT Permanent Fix: Cache-buster, quick-open button, and direct card click interceptor
+                        function fixNcertPreviews() {
+                          // 1. Detect iframes loading Google Docs Viewer with NCERT or PDF
+                          document.querySelectorAll('iframe').forEach(function(iframe) {
+                            var src = iframe.getAttribute('src') || '';
+                            if ((src.includes('docs.google.com/viewer') || src.includes('ncert.nic.in')) && !iframe.getAttribute('data-ncert-fixed')) {
+                              iframe.setAttribute('data-ncert-fixed', 'true');
+                              var realPdfUrl = '';
+                              try {
+                                var u = new URL(src);
+                                realPdfUrl = u.searchParams.get('url') || src;
+                              } catch(err) {
+                                realPdfUrl = src;
+                              }
+
+                              var parent = iframe.parentElement;
+                              if (parent && !parent.querySelector('.ncert-quick-open-btn')) {
+                                var btn = document.createElement('button');
+                                btn.className = 'ncert-quick-open-btn';
+                                btn.innerText = '  Open in PDF Reader (Instant & Offline)';
+                                btn.style.cssText = 'position:absolute; top:8px; right:8px; z-index:999999; background:#2563eb; color:#ffffff; border:none; padding:8px 14px; border-radius:8px; font-weight:bold; font-size:12px; box-shadow:0 4px 10px rgba(0,0,0,0.5); cursor:pointer; font-family:sans-serif;';
+                                btn.onclick = function(ev) {
+                                  ev.preventDefault();
+                                  ev.stopPropagation();
+                                  if (window.AppBridge && realPdfUrl) {
+                                    window.AppBridge.postMessage(JSON.stringify({
+                                      action: 'downloadPdf',
+                                      url: realPdfUrl,
+                                      title: document.title || 'NCERT Chapter'
+                                    }));
+                                  }
+                                };
+                                parent.style.position = 'relative';
+                                parent.appendChild(btn);
+                              }
+
+                              // Bust Google Docs Viewer 503 cached failure
+                              if (!src.includes('&cb=')) {
+                                iframe.setAttribute('src', src + '&cb=' + Date.now());
+                              }
+                            }
+                          });
+                        }
+                        fixNcertPreviews();
+                        if (!window.__ncertObserver) {
+                          window.__ncertObserver = new MutationObserver(fixNcertPreviews);
+                          window.__ncertObserver.observe(document.body, { childList: true, subtree: true });
+                        }
                       })();
                     """);
+
                     final token = NotificationService().fcmToken;
                     if (token != null) _bridgeHandler.injectFCMToken(token);
                     _injectInstalledApps();
 
-                    // Task 3: Check if a session was stopped & saved directly while in background or dead
-                    try {
-                      final pending = await const MethodChannel('com.prepwise/focusblocker')
-                          .invokeMethod<Map<dynamic, dynamic>>('getPendingSession');
-                      if (pending != null && pending['hasPending'] == true) {
-                        final int secs = pending['seconds'] as int? ?? 0;
-                        final String subj = pending['subject'] as String? ?? 'General';
-                        final String mode = pending['mode'] as String? ?? 'Study';
-                        final int ts = pending['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch;
-
-                        controller.runJavaScript("""
-                          (function(){
-                            if(typeof window.onNativeSavePendingSession === 'function'){
-                              window.onNativeSavePendingSession({
-                                subject: '$subj',
-                                mode: '$mode',
-                                seconds: $secs,
-                                timestamp: $ts
-                              });
-                            } else if (typeof window.onDirectLoggedSession === 'function') {
-                              window.onDirectLoggedSession({
-                                subject: '$subj',
-                                mode: '$mode',
-                                seconds: $secs,
-                                timestamp: $ts
-                              });
+                    // Continuous bridge for active session restoration, routing, dashboard card name, and leaderboard strict hours
+                    controller.runJavaScript("""
+                      (function(){
+                        // 1. Hook onNativeRestoreActiveSession so Next.js immediately gets active session when /focus mounts
+                        var _restoreCb = null;
+                        Object.defineProperty(window, 'onNativeRestoreActiveSession', {
+                          configurable: true,
+                          enumerable: true,
+                          get: function() { return _restoreCb; },
+                          set: function(fn) {
+                            _restoreCb = fn;
+                            if (typeof fn === 'function' && window.__activeNativeSession && window.__activeNativeSession.elapsedSeconds >= 0) {
+                              setTimeout(function() {
+                                try { fn(window.__activeNativeSession); } catch(e){}
+                              }, 50);
                             }
-                          })();
-                        """);
-                      }
-                    } catch (_) {}
-
-                    final focus = FocusSessionService();
-                    if (focus.isSessionActive) {
-                      controller.runJavaScript("""
-                        (function(){
-                          if(typeof window.onNativeRestoreActiveSession === 'function'){
-                            window.onNativeRestoreActiveSession({
-                              subject: '${focus.subject}',
-                              mode: '${focus.mode}',
-                              elapsedSeconds: ${focus.elapsedSeconds},
-                              camEnabled: ${focus.camEnabled},
-                              blockerEnabled: ${focus.blockerEnabled}
-                            });
                           }
-                        })();
-                      """);
-                    }
+                        });
+
+                        // 2. Client-side route change detector (Next.js Link / router)
+                        function handleRouteChange() {
+                          var path = window.location.pathname || '';
+                          if (path.includes('/focus') || (document.body && document.body.innerText.includes('Focus Mode'))) {
+                            if (window.AppBridge) {
+                              window.AppBridge.postMessage(JSON.stringify({action: 'checkActiveSession'}));
+                            }
+                          }
+                          syncDashboardTodayStudy();
+                          syncLeaderboardStrictHours();
+                        }
+
+                        if (!window.__routeHookAttached) {
+                          window.__routeHookAttached = true;
+                          var origPush = history.pushState;
+                          history.pushState = function() {
+                            origPush.apply(this, arguments);
+                            setTimeout(handleRouteChange, 80);
+                          };
+                          var origReplace = history.replaceState;
+                          history.replaceState = function() {
+                            origReplace.apply(this, arguments);
+                            setTimeout(handleRouteChange, 80);
+                          };
+                          window.addEventListener('popstate', function() {
+                            setTimeout(handleRouteChange, 80);
+                          });
+                        }
+
+                        // 3. Rename "Today Focus" to "Today Study" and ensure combined study time is displayed
+                        function syncDashboardTodayStudy() {
+                          document.querySelectorAll('span, div, p').forEach(function(el) {
+                            if (el.children.length === 0 && (el.innerText || el.textContent || '').trim() === 'Today Focus') {
+                              el.innerText = 'Today Study';
+                              el.textContent = 'Today Study';
+                            }
+                          });
+                        }
+
+                        // 4. Leaderboard: show strictly verified study hours (both toggles ON) for current user
+                        function syncLeaderboardStrictHours() {
+                          if (!window.location.pathname.includes('/leaderboard')) return;
+                          try {
+                            var raw = localStorage.getItem('prepwise_strict_sessions') || '[]';
+                            var list = JSON.parse(raw);
+                            var now = Date.now();
+                            var weekMs = 7 * 24 * 60 * 60 * 1000;
+                            var strictSecs = 0;
+                            for (var i = 0; i < list.length; i++) {
+                              var it = list[i];
+                              if (it.timestamp && (now - it.timestamp) < weekMs) {
+                                strictSecs += (it.seconds || 0);
+                              }
+                            }
+                            var strictH = (strictSecs / 3600).toFixed(1);
+
+                            document.querySelectorAll('div').forEach(function(card) {
+                              var t = card.innerText || card.textContent || '';
+                              if (t.includes('(You)') && t.includes('this week')) {
+                                card.querySelectorAll('p').forEach(function(p) {
+                                  var pt = p.innerText || p.textContent || '';
+                                  if (pt.includes('day streak') && pt.includes('this week')) {
+                                    var spl = pt.split('\u00B7');
+                                    if (spl.length >= 2) {
+                                      p.innerText = spl[0].trim() + ' \u00B7 ' + strictH + 'h verified this week';
+                                    }
+                                  }
+                                });
+                              }
+                            });
+                          } catch(e) {}
+                        }
+
+                        syncDashboardTodayStudy();
+                        syncLeaderboardStrictHours();
+
+                        if (!window.__prepwiseDomSyncObserver) {
+                          window.__prepwiseDomSyncObserver = new MutationObserver(function() {
+                            syncDashboardTodayStudy();
+                            syncLeaderboardStrictHours();
+                          });
+                          window.__prepwiseDomSyncObserver.observe(document.body, { childList: true, subtree: true });
+                        }
+                      })();
+                    """);
+
+                    // Sync active session if running in background/foreground
+                    await _checkAndSyncActiveSession();
+
+                    // Check if a session was stopped & saved directly while in background or dead and log to Supabase
+                    await _checkAndLogPendingSessions();
                   },
                   onWebResourceError: (WebResourceError error) {
-                    if (error.isForMainFrame ?? true) setState(() { _hasError = true; _isLoading = false; });
+                    if (error.isForMainFrame ?? true) {
+                      setState(() {
+                        _hasError = true;
+                        _isLoading = false;
+                      });
+                    }
                   },
                   onNavigationRequest: (NavigationRequest request) {
                     final url = request.url;
 
                     // 1. Intercept non-http protocols
                     if (url.startsWith('intent://') || url.startsWith('tel:') || url.startsWith('mailto:') || url.startsWith('whatsapp:') || url.startsWith('market:')) {
-                      try { launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
+                      try {
+                        launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                      } catch (_) {}
                       return NavigationDecision.prevent;
                     }
 
-                    // 2. Intercept NCERT and other PDF downloads
+                    // 2. Intercept NCERT, direct PDFs, and Google Docs Viewer PDF requests
                     if (url.toLowerCase().endsWith('.pdf') ||
                         url.contains('application/pdf') ||
-                        url.contains('ncert.nic.in/textbook/pdf')) {
-                      PdfDownloadService.downloadAndOpenPdf(url);
+                        url.contains('ncert.nic.in/textbook/pdf') ||
+                        (url.contains('docs.google.com/viewer') && (url.contains('ncert.nic.in') || url.contains('.pdf')))) {
+                      String targetPdf = url;
+                      if (url.contains('docs.google.com/viewer')) {
+                        final parsed = Uri.tryParse(url);
+                        targetPdf = parsed?.queryParameters['url'] ?? url;
+                      }
+                      PdfDownloadService.downloadAndOpenPdf(targetPdf);
                       return NavigationDecision.prevent;
                     }
 
-                    // Allow all normal web navigation including Google OAuth (accounts.google.com) and Supabase
+                    // Allow all normal web navigation including Google OAuth and Supabase
                     return NavigationDecision.navigate;
                   },
-                ));
+                ))
+                ..addJavaScriptChannel(
+                  'FlutterBridge',
+                  onMessageReceived: (JavaScriptMessage message) {
+                    _bridgeHandler.handleMessage(message);
+                  },
+                );
 
               if (controller.platform is AndroidWebViewController) {
                 AndroidWebViewController.enableDebugging(false);
                 final androidController = controller.platform as AndroidWebViewController;
                 androidController.setMediaPlaybackRequiresUserGesture(false);
-                androidController.setOnPlatformPermissionRequest((request) => request.grant());
               }
 
-              _bridgeHandler = AppBridgeHandler(webViewController: controller);
-              controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: _bridgeHandler.handleMessage);
-              controller.loadRequest(Uri.parse(appUrl));
               _controller = controller;
+              _bridgeHandler = AppBridgeHandler(webViewController: _controller);
+              _controller.loadRequest(Uri.parse(appUrl));
             }
 
             Future<void> _injectInstalledApps() async {
               try {
-                final String jsonStr = await _appsChannel.invokeMethod('getInstalledApps');
-                final escaped = jsonStr.replaceAll("'", "\\'");
-                await _controller.runJavaScript("window.__nativeInstalledApps=JSON.parse('$escaped');if(window.onInstalledAppsReady)window.onInstalledAppsReady(window.__nativeInstalledApps);");
-              } catch (e) {
-                debugPrint('InstalledApps injection error: $e');
-              }
+                final String appsJson = await _appsChannel.invokeMethod('getInstalledApps');
+                await _controller.runJavaScript("""
+                  (function() {
+                    try {
+                      var raw = $appsJson;
+                      window.__nativeInstalledApps = Array.isArray(raw) ? raw : JSON.parse(raw);
+                      if (typeof window.onInstalledAppsReady === 'function') {
+                        window.onInstalledAppsReady(window.__nativeInstalledApps);
+                      }
+                    } catch(e) {}
+                  })();
+                """);
+              } catch (_) {}
             }
 
-            void _initNotifications() {
-              NotificationService().initialize(
-                onTokenReady: (token) { if (!_isLoading) _bridgeHandler.injectFCMToken(token); },
-                onNotificationClick: (payload) => _bridgeHandler.handleNotificationClick(payload),
-                onFocusStopAction: () => _bridgeHandler.triggerInAppStopConfirmation(),
+            Future<void> _initNotifications() async {
+              await NotificationService().initialize(
+                onSelectNotification: (String? payload) {
+                  if (payload != null && payload.isNotEmpty) {
+                    _controller.runJavaScript("""
+                      (function(){
+                        if (typeof window.onNotificationDeepLink === 'function') {
+                          window.onNotificationDeepLink('$payload');
+                        }
+                      })();
+                    """);
+                  }
+                },
+                onFocusStopAction: () {
+                  _bridgeHandler.triggerInAppStopDirect();
+                },
               );
             }
 
-            @override
-            void didChangeAppLifecycleState(AppLifecycleState state) async {
-              if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-                FocusSessionService().onBackground();
-              } else if (state == AppLifecycleState.resumed) {
+            Future<void> _checkAndSyncActiveSession() async {
+              try {
+                final active = await const MethodChannel('com.prepwise/focusblocker')
+                    .invokeMethod<Map<dynamic, dynamic>>('getActiveSession');
+                if (active != null && active['isActive'] == true) {
+                  final int secs = active['elapsedSeconds'] as int? ?? 0;
+                  final String subj = active['subject'] as String? ?? 'General';
+                  final String md = active['mode'] as String? ?? 'Study';
+                  final bool cam = active['camEnabled'] == true;
+                  final bool blk = active['blockerEnabled'] == true;
+
+                  FocusSessionService().syncFromNative(
+                    subject: subj,
+                    mode: md,
+                    elapsedSeconds: secs,
+                    camEnabled: cam,
+                    blockerEnabled: blk,
+                  );
+
+                  _startPeriodicTimerSync();
+
+                  await _controller.runJavaScript("""
+                    (function(){
+                      window.__activeNativeSession = {
+                        subject: '$subj',
+                        mode: '$md',
+                        elapsedSeconds: $secs,
+                        camEnabled: $cam,
+                        blockerEnabled: $blk
+                      };
+                      if (typeof window.onNativeRestoreActiveSession === 'function') {
+                        window.onNativeRestoreActiveSession(window.__activeNativeSession);
+                      }
+                      if (typeof window.onNativeFocusTimerSync === 'function') {
+                        window.onNativeFocusTimerSync($secs);
+                      }
+                    })();
+                  """);
+                } else {
+                  _stopPeriodicTimerSync();
+                }
+              } catch (_) {}
+            }
+
+            void _startPeriodicTimerSync() {
+              _syncTimer?.cancel();
+              _syncTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
                 try {
-                  final int? elapsed = await const MethodChannel('com.prepwise/focusblocker')
+                  final int? secs = await const MethodChannel('com.prepwise/focusblocker')
                       .invokeMethod<int>('getElapsedSeconds');
-                  if (elapsed != null && elapsed > 0) {
-                    FocusSessionService().onForeground(elapsed);
-                    await _controller.runJavaScript(
-                      "(function(){ if(typeof window.onNativeFocusTimerSync==='function') window.onNativeFocusTimerSync($elapsed); })();"
-                    );
-                  } else if (elapsed == 0 && FocusSessionService().isSessionActive) {
-                    // elapsed=0 means service stopped — sync stop to web too
-                    FocusSessionService().stopSession();
-                    await _controller.runJavaScript(
-                      "(function(){ if(typeof window.onNativeDirectStopFocus==='function') window.onNativeDirectStopFocus(); })();"
-                    );
+                  if (secs != null && secs >= 0) {
+                    _controller.runJavaScript("""
+                      (function(){
+                        if (window.__activeNativeSession) {
+                          window.__activeNativeSession.elapsedSeconds = $secs;
+                        }
+                        if (typeof window.onNativeFocusTimerSync === 'function') {
+                          window.onNativeFocusTimerSync($secs);
+                        }
+                      })();
+                    """);
                   }
                 } catch (_) {}
+              });
+            }
+
+            void _stopPeriodicTimerSync() {
+              _syncTimer?.cancel();
+              _syncTimer = null;
+            }
+
+            Future<void> _checkAndLogPendingSessions() async {
+              try {
+                final pending = await const MethodChannel('com.prepwise/focusblocker')
+                    .invokeMethod<Map<dynamic, dynamic>>('getPendingSession');
+                if (pending != null && pending['hasPending'] == true) {
+                  final int secs = pending['seconds'] as int? ?? 0;
+                  final String subj = pending['subject'] as String? ?? 'General';
+                  final String mode = pending['mode'] as String? ?? 'Study';
+                  final bool cam = pending['camEnabled'] == true;
+                  final bool blk = pending['blockerEnabled'] == true;
+                  final int ts = pending['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch;
+
+                  if (secs > 0) {
+                    await _logSessionDirectlyToSupabase(
+                      seconds: secs,
+                      subject: subj,
+                      mode: mode,
+                      camEnabled: cam,
+                      blockerEnabled: blk,
+                      timestamp: ts,
+                    );
+                  }
+                }
+              } catch (e) {
+                debugPrint("Error checking pending sessions: $e");
               }
             }
 
-            @override
-            void dispose() {
-              WidgetsBinding.instance.removeObserver(this);
-              super.dispose();
-            }
+            Future<void> _logSessionDirectlyToSupabase({
+              required int seconds,
+              required String subject,
+              required String mode,
+              required bool camEnabled,
+              required bool blockerEnabled,
+              required int timestamp,
+            }) async {
+              final String js = """
+                (async function(){
+                  try {
+                    var userId = null;
+                    var accessToken = null;
+                    for (var i = 0; i < localStorage.length; i++) {
+                      var k = localStorage.key(i);
+                      if (k && (k.indexOf('auth-token') !== -1 || k.indexOf('sb-') === 0)) {
+                        try {
+                          var v = JSON.parse(localStorage.getItem(k));
+                          if (v && v.user && v.user.id) {
+                            userId = v.user.id;
+                            accessToken = v.access_token;
+                            break;
+                          }
+                        } catch(e) {}
+                      }
+                    }
+                    if (!userId || !accessToken) return;
 
-            Future<void> _handlePopScope(bool didPop) async {
-              if (didPop) return;
-              if (await _controller.canGoBack()) {
-                await _controller.goBack();
-                return;
-              }
-              final now = DateTime.now();
-              if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
-                _lastBackPressTime = now;
-                AppToast.show("Press back again to exit PrepWise");
-                return;
-              }
-              Navigator.of(context).pop();
+                    var supabaseUrl = 'https://tvhgqdgwpjivwuiawdrf.supabase.co';
+                    var anonKey = 'sb_publishable_dkMHodPE0rD9hPSlq88kAw_SenHt33L';
+                    var headers = {
+                      'apikey': anonKey,
+                      'Authorization': 'Bearer ' + accessToken,
+                      'Content-Type': 'application/json',
+                      'Prefer': 'resolution=merge-duplicates'
+                    };
+
+                    var elapsedSecs = $seconds;
+                    var addMins = Math.max(1, Math.round(elapsedSecs / 60));
+                    var todayStr = new Date().toISOString().split('T')[0];
+                    var curMode = '$mode';
+                    var curSubj = '$subject';
+                    var bothToggles = $camEnabled && $blockerEnabled;
+
+                    // Read current daily_logs
+                    var getUrl = supabaseUrl + '/rest/v1/daily_logs?user_id=eq.' + userId + '&log_date=eq.' + todayStr + '&select=*';
+                    var curLogs = [];
+                    try {
+                      var res = await fetch(getUrl, { headers: { 'apikey': anonKey, 'Authorization': 'Bearer ' + accessToken } });
+                      if (res.ok) curLogs = await res.json();
+                    } catch(e) {}
+
+                    var existing = (curLogs && curLogs.length > 0) ? curLogs[0] : null;
+                    var totalStudy = (existing && existing.study_time_minutes ? existing.study_time_minutes : 0) + addMins;
+                    var totalTheory = (existing && existing.theory_minutes ? existing.theory_minutes : 0) + (curMode === 'Theory' ? addMins : 0);
+                    var totalPractice = (existing && existing.practice_minutes ? existing.practice_minutes : 0) + (curMode === 'Practice' || curMode === 'questions' ? addMins : 0);
+                    var totalRevision = (existing && existing.revision_minutes ? existing.revision_minutes : 0) + (curMode === 'Revision' ? addMins : 0);
+
+                    await fetch(supabaseUrl + '/rest/v1/daily_logs', {
+                      method: 'POST',
+                      headers: headers,
+                      body: JSON.stringify({
+                        user_id: userId,
+                        log_date: todayStr,
+                        study_time_minutes: totalStudy,
+                        theory_minutes: totalTheory,
+                        practice_minutes: totalPractice,
+                        revision_minutes: totalRevision
+                      })
+                    });
+
+                    // Insert into focus_sessions
+                    var startTime = new Date($timestamp - (elapsedSecs * 1000)).toISOString();
+                    var endTime = new Date($timestamp).toISOString();
+                    await fetch(supabaseUrl + '/rest/v1/focus_sessions', {
+                      method: 'POST',
+                      headers: {
+                        'apikey': anonKey,
+                        'Authorization': 'Bearer ' + accessToken,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        user_id: userId,
+                        started_at: startTime,
+                        ended_at: endTime,
+                        duration_seconds: elapsedSecs,
+                        counts_for_streak: elapsedSecs >= 1200,
+                        subject: curSubj
+                      })
+                    });
+
+                    if (bothToggles) {
+                      try {
+                        var rawList = localStorage.getItem('prepwise_strict_sessions') || '[]';
+                        var strictList = JSON.parse(rawList);
+                        strictList.push({
+                          date: todayStr,
+                          seconds: elapsedSecs,
+                          minutes: addMins,
+                          timestamp: $timestamp
+                        });
+                        localStorage.setItem('prepwise_strict_sessions', JSON.stringify(strictList));
+                      } catch(e) {}
+                    }
+
+                    if (window.AppBridge) {
+                      window.AppBridge.postMessage(JSON.stringify({
+                        action: 'toast',
+                        message: 'Study session logged (' + addMins + 'm added to Today Study)!'
+                      }));
+                    }
+                  } catch(err) {
+                    console.error('Direct Supabase log error:', err);
+                  }
+                })();
+              """;
+              await _controller.runJavaScript(js);
             }
 
             @override
             Widget build(BuildContext context) {
               return PopScope(
                 canPop: false,
-                onPopInvokedWithResult: (didPop, result) => _handlePopScope(didPop),
+                onPopInvokedWithResult: (didPop, result) async {
+                  if (didPop) return;
+                  if (await _controller.canGoBack()) {
+                    _controller.goBack();
+                    return;
+                  }
+                  final now = DateTime.now();
+                  if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+                    _lastBackPressTime = now;
+                    AppToast.show("Press back again to exit PrepWise");
+                    return;
+                  }
+                  SystemNavigator.pop();
+                },
                 child: Scaffold(
                   backgroundColor: const Color(0xFF0F172A),
                   body: SafeArea(
-                    child: Stack(children: [
-                      RefreshIndicator(
-                        color: const Color(0xFF0D9488),
-                        backgroundColor: const Color(0xFF1E293B),
-                        onRefresh: () async => await _controller.reload(),
-                        child: WebViewWidget(controller: _controller),
-                      ),
-                      if (_isLoading && _progress < 1.0)
-                        Positioned(
-                          top: 0, left: 0, right: 0,
-                          child: LinearProgressIndicator(
-                            value: _progress,
-                            backgroundColor: Colors.transparent,
-                            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF0D9488)),
-                            minHeight: 2.5,
-                          ),
-                        ),
-                      if (_hasError)
-                        Container(
-                          color: const Color(0xFF0F172A),
-                          width: double.infinity,
-                          height: double.infinity,
-                          padding: const EdgeInsets.all(24),
-                          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            const Icon(Icons.wifi_off_rounded, size: 64, color: Color(0xFFF59E0B)),
-                            const SizedBox(height: 16),
-                            const Text("Connection Interrupted", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
-                            const Text("Unable to connect to PrepWise servers. Check your internet connection.", textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
-                            const SizedBox(height: 24),
-                            ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF0D9488),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: Stack(
+                      children: [
+                        WebViewWidget(controller: _controller),
+                        // Task 4: Isolated ValueListenableBuilder prevents whole-screen rebuilding on progress ticks
+                        ValueListenableBuilder<double>(
+                          valueListenable: _progressNotifier,
+                          builder: (context, progress, _) {
+                            if (progress >= 1.0 || !_isLoading) return const SizedBox.shrink();
+                            return Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              child: LinearProgressIndicator(
+                                value: progress > 0 ? progress : null,
+                                backgroundColor: Colors.transparent,
+                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF0D9488)),
+                                minHeight: 2.5,
                               ),
-                              onPressed: () { setState(() { _hasError = false; _isLoading = true; }); _controller.loadRequest(Uri.parse(appUrl)); },
-                              icon: const Icon(Icons.refresh_rounded),
-                              label: const Text("Retry Connection", style: TextStyle(fontWeight: FontWeight.bold)),
-                            ),
-                          ]),
+                            );
+                          },
                         ),
-                    ]),
+                        if (_hasError)
+                          Container(
+                            color: const Color(0xFF0F172A),
+                            child: Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24.0),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.wifi_off_rounded, color: Colors.white70, size: 56),
+                                    const SizedBox(height: 16),
+                                    const Text(
+                                      "Unable to load PrepWise",
+                                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      "Please check your internet connection and try again.",
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(color: Colors.white60, fontSize: 13),
+                                    ),
+                                    const SizedBox(height: 24),
+                                    ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF0D9488),
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      ),
+                                      onPressed: () {
+                                        setState(() {
+                                          _isLoading = true;
+                                          _hasError = false;
+                                        });
+                                        _controller.reload();
+                                      },
+                                      icon: const Icon(Icons.refresh),
+                                      label: const Text("Retry"),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               );
+            }
+          }
+
+          extension AppBridgeHandlerExtension on AppBridgeHandler {
+            void injectFCMToken(String token) {
+              webViewController.runJavaScript("""
+                (function(){
+                  try {
+                    if (typeof window.onNativeFCMToken === 'function') {
+                      window.onNativeFCMToken('$token');
+                    }
+                  } catch(e) {}
+                })();
+              """);
             }
           }
           DART_WEB_EOF
@@ -2960,3 +3827,6 @@ jobs:
         with:
           name: PrepWise-Android-APK
           path: prepwise_app/build/app/outputs/flutter-apk/app-release.apk
+
+
+
