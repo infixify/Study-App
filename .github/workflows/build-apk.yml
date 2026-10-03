@@ -949,7 +949,7 @@ jobs:
 
                           if (camEnabled) {
                               if (canDrawOverlay()) showFloatingDot()
-                              if (cameraProvider == null) startNativeFaceTracker()
+                              if (!isCameraRunning) startNativeFaceTracker()
                           } else {
                               removeFloatingDot()
                               stopNativeFaceTracker()
@@ -1006,7 +1006,7 @@ jobs:
 
                           if (camEnabled) {
                               if (canDrawOverlay()) showFloatingDot()
-                              if (cameraProvider == null) startNativeFaceTracker()
+                              if (!isCameraRunning) startNativeFaceTracker()
                           } else {
                               removeFloatingDot()
                               stopNativeFaceTracker()
