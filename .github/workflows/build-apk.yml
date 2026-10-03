@@ -3851,6 +3851,7 @@ jobs:
                 AndroidWebViewController.enableDebugging(false);
                 final androidController = controller.platform as AndroidWebViewController;
                 androidController.setMediaPlaybackRequiresUserGesture(false);
+                androidController.setCacheMode(WebCacheMode.noCache);
               }
 
               _controller = controller;
