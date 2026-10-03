@@ -660,10 +660,13 @@ jobs:
 
               companion object {
                   const val ACTION_START            = "com.prepwise.ACTION_FOCUS_START"
+                  const val ACTION_RESUME           = "com.prepwise.ACTION_FOCUS_RESUME"
                   const val ACTION_STOP             = "com.prepwise.ACTION_FOCUS_STOP"
                   const val ACTION_STOP_REQUEST     = "com.prepwise.ACTION_FOCUS_STOP_REQUEST"
                   const val ACTION_UPDATE_BLOCKED   = "com.prepwise.ACTION_UPDATE_BLOCKED"
                   const val ACTION_SET_CAM_STATUS   = "com.prepwise.ACTION_SET_CAM_STATUS"
+
+                  @Volatile var isStopping: Boolean = false
                   const val EXTRA_BLOCKED_APPS      = "blocked_apps"
                   const val EXTRA_SUBJECT           = "subject"
                   const val EXTRA_MODE              = "mode"
@@ -767,9 +770,18 @@ jobs:
 
               override fun onTaskRemoved(rootIntent: Intent?) {
                   super.onTaskRemoved(rootIntent)
-                  if (currentElapsedSeconds > 0) {
+                  if (currentElapsedSeconds > 0 && startTimestampMs > 0) {
+                      // Save current epoch-based timer state so restart can resume without reset
+                      val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                      prefs.edit()
+                          .putLong("focus_start_ts", startTimestampMs)
+                          .putLong("focus_paused_duration", pausedDurationMs)
+                          .putBoolean("focus_cam_paused", camPaused)
+                          .putLong("focus_pause_start", pauseStartMs)
+                          .putBoolean("focus_was_running", true)
+                          .apply()
                       val restartIntent = Intent(applicationContext, FocusBlockerService::class.java).apply {
-                          action = ACTION_START
+                          action = ACTION_RESUME
                           putStringArrayListExtra(EXTRA_BLOCKED_APPS, ArrayList(blockedApps))
                           putExtra(EXTRA_SUBJECT, subject)
                           putExtra(EXTRA_MODE, mode)
@@ -789,6 +801,7 @@ jobs:
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
                   when (intent?.action) {
                       ACTION_START -> {
+                          if (isStopping) { isStopping = false }
                           val apps       = intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: arrayListOf()
                           blockedApps    = apps.toList()
                           subject        = intent.getStringExtra(EXTRA_SUBJECT) ?: "General"
@@ -796,39 +809,102 @@ jobs:
                           camEnabled     = intent.getBooleanExtra(EXTRA_CAM_ENABLED, false)
                           blockerEnabled = intent.getBooleanExtra(EXTRA_BLOCKER_ENABLED, false)
 
-                          startTimestampMs   = System.currentTimeMillis()
-                          pausedDurationMs   = 0L
-                          pauseStartMs       = 0L
+                          // Only reset timer if not already running (prevent double-start reset)
+                          if (startTimestampMs == 0L) {
+                              startTimestampMs   = System.currentTimeMillis()
+                              pausedDurationMs   = 0L
+                              pauseStartMs       = 0L
+                              lastReportedSecond = -1
+                              currentElapsedSeconds = 0
+                              camPaused  = false
+                              camVerified = true
+                              nativeMissCount = 0
+                              lastFaceCheckMs = 0L
+                          }
+
+                          startForeground(NOTIF_ID, buildNotification())
+                          handler.removeCallbacks(tickRunnable)
+                          handler.post(tickRunnable)
+                          lifecycleRegistry.currentState = Lifecycle.State.STARTED
+
+                          if (camEnabled) {
+                              if (cameraProvider == null) startNativeFaceDetection()
+                              if (canDrawOverlay()) showFloatingDot()
+                          } else {
+                              removeFloatingDot()
+                          }
+                      }
+                      ACTION_RESUME -> {
+                          // Restore epoch-based timer from saved prefs (after app was killed)
+                          if (isStopping) { isStopping = false }
+                          val apps       = intent?.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: arrayListOf()
+                          blockedApps    = apps.toList()
+                          subject        = intent?.getStringExtra(EXTRA_SUBJECT) ?: "General"
+                          mode           = intent?.getStringExtra(EXTRA_MODE) ?: "Study"
+                          camEnabled     = intent?.getBooleanExtra(EXTRA_CAM_ENABLED, false) ?: false
+                          blockerEnabled = intent?.getBooleanExtra(EXTRA_BLOCKER_ENABLED, false) ?: false
+
+                          val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                          val savedStart = prefs.getLong("focus_start_ts", 0L)
+                          val savedPaused = prefs.getLong("focus_paused_duration", 0L)
+                          val savedCamPaused = prefs.getBoolean("focus_cam_paused", false)
+                          val savedPauseStart = prefs.getLong("focus_pause_start", 0L)
+                          prefs.edit()
+                              .remove("focus_start_ts").remove("focus_paused_duration")
+                              .remove("focus_cam_paused").remove("focus_pause_start")
+                              .remove("focus_was_running").apply()
+
+                          if (savedStart > 0L) {
+                              // Restore epoch-based timing — timer continues from where it left off
+                              startTimestampMs = savedStart
+                              pausedDurationMs = savedPaused
+                              camPaused = savedCamPaused
+                              pauseStartMs = savedPauseStart
+                              // If was cam-paused when killed, keep that pause time accumulating correctly
+                              if (camPaused && pauseStartMs == 0L) pauseStartMs = System.currentTimeMillis()
+                          } else {
+                              // Fallback: start fresh if no saved state
+                              startTimestampMs   = System.currentTimeMillis()
+                              pausedDurationMs   = 0L
+                              pauseStartMs       = 0L
+                              camPaused = false
+                          }
+                          camVerified = !camPaused
                           lastReportedSecond = -1
-                          currentElapsedSeconds = 0
-                          camPaused  = false
-                          camVerified = true
                           nativeMissCount = 0
                           lastFaceCheckMs = 0L
 
                           startForeground(NOTIF_ID, buildNotification())
                           handler.removeCallbacks(tickRunnable)
                           handler.post(tickRunnable)
-
-                          // Lifecycle to STARTED so CameraX can bind
                           lifecycleRegistry.currentState = Lifecycle.State.STARTED
 
                           if (camEnabled) {
-                              startNativeFaceDetection()
+                              if (cameraProvider == null) startNativeFaceDetection()
                               if (canDrawOverlay()) showFloatingDot()
                           } else {
                               removeFloatingDot()
                           }
                       }
                       ACTION_STOP_REQUEST -> {
-                          if (MainActivity.isAppForeground) sendStopRequestToWebApp()
-                          else directBackgroundStopAndLog()
+                          if (!isStopping) {
+                              if (MainActivity.isAppForeground) sendStopRequestToWebApp()
+                              else directBackgroundStopAndLog()
+                          }
                       }
                       ACTION_STOP -> {
+                          if (isStopping) return START_NOT_STICKY
+                          isStopping = true
                           handler.removeCallbacks(tickRunnable)
                           stopNativeFaceDetection()
                           removeOverlay()
                           removeFloatingDot()
+                          // Clear any saved resume state since we are intentionally stopping
+                          val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                          prefs.edit()
+                              .remove("focus_start_ts").remove("focus_paused_duration")
+                              .remove("focus_cam_paused").remove("focus_pause_start")
+                              .remove("focus_was_running").apply()
                           startTimestampMs = 0L
                           currentElapsedSeconds = 0
                           lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
@@ -844,7 +920,6 @@ jobs:
                           blockedApps = apps.toList()
                       }
                       ACTION_SET_CAM_STATUS -> {
-                          // This action is now only used as fallback from web; native detection drives cam status
                           val status = intent.getStringExtra(EXTRA_CAM_STATUS) ?: "verified"
                           applyCamStatus(status == "verified")
                       }
@@ -1171,7 +1246,19 @@ jobs:
 
               private fun updateDotTimer() {
                   val container = dotView ?: return
-                  container.findViewWithTag<TextView>("timerTv")?.text = formatElapsed(currentElapsedSeconds)
+                  val formatted = formatElapsed(currentElapsedSeconds)
+                  // Update ALL timerTv tags (compact dot has one, expanded card has another)
+                  fun updateAllTimerViews(v: android.view.ViewGroup) {
+                      for (i in 0 until v.childCount) {
+                          val child = v.getChildAt(i)
+                          if (child is TextView && child.tag == "timerTv") {
+                              child.text = formatted
+                          } else if (child is android.view.ViewGroup) {
+                              updateAllTimerViews(child)
+                          }
+                      }
+                  }
+                  if (container is android.view.ViewGroup) updateAllTimerViews(container)
               }
 
               private fun showDotView() {
@@ -1257,6 +1344,8 @@ jobs:
               }
 
               private fun directBackgroundStopAndLog() {
+                  if (isStopping) return
+                  isStopping = true
                   handler.removeCallbacks(tickRunnable)
                   stopNativeFaceDetection()
                   removeOverlay()
@@ -1270,6 +1359,10 @@ jobs:
                           .putString("pending_session_subject", subject)
                           .putString("pending_session_mode", mode)
                           .putLong("pending_session_timestamp", System.currentTimeMillis())
+                          // Clear resume state since session is being stopped
+                          .remove("focus_start_ts").remove("focus_paused_duration")
+                          .remove("focus_cam_paused").remove("focus_pause_start")
+                          .remove("focus_was_running")
                           .apply()
                   } catch (_: Exception) {}
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
@@ -1289,6 +1382,7 @@ jobs:
                   removeOverlay()
                   removeFloatingDot()
                   currentElapsedSeconds = 0
+                  isStopping = false  // Reset for next session
                   lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
                   releaseWakeLock()
                   super.onDestroy()
@@ -2709,18 +2803,21 @@ jobs:
             @override
             void didChangeAppLifecycleState(AppLifecycleState state) async {
               if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-                // Pause the Flutter UI timer - Kotlin service keeps counting in background
                 FocusSessionService().onBackground();
               } else if (state == AppLifecycleState.resumed) {
-                // Ask Kotlin service how many seconds have elapsed, sync Flutter UI
                 try {
                   final int? elapsed = await const MethodChannel('com.prepwise/focusblocker')
                       .invokeMethod<int>('getElapsedSeconds');
-                  if (elapsed != null) {
+                  if (elapsed != null && elapsed > 0) {
                     FocusSessionService().onForeground(elapsed);
-                    // Also push the synced time back to the web app
                     await _controller.runJavaScript(
                       "(function(){ if(typeof window.onNativeFocusTimerSync==='function') window.onNativeFocusTimerSync($elapsed); })();"
+                    );
+                  } else if (elapsed == 0 && FocusSessionService().isSessionActive) {
+                    // elapsed=0 means service stopped — sync stop to web too
+                    FocusSessionService().stopSession();
+                    await _controller.runJavaScript(
+                      "(function(){ if(typeof window.onNativeDirectStopFocus==='function') window.onNativeDirectStopFocus(); })();"
                     );
                   }
                 } catch (_) {}
