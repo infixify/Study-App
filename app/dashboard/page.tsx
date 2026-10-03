@@ -17,6 +17,8 @@ declare global {
       postMessage: (message: string) => void;
     };
     onNativeFCMToken?: (token: string) => void;
+    onNativeFocusSessionLogged?: (mins: number) => void;
+    onDirectLoggedSession?: (data: any) => void;
   }
 }
 
@@ -240,11 +242,11 @@ function getGreeting(name: string, hour: number): string {
 function HeroWidget({
   name,
   streak,
-  todayFocusMins,
+  todayStudyMins,
 }: {
   name: string;
   streak: number;
-  todayFocusMins: number;
+  todayStudyMins: number;
 }) {
   const [hour, setHour] = useState(new Date().getHours());
   const [mode, setMode] = useState<"motivation" | "meme">("motivation");
@@ -351,7 +353,7 @@ function HeroWidget({
   }, [mode, pickNextItem]);
 
   const greeting = getGreeting(name, hour);
-  const todayHours = (todayFocusMins / 60).toFixed(1);
+  const todayHours = (todayStudyMins / 60).toFixed(1);
 
   const greetingFontClass = greeting.length > 35 ? "text-xs" : "text-sm sm:text-base";
   const quoteLength = currentItem?.quote?.length ?? 0;
@@ -770,7 +772,8 @@ export default function DashboardPage() {
   const [mentorLoading, setMentorLoading] = useState(false);
   const [doubtOpen, setDoubtOpen] = useState(false);
 
-  const [todayFocusMins, setTodayFocusMins] = useState(0);
+  // Point 12: Combined Total Study Minutes (Timer sessions + Manual offline study)
+  const [todayStudyMins, setTodayStudyMins] = useState(0);
   const [todayQuestions, setTodayQuestions] = useState(0);
   const [totalQuestionsAllTime, setTotalQuestionsAllTime] = useState(0);
   const [streak, setStreak] = useState(0);
@@ -828,6 +831,19 @@ export default function DashboardPage() {
     window.onNativeFCMToken = (token: string) => {
       localStorage.setItem("prepwise_native_fcm_token", token);
       syncNativeToken(token);
+    };
+
+    // Live listener for direct background study session logging from native bridge
+    window.onNativeFocusSessionLogged = (addedMins: number) => {
+      if (typeof addedMins === "number" && addedMins > 0) {
+        setTodayStudyMins((prev) => prev + addedMins);
+      }
+    };
+    window.onDirectLoggedSession = (data: any) => {
+      if (data?.seconds) {
+        const addedMins = Math.max(1, Math.round(data.seconds / 60));
+        setTodayStudyMins((prev) => prev + addedMins);
+      }
     };
   }, []);
 
@@ -982,6 +998,7 @@ export default function DashboardPage() {
 
       const todayStr = new Date().toISOString().split("T")[0];
 
+      // 1. Fetch daily logs for the 84-day consistency matrix & breakdown
       const { data: pastLogs } = await supabase
         .from("daily_logs")
         .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, streak_count, log_date")
@@ -994,9 +1011,29 @@ export default function DashboardPage() {
       }
 
       const todayLog = pastLogs?.find((l) => l.log_date === todayStr);
+      const dailyLogMins = todayLog?.study_time_minutes || 0;
 
-      // Point 12: Total study time (Timer + Manual offline study)
-      setTodayFocusMins(todayLog?.study_time_minutes || 0);
+      // 2. Fetch today's focus sessions to guarantee any background/killed app sessions are counted
+      const todayStartIso = `${todayStr}T00:00:00.000Z`;
+      let sessionMins = 0;
+      try {
+        const { data: todaySessions } = await supabase
+          .from("focus_sessions")
+          .select("duration_seconds")
+          .eq("user_id", session.user.id)
+          .gte("started_at", todayStartIso);
+
+        if (todaySessions && todaySessions.length > 0) {
+          const totalSecs = todaySessions.reduce((acc, s) => acc + (s.duration_seconds || 0), 0);
+          sessionMins = Math.round(totalSecs / 60);
+        }
+      } catch (err) {
+        console.error("Focus sessions query error:", err);
+      }
+
+      // Combine timer sessions + manual entries (ensuring no drop if daily_logs was delayed)
+      const combinedTotalTodayStudyMins = Math.max(dailyLogMins, sessionMins);
+      setTodayStudyMins(combinedTotalTodayStudyMins);
 
       // Point 2: Unified streak reconciliation engine (Synchronized with Focus page)
       try {
@@ -1205,7 +1242,6 @@ export default function DashboardPage() {
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   };
 
-  // Point 8: High-performance branded splash loader that prevents any login screen flicker
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center text-white p-6">
@@ -1220,7 +1256,7 @@ export default function DashboardPage() {
 
   const targetExam = profile?.target_exam || "JEE";
   const allowedClasses = classLevelsForContent(profile?.class_level);
-  const todayHours = (todayFocusMins / 60).toFixed(1);
+  const todayHours = (todayStudyMins / 60).toFixed(1);
 
   const sumSplit = splitRatio.theory + splitRatio.practice + splitRatio.revision;
   const totalSplitMins = sumSplit > 0 ? sumSplit : 1;
@@ -1244,7 +1280,7 @@ export default function DashboardPage() {
         <HeroWidget
           name={firstName}
           streak={streak}
-          todayFocusMins={todayFocusMins}
+          todayStudyMins={todayStudyMins}
         />
 
         {/* 1. COMPACT DUAL/SINGLE COUNTDOWN CAROUSEL */}
@@ -1317,20 +1353,20 @@ export default function DashboardPage() {
           onOpenDoubtSolver={() => setDoubtOpen(true)}
         />
 
-        {/* 3. THREE COCKPIT METRICS (Point 12: Total Study Time Timer + Offline) */}
+        {/* 3. THREE COCKPIT METRICS (Total Study Time: Timer + Offline/Manual Study) */}
         <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => router.push("/focus")}
             className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] text-left active:scale-[0.98] transition-all hover:border-teal-500"
           >
-            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Today Focus</span>
+            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Today Study</span>
             <div className="text-lg font-black text-slate-900 tracking-tight">
               {todayHours}
               <span className="text-xs font-semibold text-slate-500 ml-0.5">h</span>
-              <span className="text-[10px] font-bold text-slate-400 ml-1">({todayFocusMins}m)</span>
+              <span className="text-[10px] font-bold text-slate-400 ml-1">({todayStudyMins}m)</span>
             </div>
-            <span className="text-[10px] font-bold text-teal-700 block mt-0.5">Timer →</span>
+            <span className="text-[10px] font-bold text-teal-700 block mt-0.5">Study Timer →</span>
           </button>
 
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
