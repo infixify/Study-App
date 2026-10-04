@@ -111,6 +111,11 @@ export default function StudyPage() {
 
   const isVerifiedSession = faceVerificationEnabled && appBlockerEnabled && overlayGranted && usageGranted;
 
+  // Gap 6 Fix: Ref that always points to the LATEST handleDirectStopAndSave
+  // Prevents stale closure — window.onNativeDirectStopFocus set once on mount
+  // but needs fresh userId/startTime/seconds on every call
+  const handleDirectStopAndSaveRef = React.useRef<() => Promise<void>>(() => Promise.resolve());
+
   function applyNativeApps(raw: { name: string; packageName: string }[]) {
     const items = raw.map(nativeToAppItem);
     setAllApps(items);
@@ -158,18 +163,21 @@ export default function StudyPage() {
       } catch (err) {}
     }
 
-    const duration = seconds;
     setIsActive(false);
     setNativeCamPaused(false);
 
+    // Kotlin handles ALL logging (daily_logs + focus_sessions) via directBackgroundStopAndLog
+    // Web MUST NOT call flushDiffToDailyLogs here — would cause double-log
+    // Web only updates UI state below
     if (!userId || !startTime) {
       setSeconds(0);
+      lastSyncedSecondsRef.current = 0;
       return;
     }
 
     setSaving(true);
     try {
-      await flushDiffToDailyLogs(duration, isVerifiedSession);
+      // Only save focus_session record for streak tracking (Kotlin saves daily_logs)
       const endedAt = new Date();
       const streakResult = await saveFocusSession(userId, startTime, endedAt);
       if (streakResult.countedForStreak) {
@@ -185,14 +193,18 @@ export default function StudyPage() {
     lastSyncedSecondsRef.current = 0;
   };
 
+  // Gap 6 Fix: Keep ref always pointing to latest function (fresh closure every render)
+  handleDirectStopAndSaveRef.current = handleDirectStopAndSave;
+
   useEffect(() => {
     if (typeof window !== "undefined" && window.AppBridge) {
       setIsNativeApp(true);
     }
 
     if (typeof window !== "undefined") {
-      window.onNativeDirectStopFocus = () => { handleDirectStopAndSave(); };
-      window.onNativeRequestStopFocus = () => { handleDirectStopAndSave(); };
+      // Gap 6 Fix: Use ref so always calls latest handleDirectStopAndSave (fresh userId/startTime)
+      window.onNativeDirectStopFocus = () => { handleDirectStopAndSaveRef.current(); };
+      window.onNativeRequestStopFocus = () => { handleDirectStopAndSaveRef.current(); };
       window.onNativeFocusTimerSync = (secs: number) => { setSeconds(secs); };
       window.onNativeRestoreActiveSession = (sess) => {
         if (sess && sess.elapsedSeconds > 0) {
@@ -384,7 +396,9 @@ export default function StudyPage() {
       clearInterval(syncIntervalRef.current);
     }
     return () => clearInterval(syncIntervalRef.current);
-  }, [isActive, userId, selectedTask]);
+  // Gap 1 Fix: faceVerificationEnabled/appBlockerEnabled/overlayGranted/usageGranted added
+  // Without these, isVerifiedSession captured at session start stays stale if toggles change mid-session
+  }, [isActive, userId, selectedTask, faceVerificationEnabled, appBlockerEnabled, overlayGranted, usageGranted]);
 
   const handleStartSession = async () => {
     if (typeof window !== "undefined" && window.AppBridge) {
