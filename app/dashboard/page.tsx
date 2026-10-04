@@ -226,14 +226,20 @@ function HeroWidget({
   onGoalSaved: (mins: number) => void;
 }) {
   const [hour, setHour] = useState(new Date().getHours());
-  const [mode, setMode] = useState<"motivation" | "meme">("motivation");
+  // Mode persisted in localStorage
+  const [mode, setMode] = useState<"motivation" | "meme">(() => {
+    try { return (localStorage.getItem("pw_content_mode") as "motivation" | "meme") || "motivation"; } catch { return "motivation"; }
+  });
   const [dbItems, setDbItems] = useState<Record<string, ContentCardItem[]>>({ motivation: [], meme: [] });
   const [currentItem, setCurrentItem] = useState<ContentCardItem | null>(null);
+  const [imgKey, setImgKey] = useState(0); // force-remount image on card change to kill GIF flicker
   const [showGoalPopup, setShowGoalPopup] = useState(false);
   const [goalHours, setGoalHours] = useState(Math.round(dailyGoalMins / 60) || 8);
   // Daily persistence state
   const [dailyState, setDailyState] = useState<DailyContentState>(() => loadDailyContentState());
+  // limitHit: only true briefly after a tap, auto-clears after 3s
   const [limitHit, setLimitHit] = useState(false);
+  const limitTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const interval = setInterval(() => setHour(new Date().getHours()), 60_000);
@@ -284,6 +290,10 @@ function HeroWidget({
     const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
     const saved = loadDailyContentState();
 
+    // Always clear limit warning on mode switch / initial load (only shows after a tap)
+    if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
+    setLimitHit(false);
+
     if (mode === "motivation") {
       let item = motDeck.find((c) => c.id === saved.selectedMotivationId);
       if (!item) {
@@ -294,7 +304,7 @@ function HeroWidget({
         saveDailyContentState(next);
       }
       setCurrentItem(item || null);
-      setLimitHit(saved.motivationCount >= QUOTE_LIMIT);
+      setImgKey((k) => k + 1);
     } else {
       let item = memDeck.find((c) => c.id === saved.selectedMemeId);
       if (!item) {
@@ -305,12 +315,12 @@ function HeroWidget({
         saveDailyContentState(next);
       }
       setCurrentItem(item || null);
-      setLimitHit(saved.memeCount >= MEME_LIMIT);
+      setImgKey((k) => k + 1);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbItems, mode]);
 
-  // On tap: advance card, increment count, check limit
+  // On tap: advance card, increment count; show limit warning briefly if exceeded
   const handleTapCard = useCallback(() => {
     const motDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
     const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
@@ -324,7 +334,12 @@ function HeroWidget({
       setDailyState(next);
       saveDailyContentState(next);
       setCurrentItem(nextItem);
-      setLimitHit(newCount >= QUOTE_LIMIT);
+      setImgKey((k) => k + 1);
+      if (newCount >= QUOTE_LIMIT) {
+        setLimitHit(true);
+        if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
+        limitTimerRef.current = setTimeout(() => setLimitHit(false), 3000);
+      }
     } else {
       const newCount = saved.memeCount + 1;
       const nextIdx = (saved.memeIndex + 1) % memDeck.length;
@@ -333,7 +348,12 @@ function HeroWidget({
       setDailyState(next);
       saveDailyContentState(next);
       setCurrentItem(nextItem);
-      setLimitHit(newCount >= MEME_LIMIT);
+      setImgKey((k) => k + 1);
+      if (newCount >= MEME_LIMIT) {
+        setLimitHit(true);
+        if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
+        limitTimerRef.current = setTimeout(() => setLimitHit(false), 3000);
+      }
     }
   }, [dbItems, mode]);
 
@@ -457,7 +477,7 @@ function HeroWidget({
         <div className="w-full p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-black flex items-center mb-2.5 shadow-inner">
           <button
             type="button"
-            onClick={() => setMode("motivation")}
+            onClick={() => { setMode("motivation"); try { localStorage.setItem("pw_content_mode", "motivation"); } catch (_) {} }}
             className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${
               mode === "motivation" ? "bg-white text-slate-900 shadow-sm font-black" : "text-slate-500 hover:text-slate-900"
             }`}
@@ -466,7 +486,7 @@ function HeroWidget({
           </button>
           <button
             type="button"
-            onClick={() => setMode("meme")}
+            onClick={() => { setMode("meme"); try { localStorage.setItem("pw_content_mode", "meme"); } catch (_) {} }}
             className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${
               mode === "meme" ? "bg-white text-slate-900 shadow-sm font-black" : "text-slate-500 hover:text-slate-900"
             }`}
@@ -488,6 +508,7 @@ function HeroWidget({
                 {currentItem.icon_or_sticker &&
                 (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
                   <img
+                    key={imgKey}
                     src={currentItem.icon_or_sticker}
                     alt=""
                     className="w-full h-full object-cover rounded-2xl"
