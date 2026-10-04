@@ -44,8 +44,24 @@ function classTagEl(tag: string) {
   );
 }
 
+// 1. READ / OPEN PDF (Opens in native viewer with "Opening..." toast)
+function triggerRead(url: string, title: string) {
+  if (typeof window !== "undefined" && (window as any).AppBridge) {
+    (window as any).AppBridge.postMessage(
+      JSON.stringify({
+        action: "readPdf",
+        url: url,
+        title: title,
+      })
+    );
+    return;
+  }
+  // Web fallback: opens in new tab
+  window.open(url, "_blank");
+}
+
+// 2. DOWNLOAD TO DEVICE STORAGE (Saves to Downloads/PrepWise folder without force-opening viewer)
 function triggerDownload(url: string, title: string) {
-  // If inside native Android App, use Native DownloadManager & open_filex
   if (typeof window !== "undefined" && (window as any).AppBridge) {
     (window as any).AppBridge.postMessage(
       JSON.stringify({
@@ -104,9 +120,9 @@ export default function ResourceChapterList({
     .map((ch) => ({ ch, files: ofCategory.filter((r) => r.chapter_id === ch.id) }))
     .filter((row) => row.files.length > 0);
 
-  function handleOpenOrView(url: string, title: string) {
+  function handleView(url: string, title: string) {
     if (typeof window !== "undefined" && (window as any).AppBridge) {
-      triggerDownload(url, title);
+      triggerRead(url, title);
     } else {
       setViewingFile({ title, url });
     }
@@ -124,7 +140,7 @@ export default function ResourceChapterList({
           "button",
           {
             type: "button",
-            onClick: () => handleOpenOrView(r.url, r.title),
+            onClick: () => handleView(r.url, r.title),
             className:
               "text-center text-sm font-semibold py-2.5 rounded-lg bg-teal/10 text-teal border border-teal/30 hover:bg-teal/20 transition-colors",
           },
@@ -184,7 +200,7 @@ export default function ResourceChapterList({
           "button",
           {
             type: "button",
-            onClick: () => handleOpenOrView(files[0].url, ch.title),
+            onClick: () => handleView(files[0].url, ch.title),
             className:
               "px-3 py-1.5 text-xs font-semibold rounded-md bg-teal/10 text-teal border border-teal/20 active:scale-95 transition-all",
           },
@@ -241,7 +257,7 @@ export default function ResourceChapterList({
             "button",
             {
               type: "button",
-              onClick: () => triggerDownload(viewingFile.url, viewingFile.title),
+              onClick: () => triggerRead(viewingFile.url, viewingFile.title),
               className:
                 "px-2.5 py-1.5 text-xs font-medium rounded-md bg-ink/5 text-ink/70 border border-ink/10 active:scale-95 transition-all",
             },
@@ -293,11 +309,11 @@ export default function ResourceChapterList({
             "button",
             {
               type: "button",
-              onClick: () => triggerDownload(viewingFile.url, viewingFile.title),
+              onClick: () => triggerRead(viewingFile.url, viewingFile.title),
               className:
                 "w-full py-3 rounded-xl bg-teal text-white font-semibold text-sm shadow hover:bg-teal/90 active:scale-95 transition-all flex items-center justify-center gap-2",
             },
-            "Open in PDF Reader (Instant & Offline)"
+            "Open in PDF Reader"
           ),
           e(
             "button",
@@ -307,7 +323,7 @@ export default function ResourceChapterList({
               className:
                 "w-full py-2.5 rounded-xl bg-ink/5 text-ink/80 font-medium text-xs hover:bg-ink/10 active:scale-95 transition-all flex items-center justify-center gap-1.5",
             },
-            "⬇️ Download to Device Storage"
+            "⬇️ Save to Downloads Folder"
           )
         )
       )
