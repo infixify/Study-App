@@ -75,6 +75,7 @@ interface DailyLogItem {
   theory_minutes?: number;
   practice_minutes?: number;
   revision_minutes?: number;
+  verified_minutes?: number; // Gap 5: time studied with BOTH cam + blocker ON
 }
 
 interface ContentCardItem {
@@ -800,6 +801,7 @@ export default function DashboardPage() {
     theory: 0,
     practice: 0,
     revision: 0,
+    verified: 0, // Gap 5: verified_minutes (both cam + blocker ON)
   });
 
   const [todayTasks, setTodayTasks] = useState<TaskItem[]>([]);
@@ -1001,7 +1003,7 @@ export default function DashboardPage() {
       // 1. Fetch daily logs for the 84-day consistency matrix & breakdown
       const { data: pastLogs } = await supabase
         .from("daily_logs")
-        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, streak_count, log_date")
+        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, verified_minutes, streak_count, log_date")
         .eq("user_id", session.user.id)
         .order("log_date", { ascending: false })
         .limit(84);
@@ -1013,27 +1015,14 @@ export default function DashboardPage() {
       const todayLog = pastLogs?.find((l) => l.log_date === todayStr);
       const dailyLogMins = todayLog?.study_time_minutes || 0;
 
-      // 2. Fetch today's focus sessions to guarantee any background/killed app sessions are counted
-      const todayStartIso = `${todayStr}T00:00:00.000Z`;
-      let sessionMins = 0;
-      try {
-        const { data: todaySessions } = await supabase
-          .from("focus_sessions")
-          .select("duration_seconds")
-          .eq("user_id", session.user.id)
-          .gte("started_at", todayStartIso);
-
-        if (todaySessions && todaySessions.length > 0) {
-          const totalSecs = todaySessions.reduce((acc, s) => acc + (s.duration_seconds || 0), 0);
-          sessionMins = Math.round(totalSecs / 60);
-        }
-      } catch (err) {
-        console.error("Focus sessions query error:", err);
-      }
-
-      // Combine timer sessions + manual entries (ensuring no drop if daily_logs was delayed)
-      const combinedTotalTodayStudyMins = Math.max(dailyLogMins, sessionMins);
-      setTodayStudyMins(combinedTotalTodayStudyMins);
+      // Gap 2 Fix: daily_logs is the single source of truth
+      // Kotlin's logSessionToSupabase does read-then-write (existing + addMins) on daily_logs
+      // Manual entries also upsert into daily_logs with existing + new
+      // So daily_logs.study_time_minutes already has correct combined total (timer + manual)
+      // Math.max was WRONG: if 60m manual + 60m timer → daily_logs=120 but focus_sessions=60
+      // Math.max(120, 60) = 120 ✓ by accident, but Math.max(60, 70) = 70 ✗ if race condition
+      // Correct approach: trust daily_logs, no focus_sessions comparison needed
+      setTodayStudyMins(dailyLogMins);
 
       // Point 2: Unified streak reconciliation engine (Synchronized with Focus page)
       try {
@@ -1047,6 +1036,7 @@ export default function DashboardPage() {
         theory: todayLog?.theory_minutes || 0,
         practice: todayLog?.practice_minutes || 0,
         revision: todayLog?.revision_minutes || 0,
+        verified: (todayLog as any)?.verified_minutes || 0, // Gap 5 Fix
       });
 
       const { data: qLogs } = await supabase
@@ -1491,6 +1481,22 @@ export default function DashboardPage() {
               <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" /> Revision ({splitRatio.revision}m)
             </span>
           </div>
+
+          {/* Gap 5 Fix: Verified minutes — leaderboard-counted strict time */}
+          {splitRatio.verified > 0 && (
+            <div className="mt-2.5 flex items-center gap-2 bg-teal-50 border border-teal-200 rounded-xl px-3 py-2">
+              <span className="text-sm">🛡️</span>
+              <div className="flex-1">
+                <span className="text-[11px] font-bold text-teal-800">
+                  {splitRatio.verified}m Verified (Leaderboard Counted)
+                </span>
+                <p className="text-[10px] text-teal-600 mt-0.5">Face cam + App blocker both ON</p>
+              </div>
+              <span className="text-xs font-black text-teal-700">
+                {Math.round((splitRatio.verified / Math.max(todayStudyMins, 1)) * 100)}%
+              </span>
+            </div>
+          )}
         </div>
 
         {/* 6. MULTI-DAY STUDY SPLIT TIMELINE */}
