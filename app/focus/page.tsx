@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { loadAndReconcileStreak, saveFocusSession, MIN_STREAK_SECONDS } from "@/lib/focus";
 import AppHeader from "@/components/dashboard/AppHeader";
@@ -114,7 +114,7 @@ export default function StudyPage() {
   // Gap 6 Fix: Ref that always points to the LATEST handleDirectStopAndSave
   // Prevents stale closure — window.onNativeDirectStopFocus set once on mount
   // but needs fresh userId/startTime/seconds on every call
-  const handleDirectStopAndSaveRef = React.useRef<() => Promise<void>>(() => Promise.resolve());
+  const handleDirectStopAndSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   function applyNativeApps(raw: { name: string; packageName: string }[]) {
     const items = raw.map(nativeToAppItem);
