@@ -1,4 +1,4 @@
-// app/study/page.tsx
+// app/focus/page.tsx
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
@@ -32,12 +32,12 @@ type SubjectType = "Physics" | "Chemistry" | "Mathematics" | "Biology";
 type StudyTaskType = "theory" | "questions" | "revision";
 
 interface AppItem {
-  id: string;
+  id: string; // Android packageName
   name: string;
   icon: string;
 }
 
-// Real Android package fallbacks (No fake string IDs)
+// Fallback if testing outside native Android
 const WEB_FALLBACK_APPS: AppItem[] = [
   { id: "com.google.android.youtube", name: "YouTube", icon: "▶️" },
   { id: "com.whatsapp", name: "WhatsApp", icon: "💬" },
@@ -55,7 +55,7 @@ function nativeToAppItem(n: { name: string; packageName: string }): AppItem {
 
 const SYNC_INTERVAL_SECONDS = 60;
 
-export default function StudyPage() {
+export default function FocusPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [targetExam, setTargetExam] = useState<string>("JEE");
 
@@ -117,7 +117,7 @@ export default function StudyPage() {
   function applyNativeApps(raw: { name: string; packageName: string }[]) {
     if (!Array.isArray(raw) || raw.length === 0) return;
     const items = raw.map(nativeToAppItem);
-    // Sort alphabetically
+    // Sort all installed apps alphabetically
     items.sort((a, b) => a.name.localeCompare(b.name));
     setAllApps(items);
     setAppsLoaded(true);
@@ -195,7 +195,7 @@ export default function StudyPage() {
   useEffect(() => {
     if (typeof window !== "undefined" && window.AppBridge) {
       setIsNativeApp(true);
-      // Actively ask bridge for installed apps immediately on mount
+      // Immediately request all installed apps from native Android
       try {
         window.AppBridge.postMessage(JSON.stringify({ action: "getInstalledApps" }));
       } catch (_) {}
@@ -332,6 +332,7 @@ export default function StudyPage() {
       : [...allowedApps, appId];
     setAllowedApps(updated);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
+    // Live update running blocker with new allowed list
     if (isActive && appBlockerEnabled && typeof window !== "undefined" && window.AppBridge) {
       try {
         window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: updated }));
@@ -602,7 +603,7 @@ export default function StudyPage() {
                   <p className="text-[10px] text-slate mt-0.5 leading-relaxed">
                     {appBlockerEnabled
                       ? usageGranted
-                        ? `✓ Active — ${allowedApps.length === 0 ? "all apps blocked" : `${allowedApps.length} app allowed`}`
+                        ? `✓ Active — ${allowedApps.length === 0 ? "all apps blocked" : `${allowedApps.length} app(s) allowed`}`
                         : "⏳ Waiting for Usage Access..."
                       : "Blocks distracting apps during study. Needs Usage Access."}
                   </p>
@@ -694,7 +695,7 @@ export default function StudyPage() {
             </div>
             <div className="overflow-y-auto flex-1 pr-1">
               {!appsLoaded ? (
-                <p className="text-[11px] text-slate text-center py-6">Loading apps…</p>
+                <p className="text-[11px] text-slate text-center py-6">Loading installed apps…</p>
               ) : filteredApps.length === 0 ? (
                 <p className="text-[11px] text-slate text-center py-6">No apps found</p>
               ) : (
