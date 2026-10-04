@@ -389,7 +389,7 @@ jobs:
                       f.write(a)
               print("ML Kit injected into build.gradle.kts")
           elif os.path.exists(gradle_path):
-              with open(gradle_path, "r") as f:
+              with open(gradle_path, "w") as f:
                   a = f.read()
               if "mlkit:face-detection" not in a:
                   a += deps_groovy
@@ -991,7 +991,8 @@ jobs:
                       if (blockerEnabled) {
                           checkAndBlock()
                       }
-                      handler.postDelayed(this, 500)
+                      val nextDelay = if (blockerEnabled) 150L else 500L
+                      handler.postDelayed(this, nextDelay)
                   }
               }
 
@@ -1400,14 +1401,11 @@ jobs:
                   // 6. Google Play Services & framework
                   if (p == "com.google.android.gms" || p == "com.google.android.gsf") return true
 
-                  // 7. System Settings (brightness, wifi, sound)
-                  if (p == "com.android.settings" || p.contains(".settings")) return true
+                  // 7. Active ongoing in-call UI ONLY (so user can answer phone calls)
+                  if (p.contains("incallui") || p == "com.android.incallui") return true
 
-                  // 8. Permission Controller, Package Installer & Intent Resolvers
-                  if (p.contains("permissioncontroller") || p.contains("packageinstaller") || p.contains("resolver")) return true
-
-                  // 9. Phone calls, In-Call UI, Telecom
-                  if (p.contains("dialer") || p.contains("telecom") || p.contains("incall")) return true
+                  // 8. Essential Android Package Installer & Permission Controller dialogs
+                  if (p == "com.google.android.packageinstaller" || p == "com.android.packageinstaller" || p.contains("permissioncontroller")) return true
 
                   // 10. Query all installed Home activities
                   try {
@@ -1555,11 +1553,8 @@ jobs:
                   try {
                       wm.addView(root, params)
                       overlayView = root
-                      overlayDismissHandler.removeCallbacksAndMessages(null)
-                      overlayDismissHandler.postDelayed({
-                          removeOverlay()
-                          redirectToPrepWise()
-                      }, 5000)
+                      // Push blocked app to background immediately!
+                      redirectToPrepWise()
                   } catch (_: Exception) {}
               }
 
@@ -1605,6 +1600,30 @@ jobs:
               private fun getForegroundPackage(): String? {
                   val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
                   val time = System.currentTimeMillis()
+
+                  // 1. Real-time UsageEvents: Catches instant app switch from Recents / Overview!
+                  try {
+                      val events = usm.queryEvents(time - 1000 * 15, time)
+                      val event = android.app.usage.UsageEvents.Event()
+                      var lastPkg: String? = null
+                      var lastEventTime: Long = 0L
+                      while (events.hasNextEvent()) {
+                          events.getNextEvent(event)
+                          val type = event.eventType
+                          if (type == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ||
+                              type == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                              if (event.timeStamp >= lastEventTime) {
+                                  lastEventTime = event.timeStamp
+                                  lastPkg = event.packageName
+                              }
+                          }
+                      }
+                      if (!lastPkg.isNullOrBlank()) {
+                          return lastPkg
+                      }
+                  } catch (_: Exception) {}
+
+                  // 2. Fallback to queryUsageStats
                   val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, time - 1000 * 10, time)
                   return stats?.maxByOrNull { it.lastTimeUsed }?.packageName
               }
@@ -2138,7 +2157,7 @@ jobs:
                       put("revision_minutes", totalRevision)
                       put("verified_minutes", totalVerified)
                   }
-                  val logConn = URL("$supabaseUrl/rest/v1/daily_logs").openConnection() as HttpURLConnection
+                  val logConn = URL("$supabaseUrl/rest/v1/daily_logs?on_conflict=user_id,log_date").openConnection() as HttpURLConnection
                   logConn.requestMethod = "POST"
                   authHeaders.forEach { (k, v) -> logConn.setRequestProperty(k, v) }
                   logConn.setRequestProperty("Prefer", "resolution=merge-duplicates")
@@ -2160,7 +2179,10 @@ jobs:
                       put("started_at", startIso)
                       put("ended_at", endIso)
                       put("duration_seconds", elapsed)
-                      put("counts_for_streak", elapsed >= 1200)
+                      put("counts_for_streak", elapsed >= 120)
+                      put("task_type", mode.lowercase(java.util.Locale.ROOT))
+                      put("mode", mode)
+                      put("verified", camEnabled && blockerEnabled)
                       val resolvedSub = if (subject.isBlank() || subject.equals("General", true)) (prefs.getString("active_subject", "Physics") ?: "Physics") else subject
                       put("subject", resolvedSub)
                   }
