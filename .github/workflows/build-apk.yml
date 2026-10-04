@@ -192,7 +192,11 @@ jobs:
                   <service
                       android:name=".FocusBlockerService"
                       android:foregroundServiceType="camera|specialUse"
-                      android:exported="false" />
+                      android:exported="false">
+                      <property
+                          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                          android:value="Anti-distraction study focus timer and face tracking" />
+                  </service>
                   <receiver
                       android:name=".BootReceiver"
                       android:exported="true">
@@ -351,8 +355,6 @@ jobs:
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'PY_MLKIT' > patch_mlkit.py
           import re, os
 
-          # Patch app/build.gradle.kts to add ML Kit + CameraX
-          # NOTE: script runs from repo root, so paths are prepwise_app/android/...
           kts_path = "prepwise_app/android/app/build.gradle.kts"
           gradle_path = "prepwise_app/android/app/build.gradle"
 
@@ -392,10 +394,6 @@ jobs:
               with open(gradle_path, "w") as f:
                   f.write(a)
               print("ML Kit injected into build.gradle")
-          else:
-              print("ERROR: Could not find build.gradle.kts or build.gradle!")
-              import glob
-              print("Found gradle files:", glob.glob("prepwise_app/android/**/*.gradle*", recursive=True))
           print("ML Kit + CameraX dependencies injected.")
           PY_MLKIT
           python3 patch_mlkit.py
@@ -501,12 +499,27 @@ jobs:
 
                   // Toast Channel
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_TOAST).setMethodCallHandler { call, result ->
-                      if (call.method == "showToast") {
-                          val msg = call.argument<String>("message") ?: ""
-                          Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
-                          result.success(true)
-                      } else {
-                          result.notImplemented()
+                      when (call.method) {
+                          "showToast" -> {
+                              val msg = call.argument<String>("message") ?: ""
+                              Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+                              result.success(true)
+                          }
+                          "scanFile" -> {
+                              val path = call.argument<String>("path")
+                              if (path != null) {
+                                  try {
+                                      android.media.MediaScannerConnection.scanFile(
+                                          applicationContext,
+                                          arrayOf(path),
+                                          arrayOf("application/pdf"),
+                                          null
+                                      )
+                                  } catch (_: Exception) {}
+                              }
+                              result.success(true)
+                          }
+                          else -> result.notImplemented()
                       }
                   }
 
@@ -633,7 +646,7 @@ jobs:
                           }
                           "stopFocusBlocker" -> {
                               // Use ACTION_STOP_REQUEST (not ACTION_STOP) so directBackgroundStopAndLog
-                              // fires and logs the session to Supabase — ACTION_STOP just stops silently
+                              // fires and logs the session to Supabase - ACTION_STOP just stops silently
                               startService(Intent(this, FocusBlockerService::class.java).apply {
                                   action = FocusBlockerService.ACTION_STOP_REQUEST
                               })
@@ -726,7 +739,7 @@ jobs:
                               }
                           }
                           "retryPendingSession" -> {
-                              // Called by Dart on app resume — retries any pending Supabase log entirely in Kotlin
+                              // Called by Dart on app resume - retries any pending Supabase log entirely in Kotlin
                               val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
                               val hasPending = prefs.getBoolean("has_pending_session", false)
                               if (hasPending) {
@@ -764,41 +777,41 @@ jobs:
                                       Thread {
                                           try {
                                               val accessToken = prefs.getString("supabase_access_token", null)
-                                          val userId = prefs.getString("supabase_user_id", null)
-                                          if (accessToken != null && userId != null) {
-                                              val supabaseUrl = "https://tvhgqdgwpjivwuiawdrf.supabase.co"
-                                              val anonKey = "sb_publishable_dkMHodPE0rD9hPSlq88kAw_SenHt33L"
-                                              val addMins = Math.max(1, Math.round(elapsed / 60.0).toInt())
-                                              val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(ts))
-                                              val authHeaders = mapOf("apikey" to anonKey, "Authorization" to "Bearer $accessToken", "Content-Type" to "application/json")
-                                              val getUrl = java.net.URL("$supabaseUrl/rest/v1/daily_logs?user_id=eq.$userId&log_date=eq.$todayStr&select=*")
-                                              val getConn = getUrl.openConnection() as java.net.HttpURLConnection
-                                              getConn.requestMethod = "GET"
-                                              authHeaders.forEach { (k, v) -> getConn.setRequestProperty(k, v) }
-                                              val existingJson = try { if (getConn.responseCode == 200) org.json.JSONArray(getConn.inputStream.bufferedReader().readText()) else org.json.JSONArray() } catch (_: Exception) { org.json.JSONArray() } finally { getConn.disconnect() }
-                                              val existing = if (existingJson.length() > 0) existingJson.getJSONObject(0) else null
-                                              val totalStudy = (existing?.optInt("study_time_minutes", 0) ?: 0) + addMins
-                                              val totalTheory = (existing?.optInt("theory_minutes", 0) ?: 0) + if (md == "Theory") addMins else 0
-                                              val totalPractice = (existing?.optInt("practice_minutes", 0) ?: 0) + if (md == "Practice" || md == "questions") addMins else 0
-                                              val totalRevision = (existing?.optInt("revision_minutes", 0) ?: 0) + if (md == "Revision") addMins else 0
-                                              val totalVerifiedRetry = (existing?.optInt("verified_minutes", 0) ?: 0) + if (camEn && blkEn) addMins else 0
-                                              val logBody = org.json.JSONObject().apply { put("user_id", userId); put("log_date", todayStr); put("study_time_minutes", totalStudy); put("theory_minutes", totalTheory); put("practice_minutes", totalPractice); put("revision_minutes", totalRevision); put("verified_minutes", totalVerifiedRetry) }
-                                              val logConn = java.net.URL("$supabaseUrl/rest/v1/daily_logs").openConnection() as java.net.HttpURLConnection
-                                              logConn.requestMethod = "POST"
-                                              authHeaders.forEach { (k, v) -> logConn.setRequestProperty(k, v) }
-                                              logConn.setRequestProperty("Prefer", "resolution=merge-duplicates")
-                                              logConn.doOutput = true
-                                              java.io.OutputStreamWriter(logConn.outputStream).use { it.write(logBody.toString()) }
-                                              logConn.responseCode; logConn.disconnect()
-                                              val fmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault()).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
-                                              val sessionBody = org.json.JSONObject().apply { put("user_id", userId); put("started_at", fmt.format(java.util.Date(ts - elapsed * 1000L))); put("ended_at", fmt.format(java.util.Date(ts))); put("duration_seconds", elapsed); put("counts_for_streak", elapsed >= 1200); put("subject", subj) }
-                                              val sessConn = java.net.URL("$supabaseUrl/rest/v1/focus_sessions").openConnection() as java.net.HttpURLConnection
-                                              sessConn.requestMethod = "POST"
-                                              authHeaders.forEach { (k, v) -> sessConn.setRequestProperty(k, v) }
-                                              sessConn.doOutput = true
-                                              java.io.OutputStreamWriter(sessConn.outputStream).use { it.write(sessionBody.toString()) }
-                                              sessConn.responseCode; sessConn.disconnect()
-                                          }
+                                              val userId = prefs.getString("supabase_user_id", null)
+                                              if (accessToken != null && userId != null) {
+                                                  val supabaseUrl = "https://tvhgqdgwpjivwuiawdrf.supabase.co"
+                                                  val anonKey = "sb_publishable_dkMHodPE0rD9hPSlq88kAw_SenHt33L"
+                                                  val addMins = Math.max(1, Math.round(elapsed / 60.0).toInt())
+                                                  val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(ts))
+                                                  val authHeaders = mapOf("apikey" to anonKey, "Authorization" to "Bearer $accessToken", "Content-Type" to "application/json")
+                                                  val getUrl = java.net.URL("$supabaseUrl/rest/v1/daily_logs?user_id=eq.$userId&log_date=eq.$todayStr&select=*")
+                                                  val getConn = getUrl.openConnection() as java.net.HttpURLConnection
+                                                  getConn.requestMethod = "GET"
+                                                  authHeaders.forEach { (k, v) -> getConn.setRequestProperty(k, v) }
+                                                  val existingJson = try { if (getConn.responseCode == 200) org.json.JSONArray(getConn.inputStream.bufferedReader().readText()) else org.json.JSONArray() } catch (_: Exception) { org.json.JSONArray() } finally { getConn.disconnect() }
+                                                  val existing = if (existingJson.length() > 0) existingJson.getJSONObject(0) else null
+                                                  val totalStudy = (existing?.optInt("study_time_minutes", 0) ?: 0) + addMins
+                                                  val totalTheory = (existing?.optInt("theory_minutes", 0) ?: 0) + if (md == "Theory") addMins else 0
+                                                  val totalPractice = (existing?.optInt("practice_minutes", 0) ?: 0) + if (md == "Practice" || md == "questions") addMins else 0
+                                                  val totalRevision = (existing?.optInt("revision_minutes", 0) ?: 0) + if (md == "Revision") addMins else 0
+                                                  val totalVerifiedRetry = (existing?.optInt("verified_minutes", 0) ?: 0) + if (camEn && blkEn) addMins else 0
+                                                  val logBody = org.json.JSONObject().apply { put("user_id", userId); put("log_date", todayStr); put("study_time_minutes", totalStudy); put("theory_minutes", totalTheory); put("practice_minutes", totalPractice); put("revision_minutes", totalRevision); put("verified_minutes", totalVerifiedRetry) }
+                                                  val logConn = java.net.URL("$supabaseUrl/rest/v1/daily_logs").openConnection() as java.net.HttpURLConnection
+                                                  logConn.requestMethod = "POST"
+                                                  authHeaders.forEach { (k, v) -> logConn.setRequestProperty(k, v) }
+                                                  logConn.setRequestProperty("Prefer", "resolution=merge-duplicates")
+                                                  logConn.doOutput = true
+                                                  java.io.OutputStreamWriter(logConn.outputStream).use { it.write(logBody.toString()) }
+                                                  logConn.responseCode; logConn.disconnect()
+                                                  val fmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault()).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                                                  val sessionBody = org.json.JSONObject().apply { put("user_id", userId); put("started_at", fmt.format(java.util.Date(ts - elapsed * 1000L))); put("ended_at", fmt.format(java.util.Date(ts))); put("duration_seconds", elapsed); put("counts_for_streak", elapsed >= 1200); put("subject", subj) }
+                                                  val sessConn = java.net.URL("$supabaseUrl/rest/v1/focus_sessions").openConnection() as java.net.HttpURLConnection
+                                                  sessConn.requestMethod = "POST"
+                                                  authHeaders.forEach { (k, v) -> sessConn.setRequestProperty(k, v) }
+                                                  sessConn.doOutput = true
+                                                  java.io.OutputStreamWriter(sessConn.outputStream).use { it.write(sessionBody.toString()) }
+                                                  sessConn.responseCode; sessConn.disconnect()
+                                              }
                                           } catch (_: Exception) {}
                                       }.start()
                                   }
@@ -825,6 +838,7 @@ jobs:
                   }
               }
           }
+
           KT_MAIN_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_SERVICE_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/FocusBlockerService.kt
@@ -1122,7 +1136,7 @@ jobs:
                       }
                       ACTION_STOP_REQUEST -> {
                           if (!isStopping) {
-                              // Kotlin handles ALL logging — web logging is fully disabled for this path
+                              // Kotlin handles ALL logging - web logging is fully disabled for this path
                               // sendStopRequestToWebApp() removed to prevent double-logging
                               // Web UI gets notified AFTER Kotlin logs, only to update display
                               directBackgroundStopAndLog()
@@ -1626,7 +1640,7 @@ jobs:
                       }
                       typeface = android.graphics.Typeface.DEFAULT_BOLD
                       setOnClickListener {
-                          // Kotlin handles ALL logging — no web logging call here
+                          // Kotlin handles ALL logging - no web logging call here
                           directBackgroundStopAndLog()
                       }
                   }
@@ -1800,6 +1814,7 @@ jobs:
                   }
                   if (container is android.view.ViewGroup) updateAll(container)
               }
+
               private fun createNotificationChannel() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val channel = NotificationChannel(
@@ -1946,7 +1961,7 @@ jobs:
                   Handler(Looper.getMainLooper()).post {
                       Toast.makeText(
                           applicationContext,
-                          "✅ Session saved! $snapSubject · $snapMode · $timeLabel logged",
+                          " Session saved! $snapSubject - $snapMode - $timeLabel logged",
                           Toast.LENGTH_LONG
                       ).show()
                   }
@@ -2081,8 +2096,8 @@ jobs:
                   super.onDestroy()
               }
           }
-          KT_SERVICE_EOF
 
+          KT_SERVICE_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'KT_BOOT_EOF' > prepwise_app/android/app/src/main/kotlin/com/prepwise/prepwise/BootReceiver.kt
           package com.prepwise.prepwise
@@ -2096,7 +2111,9 @@ jobs:
                   // Boot completed - session will be restarted by user from app
               }
           }
+
           KT_BOOT_EOF
+
 
       - name: Write Dart Services and Widgets
         run: |
@@ -2120,6 +2137,7 @@ jobs:
               }
             }
           }
+
           DART_TOAST_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_WAKE_EOF' > prepwise_app/lib/services/wakelock_service.dart
@@ -2145,6 +2163,7 @@ jobs:
               }
             }
           }
+
           DART_WAKE_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_AUTH_EOF' > prepwise_app/lib/services/google_auth_service.dart
@@ -2247,6 +2266,7 @@ jobs:
               }
             }
           }
+
           DART_AUTH_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_FOCUS_EOF' > prepwise_app/lib/services/focus_session_service.dart
@@ -2471,6 +2491,7 @@ jobs:
               // Cleared by FocusBlockerService / MainActivity
             }
           }
+
           DART_FOCUS_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_PDF_EOF' > prepwise_app/lib/services/pdf_download_service.dart
@@ -2479,40 +2500,49 @@ jobs:
           import 'package:path_provider/path_provider.dart';
           import 'package:open_filex/open_filex.dart';
           import 'package:url_launcher/url_launcher.dart';
+          import 'package:flutter/services.dart';
           import 'app_toast.dart';
           import 'package:flutter/foundation.dart';
 
           class PdfDownloadService {
-            static Future<void> downloadAndOpenPdf(String url, {String? customTitle}) async {
+            static const MethodChannel _toastChannel = MethodChannel('com.prepwise/toast');
+
+            static String resolveDirectUrl(String url) {
+              String directUrl = url;
+              if (url.contains('docs.google.com/viewer')) {
+                final parsed = Uri.tryParse(url);
+                final embedded = parsed?.queryParameters['url'];
+                if (embedded != null && embedded.isNotEmpty) {
+                  directUrl = embedded;
+                }
+              }
+              if (directUrl.contains('drive.google.com')) {
+                final match = RegExp(r'/d/([a-zA-Z0-9_-]+)').firstMatch(directUrl) ??
+                              RegExp(r'[?&]id=([a-zA-Z0-9_-]+)').firstMatch(directUrl);
+                if (match != null) {
+                  final fileId = match.group(1);
+                  directUrl = "https://drive.usercontent.google.com/download?id=$fileId&export=download&authuser=0&confirm=t";
+                }
+              }
+              return directUrl;
+            }
+
+            static String getSafeFilename(String? customTitle) {
+              final safeTitle = (customTitle != null && customTitle.trim().isNotEmpty)
+                  ? customTitle.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_\-\. ]'), '_')
+                  : "Study_Resource_${DateTime.now().millisecondsSinceEpoch}";
+              return safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : "$safeTitle.pdf";
+            }
+
+            /// 1. READ ACTION: Opens PDF in native reader (instant from cache, or loads with 'Opening/Loading...' toast)
+            static Future<void> openPdfForReading(String url, {String? customTitle}) async {
               try {
-                // Transform Google Docs Viewer or Google Drive links to direct download link
-                String directUrl = url;
-                if (url.contains('docs.google.com/viewer')) {
-                  final parsed = Uri.tryParse(url);
-                  final embedded = parsed?.queryParameters['url'];
-                  if (embedded != null && embedded.isNotEmpty) {
-                    directUrl = embedded;
-                  }
-                }
-                if (directUrl.contains('drive.google.com')) {
-                  final driveRegex = RegExp(r'/d/([a-zA-Z0-9_-]+)');
-                  final match = driveRegex.firstMatch(directUrl);
-                  if (match != null) {
-                    final fileId = match.group(1);
-                    directUrl = "https://drive.google.com/uc?export=download&id=$fileId";
-                  }
-                }
-
-                final safeTitle = (customTitle != null && customTitle.trim().isNotEmpty)
-                    ? customTitle.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_\-\. ]'), '_')
-                    : "Study_Resource_${DateTime.now().millisecondsSinceEpoch}";
-
                 final displayTitle = (customTitle != null && customTitle.trim().isNotEmpty)
                     ? customTitle.trim()
-                    : "NCERT Document";
+                    : "Document";
+                final filename = getSafeFilename(customTitle);
 
-                final filename = safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : "$safeTitle.pdf";
-
+                // Check cache in app storage or public directory
                 Directory? targetDir;
                 try {
                   final extDir = await getExternalStorageDirectory();
@@ -2527,19 +2557,27 @@ jobs:
                 targetDir ??= await getApplicationDocumentsDirectory();
 
                 final file = File("${targetDir.path}/$filename");
-                // Instant cache check: If already downloaded and valid, open instantly!
+
+                // Check if already in public Downloads folder too
+                final publicFile = File("/storage/emulated/0/Download/PrepWise/$filename");
+                if (await publicFile.exists() && await publicFile.length() > 2000) {
+                  AppToast.show("Opening $displayTitle (Offline)...");
+                  final res = await OpenFilex.open(publicFile.path);
+                  if (res.type == ResultType.done) return;
+                }
+
                 if (await file.exists() && await file.length() > 2000) {
                   AppToast.show("Opening $displayTitle (Offline)...");
                   final cachedResult = await OpenFilex.open(file.path);
                   if (cachedResult.type == ResultType.done) return;
                 }
 
-                AppToast.show("Downloading $displayTitle...");
+                // Not cached - fetch smoothly without "Downloading" confusion
+                AppToast.show("Opening $displayTitle...");
 
-                final uri = Uri.parse(directUrl);
-
+                final directUrl = resolveDirectUrl(url);
                 final response = await http.get(
-                  uri,
+                  Uri.parse(directUrl),
                   headers: {
                     'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
                     'Accept': 'application/pdf,application/octet-stream,*/*',
@@ -2551,27 +2589,80 @@ jobs:
                 }
 
                 await file.writeAsBytes(response.bodyBytes);
-
-                AppToast.show("Opening $displayTitle in PDF Reader...");
-
                 final result = await OpenFilex.open(file.path);
-                debugPrint("[PdfDownloadService] OpenFilex result: ${result.type} - ${result.message}");
 
                 if (result.type != ResultType.done) {
                   await launchUrl(Uri.parse(directUrl), mode: LaunchMode.externalApplication);
                 }
               } catch (e) {
-                debugPrint("[PdfDownloadService] Download error: $e");
+                debugPrint("[PdfDownloadService] Read error: $e");
                 final displayTitle = (customTitle != null && customTitle.trim().isNotEmpty) ? customTitle.trim() : "Document";
-                AppToast.show("Opening $displayTitle in browser...");
                 try {
                   await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-                } catch (err) {
-                  AppToast.show("Could not open $displayTitle: $e");
+                } catch (_) {
+                  AppToast.show("Could not open $displayTitle");
                 }
               }
             }
+
+            /// 2. DOWNLOAD ACTION: Saves directly to public Downloads/PrepWise folder without opening viewer
+            static Future<void> downloadToPublicFolder(String url, {String? customTitle}) async {
+              try {
+                final displayTitle = (customTitle != null && customTitle.trim().isNotEmpty)
+                    ? customTitle.trim()
+                    : "Document";
+                final filename = getSafeFilename(customTitle);
+
+                AppToast.show("Downloading $displayTitle to Downloads...");
+
+                final directUrl = resolveDirectUrl(url);
+                final response = await http.get(
+                  Uri.parse(directUrl),
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+                    'Accept': 'application/pdf,application/octet-stream,*/*',
+                  },
+                ).timeout(const Duration(seconds: 60));
+
+                if (response.statusCode != 200) {
+                  throw Exception("Server returned HTTP ${response.statusCode}");
+                }
+
+                // Save to standard Android public Downloads/PrepWise directory
+                Directory publicDir = Directory("/storage/emulated/0/Download/PrepWise");
+                if (!await publicDir.exists()) {
+                  try {
+                    await publicDir.create(recursive: true);
+                  } catch (_) {
+                    publicDir = Directory("/storage/emulated/0/Download");
+                  }
+                }
+
+                final destFile = File("${publicDir.path}/$filename");
+                await destFile.writeAsBytes(response.bodyBytes);
+
+                // Trigger MediaScanner so file appears instantly in Files and Downloads app
+                try {
+                  await _toastChannel.invokeMethod('scanFile', {'path': destFile.path});
+                } catch (_) {}
+
+                AppToast.show("Saved to Downloads/PrepWise/$filename");
+              } catch (e) {
+                debugPrint("[PdfDownloadService] Download error: $e");
+                final displayTitle = (customTitle != null && customTitle.trim().isNotEmpty) ? customTitle.trim() : "Document";
+                AppToast.show("Download failed: Please try again or open in browser.");
+                try {
+                  await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                } catch (_) {}
+              }
+            }
+
+            // Backwards compatibility alias
+            static Future<void> downloadAndOpenPdf(String url, {String? customTitle}) async {
+              await openPdfForReading(url, customTitle: customTitle);
+            }
           }
+
           DART_PDF_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_NOTIF_EOF' > prepwise_app/lib/services/notification_service.dart
@@ -2723,6 +2814,7 @@ jobs:
               });
             }
           }
+
           DART_NOTIF_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_BLOCK_EOF' > prepwise_app/lib/services/app_blocker_service.dart
@@ -2846,6 +2938,7 @@ jobs:
               }
             }
           }
+
           DART_BLOCK_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_DOT_EOF' > prepwise_app/lib/widgets/floating_focus_dot.dart
@@ -2986,6 +3079,7 @@ jobs:
               );
             }
           }
+
           DART_DOT_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_BRIDGE_EOF' > prepwise_app/lib/bridge/app_bridge_handler.dart
@@ -3059,6 +3153,7 @@ jobs:
                         'mode': mode,
                         'camEnabled': camEnabled,
                         'blockerEnabled': blockerEnabled,
+                        'initialSeconds': initialSeconds,
                       });
                     } catch (e) {
                       debugPrint('[Bridge] Error calling startFocusBlocker: $e');
@@ -3106,11 +3201,20 @@ jobs:
                     } catch (_) {}
                     break;
 
+                  case 'readPdf':
+                  case 'openPdf':
+                    final String? url = data['url'];
+                    final String? title = data['title'];
+                    if (url != null && url.isNotEmpty) {
+                      await PdfDownloadService.openPdfForReading(url, customTitle: title);
+                    }
+                    break;
+
                   case 'downloadPdf':
                     final String? url = data['url'];
                     final String? title = data['title'];
                     if (url != null && url.isNotEmpty) {
-                      await PdfDownloadService.downloadAndOpenPdf(url, customTitle: title);
+                      await PdfDownloadService.downloadToPublicFolder(url, customTitle: title);
                     }
                     break;
 
@@ -3175,21 +3279,6 @@ jobs:
                     final token = NotificationService().fcmToken;
                     if (token != null) {
                       await webViewController.runJavaScript("(function(){if(typeof window.onNativeFCMToken==='function'){window.onNativeFCMToken('$token');}})();");
-                    }
-                    break;
-
-                  case 'storeSupabaseSession':
-                    // Called from JS on login/session refresh — stores token for native Supabase logging
-                    final String accessToken = data['accessToken'] ?? '';
-                    final String userId = data['userId'] ?? '';
-                    if (accessToken.isNotEmpty && userId.isNotEmpty) {
-                      try {
-                        await const MethodChannel('com.prepwise/focusblocker')
-                            .invokeMethod('storeSupabaseSession', {
-                          'accessToken': accessToken,
-                          'userId': userId,
-                        });
-                      } catch (_) {}
                     }
                     break;
 
@@ -3399,6 +3488,7 @@ jobs:
               }
             }
           }
+
           DART_BRIDGE_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_MAIN_EOF' > prepwise_app/lib/main.dart
@@ -3459,6 +3549,7 @@ jobs:
               );
             }
           }
+
           DART_MAIN_EOF
 
           python3 -c "import sys, textwrap; sys.stdout.write(textwrap.dedent(sys.stdin.read()))" << 'DART_WEB_EOF' > prepwise_app/lib/screens/webview_screen.dart
@@ -3690,7 +3781,7 @@ jobs:
                     _injectInstalledApps();
 
                     // Bug 3 Fix: Inject stored Supabase token into WebView via Kotlin MethodChannel
-                    // Kotlin already has SharedPrefs access — no Dart SharedPreferences package needed
+                    // Kotlin already has SharedPrefs access - no Dart SharedPreferences package needed
                     try {
                       final authData = await const MethodChannel('com.prepwise/focusblocker')
                           .invokeMethod<Map<dynamic, dynamic>>('getStoredAuthToken');
@@ -4030,7 +4121,7 @@ jobs:
             }
 
             // Pending session retry is handled entirely by Kotlin via retryPendingSession MethodChannel.
-            // Kotlin shows a toast and logs directly to Supabase — no JS involved.
+            // Kotlin shows a toast and logs directly to Supabase - no JS involved.
             Future<void> _checkAndLogPendingSessions() async {
               try {
                 await const MethodChannel('com.prepwise/focusblocker')
@@ -4147,7 +4238,9 @@ jobs:
               """);
             }
           }
+
           DART_WEB_EOF
+
 
       - name: Accept Android Licenses and Ensure SDK 36
         run: |
@@ -4169,7 +4262,6 @@ jobs:
           GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
         run: |
           cd prepwise_app
-          # Extract Web OAuth Client ID (client_type=3) from google-services.json for GoogleSignIn serverClientId
           GOOGLE_SERVER_CLIENT_ID=$(python3 -c "
           import json, os
           cid = os.environ.get('GOOGLE_WEB_CLIENT_ID', '').strip()
@@ -4207,6 +4299,3 @@ jobs:
         with:
           name: PrepWise-Android-APK
           path: prepwise_app/build/app/outputs/flutter-apk/app-release.apk
-
-
-
