@@ -24,13 +24,6 @@ interface GroupRow {
 
 const RANK_MEDALS = ["🥇", "🥈", "🥉"];
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  const timer = new Promise<T>((_, reject) =>
-    setTimeout(() => reject(new Error("Request timed out")), ms)
-  );
-  return Promise.race([promise, timer]);
-}
-
 export default function LeaderboardPage() {
   const [tab, setTab] = useState<"students" | "groups">("students");
   const [students, setStudents] = useState<StudentRow[]>([]);
@@ -44,50 +37,52 @@ export default function LeaderboardPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+
+    const TIMEOUT_MS = 10000;
+
+    function raceTimeout<T>(p: Promise<T>): Promise<T> {
+      return Promise.race([
+        p,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error("Request timed out")), TIMEOUT_MS)
+        ),
+      ]);
+    }
+
     try {
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id ?? null;
       setCurrentUserId(uid);
 
-      const studentRpc = supabase.rpc("get_leaderboard_students") as Promise<{
-        data: StudentRow[] | null;
-        error: { message: string } | null;
-      }>;
-      const groupRpc = supabase.rpc("get_leaderboard_groups") as Promise<{
-        data: GroupRow[] | null;
-        error: { message: string } | null;
-      }>;
-
-      const [studentRes, groupRes] = await withTimeout(
-        Promise.all([studentRpc, groupRpc]),
-        10000
+      const [studentRes, groupRes] = await raceTimeout(
+        Promise.all([
+          supabase.rpc("get_leaderboard_students"),
+          supabase.rpc("get_leaderboard_groups"),
+        ])
       );
 
       if (studentRes.error) throw new Error(studentRes.error.message);
       if (groupRes.error) throw new Error(groupRes.error.message);
 
-      setStudents(studentRes.data ?? []);
-      setGroups(groupRes.data ?? []);
+      setStudents((studentRes.data ?? []) as StudentRow[]);
+      setGroups((groupRes.data ?? []) as GroupRow[]);
 
       if (uid) {
         try {
-          const membershipRpc = supabase
-            .from("group_members")
-            .select("group_id")
-            .eq("user_id", uid)
-            .maybeSingle() as Promise<{
-            data: { group_id: string } | null;
-            error: unknown;
-          }>;
-          const { data: membership } = await withTimeout(membershipRpc, 5000);
-          setMyGroupId(membership?.group_id ?? null);
+          const { data: membership } = await raceTimeout(
+            supabase
+              .from("group_members")
+              .select("group_id")
+              .eq("user_id", uid)
+              .maybeSingle()
+          );
+          setMyGroupId((membership as { group_id: string } | null)?.group_id ?? null);
         } catch (_) {
           // non-fatal
         }
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to load leaderboard";
-      setError(msg);
+      setError(e instanceof Error ? e.message : "Failed to load leaderboard");
     } finally {
       setLoading(false);
     }
