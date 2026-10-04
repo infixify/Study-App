@@ -28,6 +28,15 @@ interface MembershipRow {
 
 const RANK_MEDALS = ["🥇", "🥈", "🥉"];
 
+// Hard deadline: if supabase hasn't resolved in ms, throw
+function deadline<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`Timeout: ${label}`)), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); })
+     .catch((e) => { clearTimeout(t); reject(e); });
+  });
+}
+
 export default function LeaderboardPage() {
   const [tab, setTab] = useState<"students" | "groups">("students");
   const [students, setStudents] = useState<StudentRow[]>([]);
@@ -47,32 +56,77 @@ export default function LeaderboardPage() {
       const uid = authData?.user?.id ?? null;
       setCurrentUserId(uid);
 
-      // Timeout via AbortController-style: race the full Promise.all
-      let timedOut = false;
-      const timeoutId = setTimeout(() => { timedOut = true; }, 10000);
+      // --- Students ---
+      let studentRows: StudentRow[] = [];
+      try {
+        const studentRes = await deadline(
+          supabase.rpc("get_leaderboard_students").then((r) => r),
+          8000,
+          "get_leaderboard_students"
+        );
+        if (studentRes.error) throw new Error(studentRes.error.message);
+        studentRows = (studentRes.data ?? []) as StudentRow[];
+      } catch (_) {
+        // RPC failed/timed out — fallback: read users table directly
+        const { data: fallback } = await supabase
+          .from("users")
+          .select("id, display_name, current_streak")
+          .limit(50);
+        studentRows = ((fallback ?? []) as { id: string; display_name: string; current_streak: number }[]).map(
+          (u) => ({
+            user_id: u.id,
+            display_name: u.display_name ?? "Unknown",
+            streak: u.current_streak ?? 0,
+            weekly_hours: 0,
+            points: (u.current_streak ?? 0) * 10,
+          })
+        );
+      }
+      setStudents(studentRows);
 
-      const studentRes = await supabase.rpc("get_leaderboard_students");
-      const groupRes = await supabase.rpc("get_leaderboard_groups");
-      clearTimeout(timeoutId);
+      // --- Groups ---
+      let groupRows: GroupRow[] = [];
+      try {
+        const groupRes = await deadline(
+          supabase.rpc("get_leaderboard_groups").then((r) => r),
+          8000,
+          "get_leaderboard_groups"
+        );
+        if (groupRes.error) throw new Error(groupRes.error.message);
+        groupRows = (groupRes.data ?? []) as GroupRow[];
+      } catch (_) {
+        // RPC failed/timed out — fallback: read study_groups directly
+        const { data: fallback } = await supabase
+          .from("study_groups")
+          .select("id, name")
+          .limit(50);
+        groupRows = ((fallback ?? []) as { id: string; name: string }[]).map((g) => ({
+          group_id: g.id,
+          group_name: g.name,
+          member_count: 0,
+          avg_points: 0,
+          total_weekly_hours: 0,
+        }));
+      }
+      setGroups(groupRows);
 
-      if (timedOut) throw new Error("Request timed out");
-      if (studentRes.error) throw new Error(studentRes.error.message);
-      if (groupRes.error) throw new Error(groupRes.error.message);
-
-      setStudents((studentRes.data ?? []) as StudentRow[]);
-      setGroups((groupRes.data ?? []) as GroupRow[]);
-
+      // --- My group ---
       if (uid) {
         try {
-          const memberRes = await supabase
-            .from("group_members")
-            .select("group_id")
-            .eq("user_id", uid)
-            .maybeSingle();
+          const memberRes = await deadline(
+            supabase
+              .from("group_members")
+              .select("group_id")
+              .eq("user_id", uid)
+              .maybeSingle()
+              .then((r) => r),
+            5000,
+            "group_members"
+          );
           const membership = memberRes.data as MembershipRow | null;
           setMyGroupId(membership?.group_id ?? null);
         } catch (_) {
-          // non-fatal — group highlight just won't show
+          // non-fatal
         }
       }
     } catch (e: unknown) {
