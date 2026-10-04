@@ -689,6 +689,16 @@ jobs:
                               }
                               result.success(true)
                           }
+                          // Bug 3 Fix: Dart reads token from Kotlin SharedPrefs (no Dart SharedPreferences package needed)
+                          "getStoredAuthToken" -> {
+                              val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
+                              val token = prefs.getString("supabase_access_token", "") ?: ""
+                              val uid = prefs.getString("supabase_user_id", "") ?: ""
+                              val map = HashMap<String, Any>()
+                              map["accessToken"] = token
+                              map["userId"] = uid
+                              result.success(map)
+                          }
                           "getPendingSession" -> {
                               val prefs = getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE)
                               val hasPending = prefs.getBoolean("has_pending_session", false)
@@ -3679,24 +3689,23 @@ jobs:
                     if (token != null) _bridgeHandler.injectFCMToken(token);
                     _injectInstalledApps();
 
-                    // Bug 3 Fix: Inject stored Supabase token from SharedPrefs into WebView
-                    // This prevents re-login on 2nd restart when web JS hasn't stored token yet
+                    // Bug 3 Fix: Inject stored Supabase token into WebView via Kotlin MethodChannel
+                    // Kotlin already has SharedPrefs access — no Dart SharedPreferences package needed
                     try {
-                      final prefs = await SharedPreferences.getInstance();
-                      final storedToken = prefs.getString('supabase_access_token') ?? '';
-                      final storedUid = prefs.getString('supabase_user_id') ?? '';
+                      final authData = await const MethodChannel('com.prepwise/focusblocker')
+                          .invokeMethod<Map<dynamic, dynamic>>('getStoredAuthToken');
+                      final storedToken = authData?['accessToken'] as String? ?? '';
+                      final storedUid = authData?['userId'] as String? ?? '';
                       if (storedToken.isNotEmpty && storedUid.isNotEmpty) {
                         final safeToken = storedToken.replaceAll("'", "\\'").replaceAll('\n', '').replaceAll('\r', '');
                         final safeUid = storedUid.replaceAll("'", "\\'");
                         await controller.runJavaScript("""
                           (function() {
                             try {
-                              // Inject token into window for page.tsx to read on load
                               window.__nativeAuth = {
                                 accessToken: '$safeToken',
                                 userId: '$safeUid'
                               };
-                              // Also try to push into Supabase localStorage key if missing
                               var hasToken = false;
                               for (var i = 0; i < localStorage.length; i++) {
                                 var k = localStorage.key(i);
@@ -3705,7 +3714,6 @@ jobs:
                                 }
                               }
                               if (!hasToken && window.__nativeAuth.accessToken) {
-                                // Set supabase session directly if client is available
                                 if (window.__supabase && window.__supabase.auth) {
                                   window.__supabase.auth.setSession({
                                     access_token: window.__nativeAuth.accessToken,
