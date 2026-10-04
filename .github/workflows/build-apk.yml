@@ -1378,39 +1378,55 @@ jobs:
                   updateNotification()
               }
 
-              private fun isLauncherPackage(pkg: String): Boolean {
-                  return try {
+              private fun isSystemOrLauncherPackage(pkg: String): Boolean {
+                  val p = pkg.lowercase(java.util.Locale.ROOT)
+
+                  // 1. Any Launcher / Home Screen (NEVER block launcher3, pixel launcher, miui home, coloros, oneplus, etc.)
+                  if (p.contains("launcher") || p.contains("home") || p.contains("nexuslauncher") ||
+                      p.contains("quickstep") || p.contains("recents") || p.contains("trebuchet") ||
+                      p.contains("drawer") || p.contains("desktop")) return true
+
+                  // 2. PrepWise app itself
+                  if (pkg == packageName) return true
+
+                  // 3. Android OS framework
+                  if (p == "android" || p.startsWith("android.")) return true
+
+                  // 4. System UI & notification shade
+                  if (p.contains("systemui")) return true
+
+                  // 5. Keyboards & Input Method Editors (Gboard, Swiftkey, Samsung Keyboard, etc.)
+                  if (p.contains("inputmethod") || p.contains("keyboard") || p.contains("ime")) return true
+
+                  // 6. Google Play Services & framework
+                  if (p == "com.google.android.gms" || p == "com.google.android.gsf") return true
+
+                  // 7. System Settings (brightness, wifi, sound)
+                  if (p == "com.android.settings" || p.contains(".settings")) return true
+
+                  // 8. Permission Controller, Package Installer & Intent Resolvers
+                  if (p.contains("permissioncontroller") || p.contains("packageinstaller") || p.contains("resolver")) return true
+
+                  // 9. Phone calls, In-Call UI, Telecom
+                  if (p.contains("dialer") || p.contains("telecom") || p.contains("incall")) return true
+
+                  // 10. Query all installed Home activities
+                  try {
                       val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-                      val resolveInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-                      resolveInfo?.activityInfo?.packageName == pkg
-                  } catch (_: Exception) {
-                      pkg.contains("launcher") || pkg.contains("home")
-                  }
+                      val matches = packageManager.queryIntentActivities(intent, 0)
+                      if (matches.any { it.activityInfo.packageName.equals(pkg, ignoreCase = true) }) {
+                          return true
+                      }
+                  } catch (_: Exception) {}
+
+                  return false
               }
 
               private fun isForegroundAllowed(pkg: String): Boolean {
-                  // 1. PrepWise app itself
-                  if (pkg == packageName) return true
+                  // System and Launcher packages are ALWAYS allowed
+                  if (isSystemOrLauncherPackage(pkg)) return true
 
-                  // 2. Critical Android system UI & OS components
-                  if (pkg == "com.android.systemui" || pkg == "android") return true
-
-                  // 3. Home Screen / Launcher
-                  if (isLauncherPackage(pkg)) return true
-
-                  // 4. Keyboards & Input methods
-                  if (pkg.contains("inputmethod") || pkg.contains("keyboard") || pkg.contains("ime")) return true
-
-                  // 5. Google Play Services / Core Framework
-                  if (pkg == "com.google.android.gms" || pkg == "com.google.android.gsf") return true
-
-                  // 6. Permissions / Package installer
-                  if (pkg.contains("permissioncontroller") || pkg.contains("packageinstaller")) return true
-
-                  // 7. Phone calls & Telecom
-                  if (pkg.contains("dialer") || pkg.contains("telecom") || pkg.contains("incall")) return true
-
-                  // 8. User's Allowed Apps (Matches ANY selected installed app!)
+                  // User's Allowed Apps (Matches ANY selected installed app!)
                   val lowerPkg = pkg.lowercase(java.util.Locale.ROOT)
                   for (a in allowedApps) {
                       val lowerA = a.lowercase(java.util.Locale.ROOT).trim()
@@ -3211,6 +3227,8 @@ jobs:
                         allowedSet.add('com.android.systemui');
 
                         bool isAllowed(String pkg) {
+                          final p = pkg.toLowerCase();
+                          if (p.contains('launcher') || p.contains('home') || p.contains('systemui') || p.contains('recents') || p.contains('quickstep')) return true;
                           if (allowedSet.contains(pkg)) return true;
                           for (final a in allowedSet) {
                             final al = a.toLowerCase();
