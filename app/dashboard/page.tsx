@@ -68,11 +68,12 @@ interface SubjectItem {
   id: string;
   name: string;
   class_level: string;
+  target_exam?: string;
 }
 
 interface ChapterItem {
   id: string;
-  title: string; // "title" not "name"
+  title: string;
   subject_id: string;
 }
 
@@ -305,7 +306,7 @@ function HeroWidget({ name, streak, todayStudyMins }: { name: string; streak: nu
   );
 }
 
-// ─── 6. SYLLABUS COMPLETION WIDGET (DONUT CHART) ────────────────────────────
+// ─── 6. SYLLABUS COMPLETION WIDGET (GROUPED BY DISTINCT SUBJECTS) ─────────────
 function SyllabusCompletionWidget({
   subjects,
   chapters,
@@ -325,29 +326,52 @@ function SyllabusCompletionWidget({
     return s;
   }, [progress]);
 
+  // Clean group by normalized subject name (Physics, Chemistry, Maths/Biology)
   const stats = useMemo(() => {
-    const subjectList: { id: string; name: string; done: number; total: number; pct: number; color: string }[] = [];
+    const groups: Record<string, { name: string; done: number; total: number; color: string }> = {};
+
+    const colorMap: Record<string, string> = {
+      physics: "#3b82f6",
+      chemistry: "#10b981",
+      maths: "#a855f7",
+      mathematics: "#a855f7",
+      biology: "#14b8a6",
+    };
+
     let grandDone = 0;
     let grandTotal = 0;
 
-    const colors = ["#3b82f6", "#10b981", "#a855f7", "#f97316", "#06b6d4"];
+    subjects.forEach((subj) => {
+      if (!subj.name || !subj.name.trim()) return;
+      const cleanName = subj.name.trim();
+      const normKey = cleanName.toLowerCase();
 
-    subjects.forEach((subj, idx) => {
       const chaps = chapters.filter((c) => c.subject_id === subj.id);
       const doneCount = chaps.filter((c) => doneSet.has(c.id)).length;
       const totalCount = chaps.length;
+
+      if (!groups[normKey]) {
+        groups[normKey] = {
+          name: cleanName,
+          done: 0,
+          total: 0,
+          color: colorMap[normKey] || "#f59e0b",
+        };
+      }
+
+      groups[normKey].done += doneCount;
+      groups[normKey].total += totalCount;
       grandDone += doneCount;
       grandTotal += totalCount;
-      const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-      subjectList.push({
-        id: subj.id,
-        name: subj.name,
-        done: doneCount,
-        total: totalCount,
-        pct,
-        color: colors[idx % colors.length],
-      });
     });
+
+    const subjectList = Object.values(groups).map((g) => ({
+      name: g.name,
+      done: g.done,
+      total: g.total,
+      pct: g.total > 0 ? Math.round((g.done / g.total) * 100) : 0,
+      color: g.color,
+    }));
 
     const overallPct = grandTotal > 0 ? Math.round((grandDone / grandTotal) * 100) : 0;
     return { subjectList, overallPct, grandDone, grandTotal };
@@ -380,7 +404,7 @@ function SyllabusCompletionWidget({
               accumulatedOffset += strokeLength;
               return (
                 <circle
-                  key={s.id}
+                  key={s.name}
                   cx="50"
                   cy="50"
                   r={radius}
@@ -403,7 +427,7 @@ function SyllabusCompletionWidget({
 
         <div className="flex-1 space-y-2">
           {stats.subjectList.map((s) => (
-            <div key={s.id} className="space-y-0.5">
+            <div key={s.name} className="space-y-0.5">
               <div className="flex items-center justify-between text-[11px] font-bold">
                 <span className="flex items-center gap-1.5 text-slate-800">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
@@ -607,7 +631,7 @@ export default function DashboardPage() {
   // Question logging modal state
   const [showAddQuestionModal, setShowAddQuestionModal] = useState(false);
   const [todayQuestionEntries, setTodayQuestionEntries] = useState<QuestionLogEntry[]>([]);
-  const [qSubjectId, setQSubjectId] = useState("");
+  const [selectedDistinctSubject, setSelectedDistinctSubject] = useState<string>("");
   const [qChapterId, setQChapterId] = useState("");
   const [qTopicName, setQTopicName] = useState("");
   const [qCount, setQCount] = useState("30");
@@ -633,16 +657,39 @@ export default function DashboardPage() {
         setProfile(uProf);
         setSelectedShiftId(uProf.selected_shift_id || null);
 
+        const targetExam = uProf.target_exam || "JEE";
         const allowedClasses = classLevelsForContent(uProf.class_level);
-        const { data: subs } = await supabase
+
+        // Fetch subjects
+        const { data: rawSubs } = await supabase
           .from("subjects")
-          .select("id, name, class_level")
+          .select("id, name, class_level, target_exam")
           .in("class_level", allowedClasses.length ? allowedClasses : ["11", "12"]);
 
-        if (subs) {
-          setSubjects(subs);
-          if (subs[0]) setQSubjectId(subs[0].id);
-          const subIds = subs.map((s) => s.id);
+        if (rawSubs) {
+          // Strict Personalisation Filter
+          const cleanedSubs = rawSubs.filter((s) => {
+            if (!s.name || !s.name.trim()) return false;
+            const norm = s.name.trim().toLowerCase();
+            if (targetExam === "JEE") {
+              // Exclude biology or NEET-only
+              if (norm.includes("bio") || s.target_exam === "NEET") return false;
+            } else if (targetExam === "NEET") {
+              // Exclude maths or JEE-only
+              if (norm.includes("math") || s.target_exam === "JEE") return false;
+            }
+            return true;
+          });
+
+          setSubjects(cleanedSubs);
+
+          // Get unique distinct names for modal buttons
+          const distinctNames = Array.from(new Set(cleanedSubs.map((s) => s.name.trim())));
+          if (distinctNames[0]) {
+            setSelectedDistinctSubject(distinctNames[0]);
+          }
+
+          const subIds = cleanedSubs.map((s) => s.id);
           const { data: chaps } = await supabase
             .from("chapters")
             .select("id, title, subject_id")
@@ -651,7 +698,11 @@ export default function DashboardPage() {
 
           if (chaps) {
             setChapters(chaps);
-            if (chaps[0]) setQChapterId(chaps[0].id);
+            const firstActiveSubIds = cleanedSubs
+              .filter((s) => s.name.trim().toLowerCase() === distinctNames[0]?.toLowerCase())
+              .map((s) => s.id);
+            const initialChaps = chaps.filter((c) => firstActiveSubIds.includes(c.subject_id));
+            if (initialChaps[0]) setQChapterId(initialChaps[0].id);
           }
         }
       }
@@ -705,7 +756,6 @@ export default function DashboardPage() {
         });
 
         const totalHoursAllTime = pastLogs.reduce((acc, l) => acc + (l.study_time_minutes || 0), 0) / 60;
-        // Total questions all time
         const { data: qLogs } = await supabase.from("question_logs").select("id, question_count, log_date, topic_name, start_from, end_on, subject_id, chapter_id").eq("user_id", uid);
         const totalQ = (qLogs || []).reduce((acc, q) => acc + (q.question_count || 0), 0);
         setTotalQuestionsAllTime(totalQ);
@@ -749,6 +799,33 @@ export default function DashboardPage() {
     loadData();
   }, [router]);
 
+  // Distinct clean subject names for modal buttons
+  const distinctSubjectNames = useMemo(() => {
+    return Array.from(new Set(subjects.map((s) => s.name.trim()))).filter(Boolean);
+  }, [subjects]);
+
+  // Filter chapters based on selected distinct subject name
+  const filteredChaptersForSelectedSubject = useMemo(() => {
+    if (!selectedDistinctSubject) return chapters;
+    const matchingSubjectIds = subjects
+      .filter((s) => s.name.trim().toLowerCase() === selectedDistinctSubject.toLowerCase())
+      .map((s) => s.id);
+    return chapters.filter((c) => matchingSubjectIds.includes(c.subject_id));
+  }, [chapters, subjects, selectedDistinctSubject]);
+
+  const handleSelectDistinctSubject = (name: string) => {
+    setSelectedDistinctSubject(name);
+    const matchingSubjectIds = subjects
+      .filter((s) => s.name.trim().toLowerCase() === name.toLowerCase())
+      .map((s) => s.id);
+    const chaps = chapters.filter((c) => matchingSubjectIds.includes(c.subject_id));
+    if (chaps[0]) {
+      setQChapterId(chaps[0].id);
+    } else {
+      setQChapterId("");
+    }
+  };
+
   const handleCompleteTask = async (id: string) => {
     setAllTasks((prev) => prev.filter((t) => t.id !== id));
     await supabase.from("tasks").update({ status: "completed" }).eq("id", id);
@@ -769,13 +846,19 @@ export default function DashboardPage() {
     const end = qEndOn ? parseInt(qEndOn) : null;
     const todayStr = new Date().toISOString().split("T")[0];
 
+    const selectedChap = chapters.find((c) => c.id === qChapterId);
+    const matchingSubjectId =
+      selectedChap?.subject_id ||
+      subjects.find((s) => s.name.trim().toLowerCase() === selectedDistinctSubject.toLowerCase())?.id ||
+      null;
+
     try {
       const { data, error } = await supabase
         .from("question_logs")
         .insert({
           user_id: user.id,
           log_date: todayStr,
-          subject_id: qSubjectId || null,
+          subject_id: matchingSubjectId,
           chapter_id: qChapterId || null,
           topic_name: qTopicName.trim(),
           question_count: count,
@@ -901,7 +984,6 @@ export default function DashboardPage() {
             <span className="text-[10px] font-bold text-teal-700 block mt-0.5">Study Timer →</span>
           </button>
 
-          {/* Upgraded Questions Card */}
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between">
@@ -976,7 +1058,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 6. SYLLABUS COMPLETION WIDGET (NEW DONUT) */}
+        {/* 6. SYLLABUS COMPLETION WIDGET (CLEAN 3 SUBJECTS DONUT) */}
         <SyllabusCompletionWidget
           subjects={subjects}
           chapters={chapters}
@@ -984,7 +1066,7 @@ export default function DashboardPage() {
           onOpenSyllabus={() => router.push("/library")}
         />
 
-        {/* 7. COMBINED ACTION ITEMS (NEW TO-DO / BACKLOG / TESTS) */}
+        {/* 7. COMBINED ACTION ITEMS (TO-DO / BACKLOG / TESTS) */}
         <ActionItemsWidget
           tasks={allTasks}
           scheduledTests={scheduledTests}
@@ -1041,7 +1123,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 9. QUICK ROUTE CARDS (3-COLUMN UPGRADED) */}
+        {/* 9. QUICK ROUTE CARDS (3-COLUMN) */}
         <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
@@ -1079,7 +1161,7 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* QUESTION LOGGING MODAL */}
+      {/* QUESTION LOGGING MODAL (CLEAN 3 DISTINCT SUBJECT BUTTONS) */}
       {showAddQuestionModal && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-sm w-full shadow-2xl border border-slate-300 overflow-hidden flex flex-col max-h-[90vh]">
@@ -1120,16 +1202,18 @@ export default function DashboardPage() {
               <div>
                 <label className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">Subject</label>
                 <div className="grid grid-cols-3 gap-1.5">
-                  {subjects.map((s) => (
+                  {distinctSubjectNames.map((name) => (
                     <button
-                      key={s.id}
+                      key={name}
                       type="button"
-                      onClick={() => setQSubjectId(s.id)}
-                      className={`py-1.5 rounded-xl border text-xs font-bold transition-all ${
-                        qSubjectId === s.id ? "bg-slate-900 text-white border-slate-900 shadow-xs" : "bg-white text-slate-700 border-slate-300"
+                      onClick={() => handleSelectDistinctSubject(name)}
+                      className={`py-2 rounded-xl border text-xs font-bold transition-all ${
+                        selectedDistinctSubject.toLowerCase() === name.toLowerCase()
+                          ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+                          : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
                       }`}
                     >
-                      {s.name}
+                      {name}
                     </button>
                   ))}
                 </div>
@@ -1142,13 +1226,11 @@ export default function DashboardPage() {
                   onChange={(e) => setQChapterId(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
                 >
-                  {chapters
-                    .filter((c) => !qSubjectId || c.subject_id === qSubjectId)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.title}
-                      </option>
-                    ))}
+                  {filteredChaptersForSelectedSubject.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                    </option>
+                  ))}
                 </select>
               </div>
 
