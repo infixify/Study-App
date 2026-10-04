@@ -22,25 +22,53 @@ export default function ResourcesPage() {
   const [activeType, setActiveType] = useState<string | null>(null);
   const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
 
-  // Auto-intercept direct PDF downloads to use Native DownloadManager instead of redirecting to Chrome
+  // Auto-intercept direct PDF & Google Drive downloads to use Native DownloadManager instead of opening Google Drive App
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
       const target = (event.target as HTMLElement).closest("a, button");
       if (!target) return;
 
-      const href = (target as HTMLAnchorElement).href;
+      const href = (target as HTMLAnchorElement).href || target.getAttribute("data-url") || "";
       const downloadAttr = target.getAttribute("download");
-      const title = target.textContent?.trim() || downloadAttr || "PrepWise_Resource";
+      const targetText = (target.textContent || "").toLowerCase();
+      const isDownloadAction =
+        targetText.includes("download") ||
+        target.getAttribute("aria-label")?.toLowerCase().includes("download") ||
+        downloadAttr !== null;
 
-      if (href && (href.toLowerCase().endsWith(".pdf") || href.includes("application/pdf") || downloadAttr !== null)) {
+      const isDocumentUrl =
+        href &&
+        (href.toLowerCase().endsWith(".pdf") ||
+          href.includes("application/pdf") ||
+          href.includes("drive.google.com") ||
+          href.includes("ncert.nic.in") ||
+          href.includes("docs.google.com/viewer"));
+
+      if ((isDocumentUrl || isDownloadAction) && href) {
         if (typeof window !== "undefined" && (window as any).AppBridge) {
           event.preventDefault();
           event.stopPropagation();
-          (window as any).AppBridge.postMessage(JSON.stringify({
-            action: "downloadPdf",
-            url: href,
-            title: title,
-          }));
+
+          let cleanUrl = href;
+          try {
+            if (href.includes("docs.google.com/viewer")) {
+              const u = new URL(href);
+              cleanUrl = u.searchParams.get("url") || href;
+            }
+          } catch (_) {}
+
+          const title =
+            target.getAttribute("data-title") ||
+            target.textContent?.trim() ||
+            "PrepWise_Resource";
+
+          (window as any).AppBridge.postMessage(
+            JSON.stringify({
+              action: "downloadPdf",
+              url: cleanUrl,
+              title: title,
+            })
+          );
         }
       }
     };
