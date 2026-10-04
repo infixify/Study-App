@@ -396,7 +396,6 @@ jobs:
                   with open(gradle_path, "w") as f:
                       f.write(a)
               print("ML Kit injected into build.gradle")
-
           PY_MLKIT_EOF
 
           python3 patch_mlkit.py
@@ -4130,6 +4129,10 @@ jobs:
                 AndroidWebViewController.enableDebugging(false);
                 final androidController = controller.platform as AndroidWebViewController;
                 androidController.setMediaPlaybackRequiresUserGesture(false);
+                // Grant WebRTC camera & microphone permissions to web pages (Live Study Room / Cam Study)
+                androidController.setOnPlatformPermissionRequest((request) {
+                  request.grant();
+                });
               }
 
               _controller = controller;
