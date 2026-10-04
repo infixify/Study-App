@@ -14,7 +14,8 @@ declare global {
     __nativeInstalledApps?: { name: string; packageName: string }[];
     onInstalledAppsReady?: (apps: { name: string; packageName: string }[]) => void;
     onNativeRequestStopFocus?: () => void;
-    onNativeDirectStopFocus?: () => void;
+    onNativeDirectStopFocus?: (data?: any) => void;
+    onDirectLoggedSession?: (data?: any) => void;
     onNativeFocusTimerSync?: (seconds: number) => void;
     onNativeRestoreActiveSession?: (sess: {
       subject: string;
@@ -37,7 +38,6 @@ interface AppItem {
   icon: string;
 }
 
-// Fallback if testing outside native Android
 const WEB_FALLBACK_APPS: AppItem[] = [
   { id: "com.google.android.youtube", name: "YouTube", icon: "▶️" },
   { id: "com.whatsapp", name: "WhatsApp", icon: "💬" },
@@ -94,11 +94,9 @@ export default function FocusPage() {
   );
   const [manualError, setManualError] = useState<string | null>(null);
 
-  // Toggle states
   const [faceVerificationEnabled, setFaceVerificationEnabled] = useState(false);
   const [appBlockerEnabled, setAppBlockerEnabled] = useState(false);
 
-  // Permission states
   const [overlayGranted, setOverlayGranted] = useState(false);
   const [usageGranted, setUsageGranted] = useState(false);
   const [showUsageSteps, setShowUsageSteps] = useState(false);
@@ -117,7 +115,6 @@ export default function FocusPage() {
   function applyNativeApps(raw: { name: string; packageName: string }[]) {
     if (!Array.isArray(raw) || raw.length === 0) return;
     const items = raw.map(nativeToAppItem);
-    // Sort all installed apps alphabetically
     items.sort((a, b) => a.name.localeCompare(b.name));
     setAllApps(items);
     setAppsLoaded(true);
@@ -176,6 +173,26 @@ export default function FocusPage() {
     setSaving(true);
     try {
       const endedAt = new Date();
+      const durationSecs = Math.max(0, Math.round((endedAt.getTime() - startTime.getTime()) / 1000));
+      const countsForStreak = durationSecs >= MIN_STREAK_SECONDS;
+
+      // 1. Guaranteed Direct Insert with User-Selected Subject (never null or General)
+      try {
+        await supabase.from("focus_sessions").insert({
+          user_id: userId,
+          started_at: startTime.toISOString(),
+          ended_at: endedAt.toISOString(),
+          duration_seconds: durationSecs,
+          counts_for_streak: countsForStreak,
+          subject: selectedSub || "Physics",
+          task_type: selectedTask || "questions",
+          verified: isVerifiedSession,
+        });
+      } catch (err) {
+        console.error("Direct session insert err:", err);
+      }
+
+      // 2. Reconcile streak
       const streakResult = await saveFocusSession(userId, startTime, endedAt);
       if (streakResult.countedForStreak) {
         setCurrentStreak(streakResult.newStreak);
@@ -195,7 +212,6 @@ export default function FocusPage() {
   useEffect(() => {
     if (typeof window !== "undefined" && window.AppBridge) {
       setIsNativeApp(true);
-      // Immediately request all installed apps from native Android
       try {
         window.AppBridge.postMessage(JSON.stringify({ action: "getInstalledApps" }));
       } catch (_) {}
@@ -204,6 +220,7 @@ export default function FocusPage() {
     if (typeof window !== "undefined") {
       window.onNativeDirectStopFocus = () => { handleDirectStopAndSaveRef.current(); };
       window.onNativeRequestStopFocus = () => { handleDirectStopAndSaveRef.current(); };
+      window.onDirectLoggedSession = () => { handleDirectStopAndSaveRef.current(); };
       window.onNativeFocusTimerSync = (secs: number) => { setSeconds(secs); };
       window.onNativeRestoreActiveSession = (sess) => {
         if (sess && sess.elapsedSeconds > 0) {
@@ -332,7 +349,6 @@ export default function FocusPage() {
       : [...allowedApps, appId];
     setAllowedApps(updated);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
-    // Live update running blocker with new allowed list
     if (isActive && appBlockerEnabled && typeof window !== "undefined" && window.AppBridge) {
       try {
         window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: updated }));
@@ -404,9 +420,12 @@ export default function FocusPage() {
   const handleStartSession = async () => {
     if (typeof window !== "undefined" && window.AppBridge) {
       try {
+        const { data: { session } } = await supabase.auth.getSession();
         window.AppBridge.postMessage(JSON.stringify({
           action: "startFocusNotification",
-          subject: selectedSub,
+          userId: userId,
+          accessToken: session?.access_token || "",
+          subject: selectedSub || "Physics",
           mode: selectedTask === "questions" ? "Practice" : selectedTask === "theory" ? "Theory" : "Revision",
           initialSeconds: 0,
           camEnabled: faceVerificationEnabled,
@@ -431,22 +450,49 @@ export default function FocusPage() {
     setSaving(true);
     setManualError(null);
     try {
-      const { data: dailyRow } = await supabase.from("daily_logs").select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes").eq("user_id", userId).eq("log_date", manualDate).maybeSingle();
+      const today = new Date().toISOString().split("T")[0];
+      const { data: dailyRow } = await supabase
+        .from("daily_logs")
+        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes")
+        .eq("user_id", userId)
+        .eq("log_date", manualDate)
+        .maybeSingle();
+
       const newMins = (dailyRow?.study_time_minutes || 0) + manualMinutes;
       const newTheory = (dailyRow?.theory_minutes || 0) + (manualTask === "theory" ? manualMinutes : 0);
       const newPractice = (dailyRow?.practice_minutes || 0) + (manualTask === "questions" ? manualMinutes : 0);
       const newRevision = (dailyRow?.revision_minutes || 0) + (manualTask === "revision" ? manualMinutes : 0);
+
+      // 1. Update daily summary in daily_logs
       await supabase.from("daily_logs").upsert(
         { user_id: userId, log_date: manualDate, study_time_minutes: newMins, theory_minutes: newTheory, practice_minutes: newPractice, revision_minutes: newRevision },
         { onConflict: "user_id,log_date" }
       );
-      const today = new Date().toISOString().split("T")[0];
+
+      // 2. Direct insert into focus_sessions with selected subject
+      const syntheticEnd = new Date();
+      const syntheticStart = new Date(syntheticEnd.getTime() - manualMinutes * 60 * 1000);
+      try {
+        await supabase.from("focus_sessions").insert({
+          user_id: userId,
+          started_at: syntheticStart.toISOString(),
+          ended_at: syntheticEnd.toISOString(),
+          duration_seconds: manualMinutes * 60,
+          counts_for_streak: manualMinutes * 60 >= MIN_STREAK_SECONDS,
+          subject: manualSub || "Physics",
+          task_type: manualTask || "questions",
+          verified: false,
+        });
+      } catch (e) {
+        console.error("Manual focus_sessions insert err:", e);
+      }
+
+      // 3. Reconcile streak if today
       if (manualDate === today && newMins * 60 >= MIN_STREAK_SECONDS) {
-        const syntheticEnd = new Date();
-        const syntheticStart = new Date(syntheticEnd.getTime() - manualMinutes * 60 * 1000);
         const streakResult = await saveFocusSession(userId, syntheticStart, syntheticEnd);
         if (streakResult.countedForStreak) setCurrentStreak(streakResult.newStreak);
       }
+
       setSaving(false);
       setShowManualModal(false);
     } catch (err) {
