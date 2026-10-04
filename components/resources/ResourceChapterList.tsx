@@ -1,3 +1,4 @@
+// components/resources/ResourceChapterList.tsx
 "use client";
 
 import { createElement as e, useState } from "react";
@@ -44,6 +45,19 @@ function classTagEl(tag: string) {
 }
 
 function triggerDownload(url: string, title: string) {
+  // If inside native Android App, use Native DownloadManager & open_filex
+  if (typeof window !== "undefined" && (window as any).AppBridge) {
+    (window as any).AppBridge.postMessage(
+      JSON.stringify({
+        action: "downloadPdf",
+        url: url,
+        title: title,
+      })
+    );
+    return;
+  }
+
+  // Web Browser Fallback
   const cleanName = (title.replace(/[^a-zA-Z0-9_-]/g, "_") || "document") + ".pdf";
   if (url.indexOf("/storage/v1/object/public/") !== -1) {
     const target = url + (url.indexOf("?") === -1 ? "?" : "&") + "download=" + encodeURIComponent(cleanName);
@@ -90,6 +104,14 @@ export default function ResourceChapterList({
     .map((ch) => ({ ch, files: ofCategory.filter((r) => r.chapter_id === ch.id) }))
     .filter((row) => row.files.length > 0);
 
+  function handleOpenOrView(url: string, title: string) {
+    if (typeof window !== "undefined" && (window as any).AppBridge) {
+      triggerDownload(url, title);
+    } else {
+      setViewingFile({ title, url });
+    }
+  }
+
   function fileCard(r: Resource) {
     return e(
       "div",
@@ -102,7 +124,7 @@ export default function ResourceChapterList({
           "button",
           {
             type: "button",
-            onClick: () => setViewingFile({ title: r.title, url: r.url }),
+            onClick: () => handleOpenOrView(r.url, r.title),
             className:
               "text-center text-sm font-semibold py-2.5 rounded-lg bg-teal/10 text-teal border border-teal/30 hover:bg-teal/20 transition-colors",
           },
@@ -162,9 +184,9 @@ export default function ResourceChapterList({
           "button",
           {
             type: "button",
-            onClick: () => setViewingFile({ title: ch.title, url: files[0].url }),
+            onClick: () => handleOpenOrView(files[0].url, ch.title),
             className:
-              "px-3 py-1.5 text-xs font-semibold rounded-md bg-teal/10 text-teal border border-teal/20",
+              "px-3 py-1.5 text-xs font-semibold rounded-md bg-teal/10 text-teal border border-teal/20 active:scale-95 transition-all",
           },
           "Read"
         ),
@@ -174,7 +196,7 @@ export default function ResourceChapterList({
             type: "button",
             onClick: () => triggerDownload(files[0].url, ch.title),
             className:
-              "px-2.5 py-1.5 text-xs font-semibold rounded-md bg-ink/5 text-ink/70 border border-ink/10",
+              "px-2.5 py-1.5 text-xs font-semibold rounded-md bg-ink/5 text-ink/70 border border-ink/10 active:scale-95 transition-all",
           },
           "↓"
         )
@@ -184,16 +206,12 @@ export default function ResourceChapterList({
 
   function pdfModal() {
     if (!viewingFile) return null;
-    const viewerSrc =
-      "https://docs.google.com/viewer?url=" +
-      encodeURIComponent(viewingFile.url) +
-      "&embedded=true";
 
     return e(
       "div",
       {
         className:
-          "fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex flex-col animate-in fade-in duration-200",
+          "fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col animate-in fade-in duration-200",
       },
       e(
         "div",
@@ -215,18 +233,17 @@ export default function ResourceChapterList({
               type: "button",
               onClick: () => triggerDownload(viewingFile.url, viewingFile.title),
               className:
-                "px-2.5 py-1 text-xs font-semibold rounded-md bg-marigold/10 text-marigold border border-marigold/30",
+                "px-3 py-1.5 text-xs font-semibold rounded-md bg-marigold/10 text-marigold border border-marigold/30 active:scale-95 transition-all",
             },
             "Download"
           ),
           e(
-            "a",
+            "button",
             {
-              href: viewingFile.url,
-              target: "_blank",
-              rel: "noopener noreferrer",
+              type: "button",
+              onClick: () => triggerDownload(viewingFile.url, viewingFile.title),
               className:
-                "px-2 py-1 text-xs font-medium rounded-md bg-ink/5 text-ink/70 border border-ink/10",
+                "px-2.5 py-1.5 text-xs font-medium rounded-md bg-ink/5 text-ink/70 border border-ink/10 active:scale-95 transition-all",
             },
             "↗"
           ),
@@ -244,13 +261,55 @@ export default function ResourceChapterList({
       ),
       e(
         "div",
-        { className: "flex-1 w-full bg-paper relative overflow-hidden" },
-        e("iframe", {
-          src: viewerSrc,
-          title: viewingFile.title,
-          className: "w-full h-full border-0",
-          loading: "lazy",
-        })
+        {
+          className:
+            "flex-1 w-full bg-paper relative flex flex-col items-center justify-center p-6 text-center overflow-y-auto",
+        },
+        e(
+          "div",
+          {
+            className:
+              "max-w-sm w-full bg-white rounded-2xl border border-ink/10 p-6 shadow-md flex flex-col items-center gap-4 animate-in zoom-in-95 duration-150",
+          },
+          e(
+            "div",
+            {
+              className:
+                "w-16 h-16 rounded-2xl bg-teal/10 border border-teal/20 flex items-center justify-center text-3xl",
+            },
+            "📖"
+          ),
+          e(
+            "div",
+            null,
+            e("h3", { className: "text-base font-bold text-ink mb-1.5" }, viewingFile.title),
+            e(
+              "p",
+              { className: "text-xs text-ink/60 leading-relaxed" },
+              "Open directly in Android PDF Viewer for smooth, offline reading without loading errors."
+            )
+          ),
+          e(
+            "button",
+            {
+              type: "button",
+              onClick: () => triggerDownload(viewingFile.url, viewingFile.title),
+              className:
+                "w-full py-3 rounded-xl bg-teal text-white font-semibold text-sm shadow hover:bg-teal/90 active:scale-95 transition-all flex items-center justify-center gap-2",
+            },
+            "Open in PDF Reader (Instant & Offline)"
+          ),
+          e(
+            "button",
+            {
+              type: "button",
+              onClick: () => triggerDownload(viewingFile.url, viewingFile.title),
+              className:
+                "w-full py-2.5 rounded-xl bg-ink/5 text-ink/80 font-medium text-xs hover:bg-ink/10 active:scale-95 transition-all flex items-center justify-center gap-1.5",
+            },
+            "⬇️ Download to Device Storage"
+          )
+        )
       )
     );
   }
