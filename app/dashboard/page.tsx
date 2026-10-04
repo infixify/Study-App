@@ -320,13 +320,24 @@ function HeroWidget({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbItems, mode]);
 
-  // On tap: advance card, increment count; show limit warning briefly if exceeded
+  // On tap: enforce daily limit — if already at limit, show warning and do NOT advance
   const handleTapCard = useCallback(() => {
     const motDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
     const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
     const saved = loadDailyContentState();
 
+    const showLimit = () => {
+      setLimitHit(true);
+      if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
+      limitTimerRef.current = setTimeout(() => setLimitHit(false), 3000);
+    };
+
     if (mode === "motivation") {
+      // Already at limit — freeze, just remind
+      if (saved.motivationCount >= QUOTE_LIMIT) {
+        showLimit();
+        return;
+      }
       const newCount = saved.motivationCount + 1;
       const nextIdx = (saved.motivationIndex + 1) % motDeck.length;
       const nextItem = motDeck[nextIdx] || motDeck[0];
@@ -335,12 +346,14 @@ function HeroWidget({
       saveDailyContentState(next);
       setCurrentItem(nextItem);
       setImgKey((k) => k + 1);
-      if (newCount >= QUOTE_LIMIT) {
-        setLimitHit(true);
-        if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
-        limitTimerRef.current = setTimeout(() => setLimitHit(false), 3000);
-      }
+      // Hit limit exactly now — show warning
+      if (newCount >= QUOTE_LIMIT) showLimit();
     } else {
+      // Already at limit — freeze, just remind
+      if (saved.memeCount >= MEME_LIMIT) {
+        showLimit();
+        return;
+      }
       const newCount = saved.memeCount + 1;
       const nextIdx = (saved.memeIndex + 1) % memDeck.length;
       const nextItem = memDeck[nextIdx] || memDeck[0];
@@ -349,11 +362,8 @@ function HeroWidget({
       saveDailyContentState(next);
       setCurrentItem(nextItem);
       setImgKey((k) => k + 1);
-      if (newCount >= MEME_LIMIT) {
-        setLimitHit(true);
-        if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
-        limitTimerRef.current = setTimeout(() => setLimitHit(false), 3000);
-      }
+      // Hit limit exactly now — show warning
+      if (newCount >= MEME_LIMIT) showLimit();
     }
   }, [dbItems, mode]);
 
@@ -539,6 +549,8 @@ function HeroWidget({
             {mode === "motivation"
               ? `Only ${QUOTE_LIMIT} quotes per day — come back tomorrow! 🌅`
               : `Only ${MEME_LIMIT} memes per day — back to books! 📚`}
+            {" · "}
+            <span className="underline underline-offset-2 cursor-pointer">Upgrade for more</span>
           </p>
         )}
       </div>
