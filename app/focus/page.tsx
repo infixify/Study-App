@@ -1,3 +1,4 @@
+// app/study/page.tsx
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
@@ -36,15 +37,16 @@ interface AppItem {
   icon: string;
 }
 
+// Real Android package fallbacks (No fake string IDs)
 const WEB_FALLBACK_APPS: AppItem[] = [
-  { id: "pdf_reader", name: "PDF Reader", icon: "📄" },
-  { id: "calculator", name: "Calculator", icon: "🧮" },
-  { id: "youtube", name: "YouTube", icon: "▶️" },
-  { id: "whatsapp", name: "WhatsApp", icon: "💬" },
-  { id: "instagram", name: "Instagram", icon: "📸" },
-  { id: "telegram", name: "Telegram", icon: "✈️" },
-  { id: "snapchat", name: "Snapchat", icon: "👻" },
-  { id: "games", name: "Games & Social Media", icon: "🎮" },
+  { id: "com.google.android.youtube", name: "YouTube", icon: "▶️" },
+  { id: "com.whatsapp", name: "WhatsApp", icon: "💬" },
+  { id: "com.google.android.calculator", name: "Calculator", icon: "🧮" },
+  { id: "com.google.android.apps.pdfviewer", name: "PDF Viewer", icon: "📄" },
+  { id: "org.telegram.messenger", name: "Telegram", icon: "✈️" },
+  { id: "com.instagram.android", name: "Instagram", icon: "📸" },
+  { id: "com.google.android.apps.docs", name: "Google Docs", icon: "📝" },
+  { id: "com.adobe.reader", name: "Adobe Acrobat Reader", icon: "📕" },
 ];
 
 function nativeToAppItem(n: { name: string; packageName: string }): AppItem {
@@ -101,7 +103,6 @@ export default function StudyPage() {
   const [usageGranted, setUsageGranted] = useState(false);
   const [showUsageSteps, setShowUsageSteps] = useState(false);
 
-  // Native cam status (driven by Kotlin FocusBlockerService — no face-api.js)
   const [nativeCamPaused, setNativeCamPaused] = useState(false);
 
   const availableSubjects: SubjectType[] =
@@ -111,13 +112,13 @@ export default function StudyPage() {
 
   const isVerifiedSession = faceVerificationEnabled && appBlockerEnabled && overlayGranted && usageGranted;
 
-  // Gap 6 Fix: Ref that always points to the LATEST handleDirectStopAndSave
-  // Prevents stale closure — window.onNativeDirectStopFocus set once on mount
-  // but needs fresh userId/startTime/seconds on every call
   const handleDirectStopAndSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   function applyNativeApps(raw: { name: string; packageName: string }[]) {
+    if (!Array.isArray(raw) || raw.length === 0) return;
     const items = raw.map(nativeToAppItem);
+    // Sort alphabetically
+    items.sort((a, b) => a.name.localeCompare(b.name));
     setAllApps(items);
     setAppsLoaded(true);
   }
@@ -166,9 +167,6 @@ export default function StudyPage() {
     setIsActive(false);
     setNativeCamPaused(false);
 
-    // Kotlin handles ALL logging (daily_logs + focus_sessions) via directBackgroundStopAndLog
-    // Web MUST NOT call flushDiffToDailyLogs here — would cause double-log
-    // Web only updates UI state below
     if (!userId || !startTime) {
       setSeconds(0);
       lastSyncedSecondsRef.current = 0;
@@ -177,7 +175,6 @@ export default function StudyPage() {
 
     setSaving(true);
     try {
-      // Only save focus_session record for streak tracking (Kotlin saves daily_logs)
       const endedAt = new Date();
       const streakResult = await saveFocusSession(userId, startTime, endedAt);
       if (streakResult.countedForStreak) {
@@ -193,16 +190,18 @@ export default function StudyPage() {
     lastSyncedSecondsRef.current = 0;
   };
 
-  // Gap 6 Fix: Keep ref always pointing to latest function (fresh closure every render)
   handleDirectStopAndSaveRef.current = handleDirectStopAndSave;
 
   useEffect(() => {
     if (typeof window !== "undefined" && window.AppBridge) {
       setIsNativeApp(true);
+      // Actively ask bridge for installed apps immediately on mount
+      try {
+        window.AppBridge.postMessage(JSON.stringify({ action: "getInstalledApps" }));
+      } catch (_) {}
     }
 
     if (typeof window !== "undefined") {
-      // Gap 6 Fix: Use ref so always calls latest handleDirectStopAndSave (fresh userId/startTime)
       window.onNativeDirectStopFocus = () => { handleDirectStopAndSaveRef.current(); };
       window.onNativeRequestStopFocus = () => { handleDirectStopAndSaveRef.current(); };
       window.onNativeFocusTimerSync = (secs: number) => { setSeconds(secs); };
@@ -334,7 +333,9 @@ export default function StudyPage() {
     setAllowedApps(updated);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
     if (isActive && appBlockerEnabled && typeof window !== "undefined" && window.AppBridge) {
-      try { window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: updated })); } catch (err) {}
+      try {
+        window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: updated }));
+      } catch (err) {}
     }
   };
 
@@ -342,7 +343,9 @@ export default function StudyPage() {
     setAllowedApps([]);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify([]));
     if (isActive && appBlockerEnabled && typeof window !== "undefined" && window.AppBridge) {
-      try { window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: [] })); } catch (err) {}
+      try {
+        window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: [] }));
+      } catch (err) {}
     }
   };
 
@@ -375,7 +378,6 @@ export default function StudyPage() {
   }
 
   useEffect(() => {
-    // Timer driven by native service sync when native; JS interval as fallback on web
     if (isActive) {
       timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
     } else if (timerRef.current) {
@@ -396,8 +398,6 @@ export default function StudyPage() {
       clearInterval(syncIntervalRef.current);
     }
     return () => clearInterval(syncIntervalRef.current);
-  // Gap 1 Fix: faceVerificationEnabled/appBlockerEnabled/overlayGranted/usageGranted added
-  // Without these, isVerifiedSession captured at session start stays stale if toggles change mid-session
   }, [isActive, userId, selectedTask, faceVerificationEnabled, appBlockerEnabled, overlayGranted, usageGranted]);
 
   const handleStartSession = async () => {
@@ -515,7 +515,6 @@ export default function StudyPage() {
           </div>
         )}
 
-        {/* Native cam-paused banner — status driven by Kotlin, not face-api.js */}
         {isActive && faceVerificationEnabled && nativeCamPaused && (
           <div className="rounded-ticket border border-coral/30 bg-coral/10 px-4 py-3 flex items-center gap-3">
             <span className="text-xl">⏸️</span>
