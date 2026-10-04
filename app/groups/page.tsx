@@ -67,12 +67,14 @@ export default function GroupsListPage() {
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
-  const [newGroupExam, setNewGroupExam] = useState("JEE");
+  const [newGroupExam, setNewGroupExam] = useState("All");
   const [newGroupHasPassword, setNewGroupHasPassword] = useState(true);
   const [newGroupPasscode, setNewGroupPasscode] = useState("");
   const [newGroupRequiresApproval, setNewGroupRequiresApproval] = useState(false);
   const [newGroupGoalHours, setNewGroupGoalHours] = useState("6");
   const [newGroupRules, setNewGroupRules] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [joinTargetId, setJoinTargetId] = useState("");
@@ -143,13 +145,41 @@ export default function GroupsListPage() {
 
   async function handleCreateGroup(e: React.FormEvent) {
     e.preventDefault();
-    if (!newGroupName.trim()) return;
+    setCreateError(null);
+    const trimmedName = newGroupName.trim();
+    if (!trimmedName) return;
     if (newGroupHasPassword && !newGroupPasscode.trim()) return;
+
+    // 1. Check if group with same name already exists in memory
+    const nameExistsLocally = groups.some(
+      (g) => g.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (nameExistsLocally) {
+      setCreateError("A group with this name already exists. Please choose a different name.");
+      return;
+    }
+
+    setCreating(true);
+
+    // 2. Double check directly in database (case-insensitive ilike)
+    try {
+      const { data: existingGroup } = await supabase
+        .from("study_groups")
+        .select("id")
+        .ilike("name", trimmedName)
+        .maybeSingle();
+
+      if (existingGroup) {
+        setCreateError("A group with this name already exists. Please choose a different name.");
+        setCreating(false);
+        return;
+      }
+    } catch (_) {}
 
     const { data: inserted, error } = await supabase
       .from("study_groups")
       .insert({
-        name: newGroupName.trim(),
+        name: trimmedName,
         target_exam: newGroupExam,
         passcode: newGroupHasPassword ? newGroupPasscode.trim() : null,
         requires_approval: newGroupHasPassword ? false : newGroupRequiresApproval,
@@ -160,10 +190,16 @@ export default function GroupsListPage() {
       .select("id")
       .single();
 
-    if (error || !inserted) return;
+    setCreating(false);
+
+    if (error || !inserted) {
+      setCreateError(error?.message || "Failed to create group. Please try again.");
+      return;
+    }
 
     setShowCreateModal(false);
     setNewGroupName("");
+    setNewGroupExam("All");
     setNewGroupHasPassword(true);
     setNewGroupPasscode("");
     setNewGroupRequiresApproval(false);
@@ -298,7 +334,10 @@ export default function GroupsListPage() {
             🔑 Join Group
           </button>
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => {
+              setCreateError(null);
+              setShowCreateModal(true);
+            }}
             className="flex-1 py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-xs hover:bg-teal/90"
           >
             + Create Group
@@ -312,17 +351,34 @@ export default function GroupsListPage() {
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-2 border-b border-ink/8">
               <h3 className="text-sm font-bold text-ink">Create Study Group</h3>
-              <button onClick={() => setShowCreateModal(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs">
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setCreateError(null);
+                }}
+                className="w-6 h-6 rounded-full bg-ink/5 text-xs"
+              >
                 ✕
               </button>
             </div>
+
+            {createError && (
+              <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                ⚠️ {createError}
+              </p>
+            )}
+
             <form onSubmit={handleCreateGroup} className="space-y-3">
               <div>
                 <label className="text-[10px] font-bold text-slate block mb-0.5">Group Name</label>
                 <input
                   type="text"
                   value={newGroupName}
-                  onChange={(e) => setNewGroupName(e.target.value)}
+                  onChange={(e) => {
+                    setNewGroupName(e.target.value);
+                    if (createError) setCreateError(null);
+                  }}
+                  placeholder="e.g. Daily Study Squad"
                   className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15"
                   required
                 />
@@ -334,6 +390,7 @@ export default function GroupsListPage() {
                   onChange={(e) => setNewGroupExam(e.target.value)}
                   className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15 bg-white"
                 >
+                  <option>All</option>
                   <option>JEE</option>
                   <option>NEET</option>
                   <option>Boards</option>
@@ -356,6 +413,7 @@ export default function GroupsListPage() {
                   value={newGroupRules}
                   onChange={(e) => setNewGroupRules(e.target.value)}
                   rows={2}
+                  placeholder="e.g. Maintain streak daily"
                   className="w-full p-2.5 text-xs rounded-xl border border-ink/15 resize-none"
                 />
               </div>
@@ -395,6 +453,7 @@ export default function GroupsListPage() {
                       type="text"
                       value={newGroupPasscode}
                       onChange={(e) => setNewGroupPasscode(e.target.value)}
+                      placeholder="e.g. 1234"
                       className="w-full p-2.5 text-xs font-semibold rounded-xl border border-ink/15"
                       required
                     />
@@ -429,13 +488,20 @@ export default function GroupsListPage() {
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setCreateError(null);
+                  }}
                   className="flex-1 py-2.5 rounded-xl border border-ink/10 text-xs font-semibold text-slate"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="flex-1 py-2.5 rounded-xl bg-teal text-white text-xs font-bold">
-                  Create & Enter
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="flex-1 py-2.5 rounded-xl bg-teal text-white text-xs font-bold disabled:opacity-50"
+                >
+                  {creating ? "Checking…" : "Create & Enter"}
                 </button>
               </div>
             </form>
