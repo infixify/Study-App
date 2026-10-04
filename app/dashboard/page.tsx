@@ -110,6 +110,55 @@ interface ContentCardItem {
   badge: string;
 }
 
+// ─── DAILY CONTENT STATE HELPERS ─────────────────────────────────────────────
+// We store per-day usage in localStorage keyed by date.
+// Key: "pw_content_state_YYYY-MM-DD"
+// Value: { motivationIndex: number; memeIndex: number; motivationCount: number; memeCount: number; motivationId: string; memeId: string }
+
+const QUOTE_LIMIT = 3;
+const MEME_LIMIT = 2;
+
+function getTodayStr(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+interface DailyContentState {
+  motivationIndex: number;
+  memeIndex: number;
+  motivationCount: number;
+  memeCount: number;
+  selectedMotivationId: string;
+  selectedMemeId: string;
+}
+
+function loadDailyContentState(): DailyContentState {
+  try {
+    const key = `pw_content_state_${getTodayStr()}`;
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw);
+  } catch (_) {}
+  return { motivationIndex: 0, memeIndex: 0, motivationCount: 0, memeCount: 0, selectedMotivationId: "", selectedMemeId: "" };
+}
+
+function saveDailyContentState(state: DailyContentState) {
+  try {
+    const key = `pw_content_state_${getTodayStr()}`;
+    localStorage.setItem(key, JSON.stringify(state));
+  } catch (_) {}
+}
+
+// Deterministic daily seed — different index each day, cycles through deck
+function getDailyIndex(deck: ContentCardItem[], dateStr: string, salt: string): number {
+  if (!deck.length) return 0;
+  let hash = 0;
+  const str = dateStr + salt;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) & 0xffffffff;
+  }
+  return Math.abs(hash) % deck.length;
+}
+
+// ─── COLOR PRESETS ────────────────────────────────────────────────────────────
 const COLOR_PRESETS = [
   { color: "from-sky-500 to-indigo-600", bg: "bg-sky-50", border: "border-sky-200", text: "text-sky-950", badge: "bg-sky-500" },
   { color: "from-amber-500 to-orange-600", bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-950", badge: "bg-amber-500" },
@@ -142,6 +191,18 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     text: "text-amber-950",
     badge: "bg-amber-500",
   },
+  {
+    id: "m-3",
+    quote: "You have to fight to reach your dream. You have to sacrifice and work hard for it.",
+    character: "Lionel Messi",
+    show: "PrepWise",
+    icon_or_sticker: "🏆",
+    color: "from-teal-500 to-emerald-600",
+    bg: "bg-teal-50",
+    border: "border-teal-200",
+    text: "text-teal-950",
+    badge: "bg-teal-500",
+  },
 ];
 
 const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
@@ -157,6 +218,18 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
     text: "text-gray-950",
     badge: "bg-gray-600",
   },
+  {
+    id: "meme-2",
+    quote: "Ek baar aur padhle bhai... exam ke baad sab Netflix dekhenge! Abhi sirf books! 📚",
+    character: "Virender Sehwag",
+    show: "Meme World",
+    icon_or_sticker: "😂",
+    color: "from-purple-600 to-indigo-600",
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-950",
+    badge: "bg-purple-600",
+  },
 ];
 
 function getGreeting(name: string, hour: number): string {
@@ -169,6 +242,7 @@ function getGreeting(name: string, hour: number): string {
   return `Night owl alert, ${name}! 🦉 Sleep matters too!`;
 }
 
+// ─── HERO WIDGET ──────────────────────────────────────────────────────────────
 function HeroWidget({
   name,
   streak,
@@ -188,6 +262,11 @@ function HeroWidget({
   const [currentItem, setCurrentItem] = useState<ContentCardItem | null>(null);
   const [showGoalPopup, setShowGoalPopup] = useState(false);
   const [goalHours, setGoalHours] = useState(Math.round(dailyGoalMins / 60) || 8);
+
+  // Daily content state — loaded from localStorage, persists across refresh
+  const [dailyState, setDailyState] = useState<DailyContentState>(() => loadDailyContentState());
+  // Whether user hit today's limit for current mode
+  const [limitHit, setLimitHit] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => setHour(new Date().getHours()), 60_000);
@@ -232,23 +311,96 @@ function HeroWidget({
     fetchDynamicContent();
   }, []);
 
-  const pickNextItem = useCallback(
-    (currentMode: "motivation" | "meme") => {
-      const deck =
-        dbItems[currentMode].length > 0
-          ? dbItems[currentMode]
-          : currentMode === "motivation"
-          ? FALLBACK_MOTIVATION_QUOTES
-          : FALLBACK_MEME_QUOTES;
-      const selected = deck[Math.floor(Math.random() * deck.length)] || deck[0];
-      setCurrentItem(selected);
-    },
-    [dbItems]
-  );
-
+  // Once dbItems are ready, restore or set the initial card from persisted state
   useEffect(() => {
-    pickNextItem(mode);
-  }, [mode, pickNextItem]);
+    const motDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
+    const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
+
+    const todayStr = getTodayStr();
+    const savedState = loadDailyContentState();
+
+    if (mode === "motivation") {
+      // If we have a persisted selected ID for today, restore it
+      let item: ContentCardItem | undefined;
+      if (savedState.selectedMotivationId) {
+        item = motDeck.find((c) => c.id === savedState.selectedMotivationId);
+      }
+      // If not found (new day or first load), pick daily seed
+      if (!item) {
+        const idx = getDailyIndex(motDeck, todayStr, "motivation");
+        item = motDeck[idx] || motDeck[0];
+        const newState: DailyContentState = {
+          ...savedState,
+          motivationIndex: idx,
+          selectedMotivationId: item.id,
+        };
+        setDailyState(newState);
+        saveDailyContentState(newState);
+      }
+      setCurrentItem(item || null);
+      setLimitHit(savedState.motivationCount >= QUOTE_LIMIT);
+    } else {
+      let item: ContentCardItem | undefined;
+      if (savedState.selectedMemeId) {
+        item = memDeck.find((c) => c.id === savedState.selectedMemeId);
+      }
+      if (!item) {
+        const idx = getDailyIndex(memDeck, todayStr, "meme");
+        item = memDeck[idx] || memDeck[0];
+        const newState: DailyContentState = {
+          ...savedState,
+          memeIndex: idx,
+          selectedMemeId: item.id,
+        };
+        setDailyState(newState);
+        saveDailyContentState(newState);
+      }
+      setCurrentItem(item || null);
+      setLimitHit(savedState.memeCount >= MEME_LIMIT);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbItems, mode]);
+
+  // On tap — advance to next card, increment count, check limit
+  const handleTapCard = useCallback(() => {
+    const motDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
+    const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
+    const savedState = loadDailyContentState();
+
+    if (mode === "motivation") {
+      const limit = QUOTE_LIMIT;
+      const newCount = savedState.motivationCount + 1;
+      const deck = motDeck;
+      const nextIdx = (savedState.motivationIndex + 1) % deck.length;
+      const nextItem = deck[nextIdx] || deck[0];
+      const newState: DailyContentState = {
+        ...savedState,
+        motivationIndex: nextIdx,
+        motivationCount: newCount,
+        selectedMotivationId: nextItem.id,
+      };
+      setDailyState(newState);
+      saveDailyContentState(newState);
+      setCurrentItem(nextItem);
+      setLimitHit(newCount >= limit);
+    } else {
+      const limit = MEME_LIMIT;
+      const newCount = savedState.memeCount + 1;
+      const deck = memDeck;
+      const nextIdx = (savedState.memeIndex + 1) % deck.length;
+      const nextItem = deck[nextIdx] || deck[0];
+      const newState: DailyContentState = {
+        ...savedState,
+        memeIndex: nextIdx,
+        memeCount: newCount,
+        selectedMemeId: nextItem.id,
+      };
+      setDailyState(newState);
+      saveDailyContentState(newState);
+      setCurrentItem(nextItem);
+      setLimitHit(newCount >= limit);
+    }
+  }, [dbItems, mode]);
 
   const greeting = getGreeting(name, hour);
   const todayHours = (todayStudyMins / 60).toFixed(1);
@@ -261,47 +413,35 @@ function HeroWidget({
     setShowGoalPopup(false);
   };
 
+  const todayLimitLabel = mode === "motivation"
+    ? `Only ${QUOTE_LIMIT} quotes per day — come back tomorrow! 🌅`
+    : `Only ${MEME_LIMIT} memes per day — back to books! 📚`;
+
   return (
     <div className="rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-slate-200/80 bg-white">
       <div className={`h-1 w-full bg-gradient-to-r ${currentItem?.color || "from-indigo-500 to-teal-500"}`} />
       <div className="p-3 pb-2.5">
-        {/* Greeting + Streak */}
+        {/* Greeting + Streak — compact single row */}
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex-1 min-w-0">
-            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-0.5">
-              PrepWise Cockpit
-            </p>
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-0.5">PrepWise Cockpit</p>
             <h2 className="text-xs font-black text-slate-900 leading-snug truncate">{greeting}</h2>
           </div>
           {/* Streak — horizontal compact */}
-          <div
-            className={`shrink-0 flex items-center gap-1 rounded-xl px-2.5 py-1.5 ${
-              streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"
-            }`}
-          >
+          <div className={`shrink-0 flex items-center gap-1 rounded-xl px-2.5 py-1.5 ${streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"}`}>
             <span className="text-sm leading-none">{streak > 0 ? "🔥" : "💤"}</span>
-            <span className={`text-sm font-black leading-none ${streak > 0 ? "text-orange-600" : "text-slate-400"}`}>
-              {streak}
-            </span>
+            <span className={`text-sm font-black leading-none ${streak > 0 ? "text-orange-600" : "text-slate-400"}`}>{streak}</span>
             <span className="text-[9px] font-bold text-slate-500 uppercase">{streak === 1 ? "Day" : "Days"}</span>
           </div>
         </div>
 
-        {/* Today + Goal boxes */}
+        {/* Today + Goal boxes — compact */}
         <div className="flex items-center gap-2 mb-2">
-          <div
-            className={`flex-1 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 ${
-              goalReached ? "bg-emerald-50 border-emerald-200" : "bg-teal-50 border-teal-100"
-            }`}
-          >
+          <div className={`flex-1 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 ${goalReached ? "bg-emerald-50 border-emerald-200" : "bg-teal-50 border-teal-100"}`}>
             <span className="text-sm">{goalReached ? "🎯" : "⏱️"}</span>
             <div>
-              <p className={`text-[9px] font-bold leading-none ${goalReached ? "text-emerald-600" : "text-teal-600"}`}>
-                {goalReached ? "Goal Reached!" : "Today"}
-              </p>
-              <p className={`text-xs font-black leading-tight ${goalReached ? "text-emerald-900" : "text-teal-900"}`}>
-                {todayHours}h studied
-              </p>
+              <p className={`text-[9px] font-bold leading-none ${goalReached ? "text-emerald-600" : "text-teal-600"}`}>{goalReached ? "Goal Reached!" : "Today"}</p>
+              <p className={`text-xs font-black leading-tight ${goalReached ? "text-emerald-900" : "text-teal-900"}`}>{todayHours}h studied</p>
             </div>
           </div>
           <div className="flex-1 bg-indigo-50 border border-indigo-100 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-1.5">
@@ -312,16 +452,7 @@ function HeroWidget({
                 <p className="text-xs font-black text-indigo-900 leading-tight">{goalHoursDisplay}h / day</p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setGoalHours(Math.round(dailyGoalMins / 60) || 8);
-                setShowGoalPopup(true);
-              }}
-              className="text-[9px] font-black text-indigo-600 bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded-lg hover:bg-indigo-200 shrink-0"
-            >
-              Edit
-            </button>
+            <button type="button" onClick={() => { setGoalHours(Math.round(dailyGoalMins / 60) || 8); setShowGoalPopup(true); }} className="text-[9px] font-black text-indigo-600 bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded-lg hover:bg-indigo-200 shrink-0">Edit</button>
           </div>
         </div>
 
@@ -333,56 +464,33 @@ function HeroWidget({
               <p className="text-[10px] text-slate-500 font-semibold mb-3">Choose your target study hours per day</p>
               <div className="grid grid-cols-4 gap-2 mb-4">
                 {Array.from({ length: 24 }, (_, i) => i + 1).map((h) => (
-                  <button
-                    key={h}
-                    type="button"
-                    onClick={() => setGoalHours(h)}
-                    className={`py-2 rounded-xl text-xs font-black border transition-all ${
-                      goalHours === h
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                    }`}
-                  >
+                  <button key={h} type="button" onClick={() => setGoalHours(h)}
+                    className={`py-2 rounded-xl text-xs font-black border transition-all ${goalHours === h ? "bg-indigo-600 text-white border-indigo-600" : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"}`}>
                     {h}h
                   </button>
                 ))}
               </div>
               <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowGoalPopup(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-black text-xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveGoal}
-                  className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-xs shadow-md"
-                >
-                  Save Goal
-                </button>
+                <button type="button" onClick={() => setShowGoalPopup(false)} className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-black text-xs">Cancel</button>
+                <button type="button" onClick={handleSaveGoal} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-xs shadow-md">Save Goal</button>
               </div>
             </div>
           </div>
         )}
 
+        {/* Mode toggle */}
         <div className="w-full p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-black flex items-center mb-2.5 shadow-inner">
           <button
             type="button"
             onClick={() => setMode("motivation")}
-            className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${
-              mode === "motivation" ? "bg-white text-slate-900 shadow-sm font-black" : "text-slate-500 hover:text-slate-900"
-            }`}
+            className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${mode === "motivation" ? "bg-white text-slate-900 shadow-sm font-black" : "text-slate-500 hover:text-slate-900"}`}
           >
             <span>🔥</span> Motivation
           </button>
           <button
             type="button"
             onClick={() => setMode("meme")}
-            className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${
-              mode === "meme" ? "bg-white text-slate-900 shadow-sm font-black" : "text-slate-500 hover:text-slate-900"
-            }`}
+            className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${mode === "meme" ? "bg-white text-slate-900 shadow-sm font-black" : "text-slate-500 hover:text-slate-900"}`}
           >
             <span>😂</span> Memes
           </button>
@@ -391,23 +499,13 @@ function HeroWidget({
         {currentItem && (
           <button
             type="button"
-            onClick={() => pickNextItem(mode)}
+            onClick={handleTapCard}
             className={`w-full text-left rounded-2xl border ${currentItem.border} ${currentItem.bg} p-3 active:scale-[0.98] transition-all relative overflow-hidden group shadow-2xs`}
           >
             <div className="flex items-center gap-3">
-              <div
-                className={`w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden`}
-              >
-                {currentItem.icon_or_sticker &&
-                (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
-                  <img
-                    src={currentItem.icon_or_sticker}
-                    alt=""
-                    className="w-full h-full object-cover rounded-2xl"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                  />
+              <div className={`w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden`}>
+                {currentItem.icon_or_sticker && (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
+                  <img src={currentItem.icon_or_sticker} alt="" className="w-full h-full object-cover rounded-2xl" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                 ) : (
                   <span className="text-3xl">{currentItem.icon_or_sticker || "💡"}</span>
                 )}
@@ -416,13 +514,18 @@ function HeroWidget({
                 <p className={`text-xs font-bold ${currentItem.text} leading-snug`}>"{currentItem.quote}"</p>
                 <div className="flex items-center justify-between mt-2 pt-1 border-t border-black/5">
                   <p className="text-[10px] font-black text-slate-600 truncate">— {currentItem.character}</p>
-                  <span className="text-[9.5px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-1.5 py-0.5 rounded-full shrink-0 shadow-2xs">
-                    Tap ↻
-                  </span>
+                  <span className="text-[9.5px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-1.5 py-0.5 rounded-full shrink-0 shadow-2xs">Tap ↻</span>
                 </div>
               </div>
             </div>
           </button>
+        )}
+
+        {/* Daily limit warning — shows when user hits or exceeds limit */}
+        {limitHit && (
+          <p className="mt-1.5 text-center text-[10px] font-bold text-red-500">
+            {todayLimitLabel}
+          </p>
         )}
       </div>
     </div>
@@ -449,6 +552,7 @@ function SyllabusCompletionWidget({
     return s;
   }, [progress]);
 
+  // Clean group by normalized subject name (Physics, Chemistry, Maths/Biology)
   const stats = useMemo(() => {
     const groups: Record<string, { name: string; done: number; total: number; color: string }> = {};
 
@@ -805,7 +909,6 @@ export default function DashboardPage() {
 
           setSubjects(cleanedSubs);
 
-          // Get unique distinct names for modal buttons
           const distinctNames = Array.from(new Set(cleanedSubs.map((s) => s.name.trim())));
           if (distinctNames[0]) {
             setSelectedDistinctSubject(distinctNames[0]);
@@ -847,9 +950,7 @@ export default function DashboardPage() {
 
       let studentSchedules: ExamScheduleItem[] = [];
       if (schedules && schedules.length > 0) {
-        studentSchedules = schedules.filter((s) =>
-          s.target_exam === "Boards" ? wantsBoards : s.target_exam === targetExam || s.target_exam === "ALL"
-        );
+        studentSchedules = schedules.filter((s) => (s.target_exam === "Boards" ? wantsBoards : s.target_exam === targetExam || s.target_exam === "ALL"));
         const scheduleIds = studentSchedules.map((s) => s.id);
         const { data: shifts } = await supabase.from("exam_shifts").select("*").in("exam_schedule_id", scheduleIds);
         if (shifts) {
@@ -885,10 +986,7 @@ export default function DashboardPage() {
         });
 
         const totalHoursAllTime = pastLogs.reduce((acc, l) => acc + (l.study_time_minutes || 0), 0) / 60;
-        const { data: qLogs } = await supabase
-          .from("question_logs")
-          .select("id, question_count, log_date, topic_name, start_from, end_on, subject_id, chapter_id")
-          .eq("user_id", uid);
+        const { data: qLogs } = await supabase.from("question_logs").select("id, question_count, log_date, topic_name, start_from, end_on, subject_id, chapter_id").eq("user_id", uid);
         const totalQ = (qLogs || []).reduce((acc, q) => acc + (q.question_count || 0), 0);
         setTotalQuestionsAllTime(totalQ);
         const tQ = (qLogs || []).filter((q) => q.log_date === todayStr);
@@ -912,33 +1010,17 @@ export default function DashboardPage() {
       if (prog) setChapterProgress(prog);
 
       // Tasks
-      const { data: userTasks } = await supabase
-        .from("tasks")
-        .select("id, title, priority, status, task_type, due_date")
-        .eq("user_id", uid)
-        .neq("status", "completed")
-        .order("created_at", { ascending: false });
+      const { data: userTasks } = await supabase.from("tasks").select("id, title, priority, status, task_type, due_date").eq("user_id", uid).neq("status", "completed").order("created_at", { ascending: false });
       if (userTasks) setAllTasks(userTasks);
 
       // Scheduled Tests
       try {
-        const { data: schedTests } = await supabase
-          .from("test_schedule")
-          .select("id, test_name, scheduled_date, subject, status")
-          .eq("user_id", uid)
-          .eq("status", "upcoming")
-          .order("scheduled_date", { ascending: true })
-          .limit(5);
+        const { data: schedTests } = await supabase.from("test_schedule").select("id, test_name, scheduled_date, subject, status").eq("user_id", uid).eq("status", "upcoming").order("scheduled_date", { ascending: true }).limit(5);
         if (schedTests) setScheduledTests(schedTests);
       } catch (_) {}
 
       // Recent Tests
-      const { data: testData } = await supabase
-        .from("test_logs")
-        .select("id, test_name, total_marks, max_marks, accuracy, test_date")
-        .eq("user_id", uid)
-        .order("test_date", { ascending: false })
-        .limit(2);
+      const { data: testData } = await supabase.from("test_logs").select("id, test_name, total_marks, max_marks, accuracy, test_date").eq("user_id", uid).order("test_date", { ascending: false }).limit(2);
       if (testData) setRecentTests(testData);
 
       setLoading(false);
@@ -1035,20 +1117,6 @@ export default function DashboardPage() {
     }
   };
 
-  const handleOpenMentorshipPopup = () => {
-    // Triggers the exact same popup as the "GET MENTORSHIP" button in AiMentorCard
-    const buttons = Array.from(document.querySelectorAll("button"));
-    const mentorBtn = buttons.find((b) => {
-      const txt = (b.textContent || b.innerText || "").toUpperCase();
-      return txt.includes("GET MENTORSHIP");
-    });
-    if (mentorBtn) {
-      mentorBtn.click();
-    } else {
-      router.push("/mentor");
-    }
-  };
-
   const calculateDaysLeft = (targetDate: string) => {
     const diff = new Date(targetDate).getTime() - new Date().getTime();
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
@@ -1082,92 +1150,47 @@ export default function DashboardPage() {
 
       <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
         {/* 1. HERO WIDGET */}
-        <HeroWidget
-          name={firstName}
-          streak={streak}
-          todayStudyMins={todayStudyMins}
-          dailyGoalMins={dailyGoalMins}
-          onGoalSaved={handleGoalSaved}
-        />
+        <HeroWidget name={firstName} streak={streak} todayStudyMins={todayStudyMins} dailyGoalMins={dailyGoalMins} onGoalSaved={handleGoalSaved} />
 
-        {/* 2. EXAM COUNTDOWN (ORGANIZED, CLEAN CARDS) */}
-        <div
-          className={`grid gap-2 ${
-            examSchedules.length === 1
-              ? "grid-cols-1"
-              : examSchedules.length === 2
-              ? "grid-cols-2"
-              : examSchedules.length === 3
-              ? "grid-cols-3"
-              : "grid-cols-4"
-          }`}
-        >
+        {/* 2. EXAM COUNTDOWN */}
+        <div className={`grid gap-2 ${examSchedules.length === 1 ? "grid-cols-1" : examSchedules.length === 2 ? "grid-cols-2" : examSchedules.length === 3 ? "grid-cols-3" : "grid-cols-4"}`}>
           {examSchedules.map((exam) => {
             const days = calculateDaysLeft(exam.exam_date);
             const shifts = shiftsMap[exam.id] || [];
-            const formattedDate = new Date(exam.exam_date).toLocaleDateString("en-IN", {
-              day: "numeric",
-              month: "short",
-            });
-
-            let cleanLabel = exam.label;
-            const norm = cleanLabel.toLowerCase();
-            if (norm.includes("session 1") || norm.includes("jan")) {
-              cleanLabel = "JEE Main (Jan)";
-            } else if (norm.includes("session 2") || norm.includes("apr")) {
-              cleanLabel = "JEE Main (Apr)";
-            } else if (norm.includes("advanced")) {
-              cleanLabel = "JEE Advanced";
-            }
 
             return (
-              <div
-                key={exam.id}
-                className="rounded-2xl p-2.5 bg-gradient-to-b from-[#0B132B] to-[#162238] text-white shadow-md border border-slate-800 flex flex-col justify-between"
-              >
-                {/* Header Tag + Official/Proj Badge */}
-                <div className="flex items-center justify-between gap-1 mb-1.5">
-                  <span className="text-[9px] font-black uppercase tracking-wide text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded-md border border-amber-400/30 truncate max-w-[70%]">
-                    {cleanLabel}
+              <div key={exam.id} className="rounded-2xl p-3 bg-[#0B132B] text-white shadow-md border border-slate-800 flex flex-col justify-between">
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <span className="text-[9.5px] font-black uppercase text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-md border border-amber-400/30 truncate">
+                    {exam.label}
                   </span>
-                  <span className="text-[8px] font-bold text-slate-400 uppercase">
-                    {exam.is_confirmed ? "Official" : "Proj."}
-                  </span>
+                  <span className="text-[8.5px] font-semibold text-slate-400">{exam.is_confirmed ? "Official" : "Proj."}</span>
                 </div>
-
-                {/* Recessed Center Countdown */}
-                <div className="flex flex-col items-center justify-center my-1 bg-black/30 rounded-xl py-2 border border-white/5">
-                  <div className="text-2xl font-black text-amber-400 leading-none tracking-tight">
+                <div className="flex items-baseline justify-between mt-1 mb-1">
+                  <div className="text-2xl font-black text-amber-400 leading-none">
                     {days}
+                    <span className="text-[9.5px] font-bold text-slate-300 uppercase ml-1">Days</span>
                   </div>
-                  <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">
-                    DAYS LEFT
-                  </span>
+                  <div className="text-[10px] text-slate-300">
+                    {new Date(exam.exam_date).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}
+                  </div>
                 </div>
-
-                {/* Clean Bottom Target Date */}
-                <div className="mt-1 pt-1.5 border-t border-white/10 flex flex-col items-center">
-                  <span className="text-[10px] font-bold text-slate-300 tracking-wide">
-                    📅 {formattedDate}
-                  </span>
-
-                  {shifts.length > 0 && (
-                    <div className="w-full mt-1.5">
-                      <select
-                        value={selectedShiftId || ""}
-                        onChange={(e) => setSelectedShiftId(e.target.value)}
-                        className="w-full bg-slate-800 text-white rounded-lg px-1.5 py-1 border border-slate-700 text-[9px] font-semibold truncate"
-                      >
-                        <option value="">Select Shift</option>
-                        {shifts.map((sh) => (
-                          <option key={sh.id} value={sh.id}>
-                            {sh.shift_date} ({sh.shift_time})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
+                {shifts.length > 0 && (
+                  <div className="mt-1.5 pt-1.5 border-t border-white/10">
+                    <select
+                      value={selectedShiftId || ""}
+                      onChange={(e) => setSelectedShiftId(e.target.value)}
+                      className="w-full bg-slate-800/90 text-white rounded-lg px-2 py-1 border border-slate-700 text-[9.5px]"
+                    >
+                      <option value="">Select Shift</option>
+                      {shifts.map((sh) => (
+                        <option key={sh.id} value={sh.id}>
+                          {sh.shift_date} ({sh.shift_time})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1184,22 +1207,14 @@ export default function DashboardPage() {
             onOpenDoubtSolver={() => setDoubtOpen(true)}
           />
           <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={handleOpenMentorshipPopup}
-              className="flex items-center gap-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all"
-            >
+            <button type="button" onClick={() => router.push("/mentor")} className="flex items-center gap-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all">
               <span className="text-lg">🧠</span>
               <div className="text-left">
                 <div className="text-xs font-black leading-none">AI Mentorship</div>
                 <div className="text-[9px] font-semibold text-indigo-200 leading-tight mt-0.5">7-day plan & analysis</div>
               </div>
             </button>
-            <button
-              type="button"
-              onClick={() => setDoubtOpen(true)}
-              className="flex items-center gap-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all"
-            >
+            <button type="button" onClick={() => setDoubtOpen(true)} className="flex items-center gap-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all">
               <span className="text-lg">✨</span>
               <div className="text-left">
                 <div className="text-xs font-black leading-none">Doubt Solver</div>
@@ -1209,7 +1224,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 4. METRICS ROW */}
+        {/* 4. METRICS ROW (UPGRADED QUESTIONS CARD) */}
         <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
@@ -1249,59 +1264,41 @@ export default function DashboardPage() {
             <div className="text-lg font-black text-slate-900 tracking-tight">
               {allTasks.length}
             </div>
-            <span
-              className={`text-[10px] font-bold block mt-0.5 ${
-                allTasks.length > 0 ? "text-rose-600" : "text-emerald-600"
-              }`}
-            >
-              {allTasks.length > 0 ? "Pending" : "All Done ✓"}
-            </span>
+            <span className={`text-[10px] font-bold block mt-0.5 ${allTasks.length > 0 ? "text-rose-600" : "text-emerald-600"}`}>{allTasks.length > 0 ? "Pending" : "All Done ✓"}</span>
           </div>
         </div>
 
-        {/* 5. TODAY'S STUDY DISTRIBUTION RATIO (TARGET REMOVED) */}
+        {/* 5. TODAY'S STUDY DISTRIBUTION RATIO */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
               <span>⚖️</span> Today's Study Split
             </span>
-          </div>
-
-          <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex mb-2.5 shadow-inner">
-            <div style={{ width: `${sumSplit > 0 ? theoryPct : 33}%` }} className="bg-amber-500 transition-all" />
-            <div style={{ width: `${sumSplit > 0 ? practicePct : 50}%` }} className="bg-teal-600 transition-all" />
-            <div style={{ width: `${sumSplit > 0 ? revisionPct : 17}%` }} className="bg-indigo-600 transition-all" />
-          </div>
-
-          <div className="flex items-center justify-between text-[11px] font-bold px-0.5">
-            <span className="flex items-center gap-1.5 text-amber-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Theory ({splitRatio.theory}m)
-            </span>
-            <span className="flex items-center gap-1.5 text-teal-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-teal-600" /> Practice ({splitRatio.practice}m)
-            </span>
-            <span className="flex items-center gap-1.5 text-indigo-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" /> Revision ({splitRatio.revision}m)
+            <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+              Target: 60% Practice
             </span>
           </div>
-
-          {splitRatio.verified > 0 && (
-            <div className="mt-2.5 flex items-center gap-2 bg-teal-50 border border-teal-200 rounded-xl px-3 py-2">
-              <span className="text-sm">🛡️</span>
-              <div className="flex-1">
-                <span className="text-[11px] font-bold text-teal-800">
-                  {splitRatio.verified}m Verified (Leaderboard Counted)
-                </span>
-                <p className="text-[10px] text-teal-600 mt-0.5">Face cam + App blocker both ON</p>
+          <div className="flex gap-1 h-3 rounded-full overflow-hidden bg-slate-100 mb-2">
+            {theoryPct > 0 && <div style={{ width: `${theoryPct}%` }} className="bg-sky-500 transition-all" />}
+            {practicePct > 0 && <div style={{ width: `${practicePct}%` }} className="bg-teal-500 transition-all" />}
+            {revisionPct > 0 && <div style={{ width: `${revisionPct}%` }} className="bg-amber-400 transition-all" />}
+            {theoryPct === 0 && practicePct === 0 && revisionPct === 0 && <div style={{ width: "100%" }} className="bg-slate-200 transition-all" />}
+          </div>
+          <div className="grid grid-cols-3 gap-1 text-center">
+            {[
+              { label: "Theory", pct: theoryPct, color: "text-sky-700", bg: "bg-sky-50 border-sky-200" },
+              { label: "Practice", pct: practicePct, color: "text-teal-700", bg: "bg-teal-50 border-teal-200" },
+              { label: "Revision", pct: revisionPct, color: "text-amber-700", bg: "bg-amber-50 border-amber-200" },
+            ].map((s) => (
+              <div key={s.label} className={`rounded-xl border py-1.5 px-1 ${s.bg}`}>
+                <div className={`text-base font-black ${s.color}`}>{s.pct}%</div>
+                <div className="text-[9px] font-bold text-slate-500 uppercase">{s.label}</div>
               </div>
-              <span className="text-xs font-black text-teal-700">
-                {Math.round((splitRatio.verified / Math.max(todayStudyMins, 1)) * 100)}%
-              </span>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
 
-        {/* 6. SYLLABUS COMPLETION WIDGET */}
+        {/* 6. SYLLABUS COMPLETION */}
         <SyllabusCompletionWidget
           subjects={subjects}
           chapters={chapters}
@@ -1309,69 +1306,40 @@ export default function DashboardPage() {
           onOpenSyllabus={() => router.push("/library")}
         />
 
-        {/* 7. COMBINED ACTION ITEMS (TO-DO / BACKLOG / TESTS) */}
+        {/* 7. ACTION ITEMS */}
         <ActionItemsWidget
           tasks={allTasks}
           scheduledTests={scheduledTests}
           onCompleteTask={handleCompleteTask}
           onCompleteTest={handleCompleteTest}
-          onAddTask={() => router.push("/todo")}
-          onViewAll={() => router.push("/todo")}
+          onAddTask={() => router.push("/tasks")}
+          onViewAll={() => router.push("/tasks")}
         />
 
-        {/* 8. RECENT MOCK TESTS (LIMIT 2) */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
-          <div className="flex items-center justify-between text-xs font-black mb-2.5">
-            <span className="text-slate-900 font-bold flex items-center gap-1.5">
-              <span>📈</span> Recent Mock Performance
-            </span>
-            <button
-              type="button"
-              onClick={() => router.push("/tests")}
-              className="text-[11px] font-bold text-indigo-700 hover:underline"
-            >
-              View Hub →
-            </button>
-          </div>
-
-          {recentTests.length === 0 ? (
-            <div className="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl flex items-center justify-between">
-              <div>
-                <div className="text-xs font-black text-indigo-950">No Tests Logged</div>
-                <div className="text-[10px] font-semibold text-slate-600">Log mock test marks to track accuracy</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => router.push("/tests")}
-                className="px-3 py-1.5 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-xs"
-              >
-                + Log Score
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {recentTests.slice(0, 2).map((t) => (
-                <div
-                  key={t.id}
-                  className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs"
-                >
-                  <div>
-                    <div className="font-black text-slate-900 text-xs">{t.test_name}</div>
-                    <div className="text-[10px] font-semibold text-slate-500">{t.test_date}</div>
+        {/* 8. RECENT TEST RESULTS */}
+        {recentTests.length > 0 && (
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] space-y-2">
+            <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+              <span>📊</span> Recent Tests
+            </h3>
+            {recentTests.map((t) => (
+              <div key={t.id} className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <div>
+                  <div className="font-black text-slate-900 text-xs">{t.test_name}</div>
+                  <div className="text-[10px] font-semibold text-slate-500">{t.test_date}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-black text-slate-900 text-sm">
+                    {t.total_marks} / {t.max_marks}
                   </div>
-                  <div className="text-right">
-                    <div className="font-black text-slate-900 text-sm">
-                      {t.total_marks} / {t.max_marks}
-                    </div>
-                    <div className="text-[10px] font-bold text-teal-700">
-                      Acc: {t.accuracy || Math.round((t.total_marks / t.max_marks) * 100)}%
-                    </div>
+                  <div className="text-[10px] font-bold text-teal-700">
+                    Acc: {t.accuracy || Math.round((t.total_marks / t.max_marks) * 100)}%
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* 9. QUICK ROUTE CARDS (3-COLUMN) */}
         <div className="grid grid-cols-3 gap-2">
@@ -1411,7 +1379,7 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* QUESTION LOGGING MODAL */}
+      {/* QUESTION LOGGING MODAL (CLEAN 3 DISTINCT SUBJECT BUTTONS) */}
       {showAddQuestionModal && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-sm w-full shadow-2xl border border-slate-300 overflow-hidden flex flex-col max-h-[90vh]">
@@ -1439,10 +1407,7 @@ export default function DashboardPage() {
                 <span className="text-[10px] font-black text-slate-500 uppercase block mb-1.5">Today's Entries</span>
                 <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
                   {todayQuestionEntries.map((e) => (
-                    <div
-                      key={e.id}
-                      className="flex items-center justify-between bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-[11px] font-bold"
-                    >
+                    <div key={e.id} className="flex items-center justify-between bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-[11px] font-bold">
                       <span className="truncate text-slate-800">{e.topic_name || "Practice Session"}</span>
                       <span className="text-teal-700 shrink-0 ml-2">+{e.question_count} Qs</span>
                     </div>
