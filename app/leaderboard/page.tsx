@@ -22,6 +22,10 @@ interface GroupRow {
   total_weekly_hours: number;
 }
 
+interface MembershipRow {
+  group_id: string;
+}
+
 const RANK_MEDALS = ["🥇", "🥈", "🥉"];
 
 export default function LeaderboardPage() {
@@ -38,29 +42,20 @@ export default function LeaderboardPage() {
     setLoading(true);
     setError(null);
 
-    const TIMEOUT_MS = 10000;
-
-    function raceTimeout<T>(p: Promise<T>): Promise<T> {
-      return Promise.race([
-        p,
-        new Promise<T>((_, reject) =>
-          setTimeout(() => reject(new Error("Request timed out")), TIMEOUT_MS)
-        ),
-      ]);
-    }
-
     try {
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id ?? null;
       setCurrentUserId(uid);
 
-      const [studentRes, groupRes] = await raceTimeout(
-        Promise.all([
-          supabase.rpc("get_leaderboard_students"),
-          supabase.rpc("get_leaderboard_groups"),
-        ])
-      );
+      // Timeout via AbortController-style: race the full Promise.all
+      let timedOut = false;
+      const timeoutId = setTimeout(() => { timedOut = true; }, 10000);
 
+      const studentRes = await supabase.rpc("get_leaderboard_students");
+      const groupRes = await supabase.rpc("get_leaderboard_groups");
+      clearTimeout(timeoutId);
+
+      if (timedOut) throw new Error("Request timed out");
       if (studentRes.error) throw new Error(studentRes.error.message);
       if (groupRes.error) throw new Error(groupRes.error.message);
 
@@ -69,16 +64,15 @@ export default function LeaderboardPage() {
 
       if (uid) {
         try {
-          const { data: membership } = await raceTimeout(
-            supabase
-              .from("group_members")
-              .select("group_id")
-              .eq("user_id", uid)
-              .maybeSingle()
-          );
-          setMyGroupId((membership as { group_id: string } | null)?.group_id ?? null);
+          const memberRes = await supabase
+            .from("group_members")
+            .select("group_id")
+            .eq("user_id", uid)
+            .maybeSingle();
+          const membership = memberRes.data as MembershipRow | null;
+          setMyGroupId(membership?.group_id ?? null);
         } catch (_) {
-          // non-fatal
+          // non-fatal — group highlight just won't show
         }
       }
     } catch (e: unknown) {
