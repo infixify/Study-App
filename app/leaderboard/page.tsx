@@ -31,12 +31,19 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [myGroupId, setMyGroupId] = useState<string | null>(null); // Leaderboard Fix 2
+
+  // Leaderboard Fix 1: retryKey triggers re-fetch when Retry is clicked
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     async function load() {
+      setLoading(true);
+      setError(null);
       try {
         const { data: authData } = await supabase.auth.getUser();
-        setCurrentUserId(authData?.user?.id ?? null);
+        const uid = authData?.user?.id ?? null;
+        setCurrentUserId(uid);
 
         const [studentRes, groupRes] = await Promise.all([
           supabase.rpc("get_leaderboard_students"),
@@ -48,6 +55,18 @@ export default function LeaderboardPage() {
 
         setStudents((studentRes.data as StudentRow[]) ?? []);
         setGroups((groupRes.data as GroupRow[]) ?? []);
+
+        // Leaderboard Fix 2: Find which group current user belongs to
+        if (uid) {
+          try {
+            const { data: membership } = await supabase
+              .from("group_members")
+              .select("group_id")
+              .eq("user_id", uid)
+              .maybeSingle();
+            setMyGroupId(membership?.group_id ?? null);
+          } catch (_) {}
+        }
       } catch (e: any) {
         setError(e?.message ?? "Failed to load leaderboard");
       } finally {
@@ -55,7 +74,7 @@ export default function LeaderboardPage() {
       }
     }
     load();
-  }, []);
+  }, [retryKey]); // Leaderboard Fix 1: re-run on retry
 
   return (
     <div className="min-h-screen bg-paper pb-28">
@@ -99,7 +118,7 @@ export default function LeaderboardPage() {
             <p className="text-xs font-bold text-red-600 mb-1">Failed to load</p>
             <p className="text-[10px] text-red-400">{error}</p>
             <button
-              onClick={() => { setError(null); setLoading(true); }}
+              onClick={() => setRetryKey((k) => k + 1)}
               className="mt-3 text-xs text-teal font-semibold underline"
             >
               Retry
@@ -148,31 +167,39 @@ export default function LeaderboardPage() {
             {groups.length === 0 && (
               <p className="text-center py-10 text-xs text-slate">No groups yet.</p>
             )}
-            {groups.map((g, i) => (
-              <div
-                key={g.group_id}
-                className="rounded-ticket border border-ink/10 bg-white p-3.5 flex items-center gap-3"
-              >
-                <div className="w-8 text-center shrink-0">
-                  {i < 3 ? (
-                    <span className="text-lg">{RANK_MEDALS[i]}</span>
-                  ) : (
-                    <span className="text-xs font-bold text-slate">#{i + 1}</span>
-                  )}
+            {groups.map((g, i) => {
+              const isMyGroup = g.group_id === myGroupId;
+              return (
+                <div
+                  key={g.group_id}
+                  className={`rounded-ticket border p-3.5 flex items-center gap-3 ${
+                    isMyGroup ? "border-teal bg-teal/5" : "border-ink/10 bg-white"
+                  }`}
+                >
+                  <div className="w-8 text-center shrink-0">
+                    {i < 3 ? (
+                      <span className="text-lg">{RANK_MEDALS[i]}</span>
+                    ) : (
+                      <span className="text-xs font-bold text-slate">#{i + 1}</span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-ink truncate">
+                      {g.group_name}
+                      {isMyGroup && <span className="text-teal font-semibold"> (Your Group)</span>}
+                    </p>
+                    <p className="text-[10px] text-slate mt-0.5">
+                      {g.member_count} member{g.member_count === 1 ? "" : "s"} ·{" "}
+                      {g.total_weekly_hours}h combined this week
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-bold text-ink">{g.avg_points}</p>
+                    <p className="text-[9px] text-slate">avg points</p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-ink truncate">{g.group_name}</p>
-                  <p className="text-[10px] text-slate mt-0.5">
-                    {g.member_count} member{g.member_count === 1 ? "" : "s"} ·{" "}
-                    {g.total_weekly_hours}h combined this week
-                  </p>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-sm font-bold text-ink">{g.avg_points}</p>
-                  <p className="text-[9px] text-slate">avg points</p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </main>
