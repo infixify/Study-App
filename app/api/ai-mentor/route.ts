@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 const apiKey =
   process.env.GEMINI_API_KEY_MENTOR || process.env.GEMINI_API_KEY || "";
 
-// 100% Live Tested & Verified Active Models
+// 100% Live Tested & Verified Active Models (Aapke exact models)
 const MODELS_CASCADE = [
   "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
@@ -80,6 +80,9 @@ export async function POST(req: Request) {
       { data: questionLogs },
       { data: recentTests },
       { data: pendingBacklogs },
+      { data: subjectSessions },
+      { data: chapterProgress },
+      { data: questionDetails },
     ] = await Promise.all([
       supabase.from("users").select("*").eq("uid", userId).maybeSingle(),
       supabase
@@ -106,6 +109,22 @@ export async function POST(req: Request) {
         .eq("user_id", userId)
         .eq("task_type", "backlog")
         .neq("status", "completed"),
+      supabase
+        .from("focus_sessions")
+        .select("subject, duration_seconds, started_at")
+        .eq("user_id", userId)
+        .order("started_at", { ascending: false })
+        .limit(30),
+      supabase
+        .from("chapter_progress")
+        .select("status, is_backlog, chapter_id, chapters(title, subject_id, subjects(name))")
+        .eq("user_id", userId),
+      supabase
+        .from("question_logs")
+        .select("question_count, log_date, topic_name, start_from, end_on, subject_id, chapter_id, subjects(name), chapters(title)")
+        .eq("user_id", userId)
+        .order("log_date", { ascending: false })
+        .limit(30),
     ]);
 
     const targetExam = profile?.target_exam || "JEE";
@@ -119,9 +138,15 @@ Student Context:
 - Target Exam: ${targetExam}
 - Class Level: ${classLevel}
 - Active Pending Backlogs: ${JSON.stringify(pendingBacklogs || [])}
-- Recent 14-day study logs (minutes, includes verified_minutes = time studied with BOTH face-cam AND app-blocker ON — this is the strict leaderboard-counted time, always ≤ study_time_minutes): ${JSON.stringify(pastLogs || [])}
+- Recent 14-day study logs (minutes, includes verified_minutes = time studied with BOTH face-cam AND app-blocker ON — this is the strict leaderboard-counted time, always <= study_time_minutes): ${JSON.stringify(pastLogs || [])}
 - Recent 14-day question solving numbers: ${JSON.stringify(questionLogs || [])}
 - Last 5 Mock Test Results: ${JSON.stringify(recentTests || [])}
+- Subject-wise study time (last 30 sessions): ${JSON.stringify(subjectSessions || [])}
+- Chapter progress (what student has done/pending/backlog): ${JSON.stringify(chapterProgress || [])}
+- Detailed question solving log (last 30 entries with topic_name and question range coverage): ${JSON.stringify(questionDetails || [])}
+
+Analyze actual subject_sessions data to determine which subjects student spends most/least time on.
+Cross-reference with question_logs topic_name to identify weak topics within each subject.
 
 Required JSON Output schema strictly matching:
 {
