@@ -632,8 +632,10 @@ jobs:
                               result.success(true)
                           }
                           "stopFocusBlocker" -> {
+                              // Use ACTION_STOP_REQUEST (not ACTION_STOP) so directBackgroundStopAndLog
+                              // fires and logs the session to Supabase — ACTION_STOP just stops silently
                               startService(Intent(this, FocusBlockerService::class.java).apply {
-                                  action = FocusBlockerService.ACTION_STOP
+                                  action = FocusBlockerService.ACTION_STOP_REQUEST
                               })
                               result.success(true)
                           }
@@ -1110,7 +1112,9 @@ jobs:
                       }
                       ACTION_STOP_REQUEST -> {
                           if (!isStopping) {
-                              sendStopRequestToWebApp()
+                              // Kotlin handles ALL logging — web logging is fully disabled for this path
+                              // sendStopRequestToWebApp() removed to prevent double-logging
+                              // Web UI gets notified AFTER Kotlin logs, only to update display
                               directBackgroundStopAndLog()
                           }
                       }
@@ -1612,7 +1616,7 @@ jobs:
                       }
                       typeface = android.graphics.Typeface.DEFAULT_BOLD
                       setOnClickListener {
-                          sendStopRequestToWebApp()
+                          // Kotlin handles ALL logging — no web logging call here
                           directBackgroundStopAndLog()
                       }
                   }
@@ -1890,7 +1894,19 @@ jobs:
                   stopNativeFaceTracker()
                   removeOverlay()
                   removeFloatingDot()
-                  val elapsed = currentElapsedSeconds
+                  // Bug 2 Fix: Always compute elapsed from epoch timestamps
+                  // currentElapsedSeconds can be 0 right after ACTION_RESUME (tick hasn't fired yet)
+                  val elapsed = if (startTimestampMs > 0L) {
+                      val nowMs = System.currentTimeMillis()
+                      val elapsedMs = if (camPaused && pauseStartMs > 0L) {
+                          (pauseStartMs - startTimestampMs - pausedDurationMs)
+                      } else {
+                          (nowMs - startTimestampMs - pausedDurationMs)
+                      }
+                      Math.max(0, (elapsedMs / 1000).toInt())
+                  } else {
+                      currentElapsedSeconds // fallback if epoch not available
+                  }
                   val snapSubject = subject
                   val snapMode = mode
                   val snapCam = camEnabled
@@ -3662,6 +3678,46 @@ jobs:
                     final token = NotificationService().fcmToken;
                     if (token != null) _bridgeHandler.injectFCMToken(token);
                     _injectInstalledApps();
+
+                    // Bug 3 Fix: Inject stored Supabase token from SharedPrefs into WebView
+                    // This prevents re-login on 2nd restart when web JS hasn't stored token yet
+                    try {
+                      final prefs = await SharedPreferences.getInstance();
+                      final storedToken = prefs.getString('supabase_access_token') ?? '';
+                      final storedUid = prefs.getString('supabase_user_id') ?? '';
+                      if (storedToken.isNotEmpty && storedUid.isNotEmpty) {
+                        final safeToken = storedToken.replaceAll("'", "\\'").replaceAll('\n', '').replaceAll('\r', '');
+                        final safeUid = storedUid.replaceAll("'", "\\'");
+                        await controller.runJavaScript("""
+                          (function() {
+                            try {
+                              // Inject token into window for page.tsx to read on load
+                              window.__nativeAuth = {
+                                accessToken: '$safeToken',
+                                userId: '$safeUid'
+                              };
+                              // Also try to push into Supabase localStorage key if missing
+                              var hasToken = false;
+                              for (var i = 0; i < localStorage.length; i++) {
+                                var k = localStorage.key(i);
+                                if (k && k.indexOf('sb-') === 0 && k.indexOf('-auth-token') !== -1) {
+                                  hasToken = true; break;
+                                }
+                              }
+                              if (!hasToken && window.__nativeAuth.accessToken) {
+                                // Set supabase session directly if client is available
+                                if (window.__supabase && window.__supabase.auth) {
+                                  window.__supabase.auth.setSession({
+                                    access_token: window.__nativeAuth.accessToken,
+                                    refresh_token: window.__nativeAuth.accessToken
+                                  }).catch(function(){});
+                                }
+                              }
+                            } catch(e) {}
+                          })();
+                        """);
+                      }
+                    } catch (_) {}
 
                     // Continuous bridge for active session restoration, routing, dashboard card name, and leaderboard strict hours
                     controller.runJavaScript("""
