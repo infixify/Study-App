@@ -169,11 +169,13 @@ function getGreeting(name: string, hour: number): string {
   return `Night owl alert, ${name}! 🦉 Sleep matters too!`;
 }
 
-function HeroWidget({ name, streak, todayStudyMins }: { name: string; streak: number; todayStudyMins: number }) {
+function HeroWidget({ name, streak, todayStudyMins, dailyGoalMins, onGoalSaved }: { name: string; streak: number; todayStudyMins: number; dailyGoalMins: number; onGoalSaved: (mins: number) => void }) {
   const [hour, setHour] = useState(new Date().getHours());
   const [mode, setMode] = useState<"motivation" | "meme">("motivation");
   const [dbItems, setDbItems] = useState<Record<string, ContentCardItem[]>>({ motivation: [], meme: [] });
   const [currentItem, setCurrentItem] = useState<ContentCardItem | null>(null);
+  const [showGoalPopup, setShowGoalPopup] = useState(false);
+  const [goalHours, setGoalHours] = useState(Math.round(dailyGoalMins / 60) || 8);
 
   useEffect(() => {
     const interval = setInterval(() => setHour(new Date().getHours()), 60_000);
@@ -230,39 +232,76 @@ function HeroWidget({ name, streak, todayStudyMins }: { name: string; streak: nu
 
   const greeting = getGreeting(name, hour);
   const todayHours = (todayStudyMins / 60).toFixed(1);
+  const goalHoursDisplay = (dailyGoalMins / 60).toFixed(0);
+  const goalReached = todayStudyMins >= dailyGoalMins && dailyGoalMins > 0;
+
+  const handleSaveGoal = async () => {
+    const mins = goalHours * 60;
+    onGoalSaved(mins);
+    setShowGoalPopup(false);
+  };
 
   return (
     <div className="rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-slate-200/80 bg-white">
-      <div className={`h-1.5 w-full bg-gradient-to-r ${currentItem?.color || "from-indigo-500 to-teal-500"}`} />
-      <div className="p-4 pb-3">
-        <div className="flex items-start justify-between gap-2 mb-3">
+      <div className={`h-1 w-full bg-gradient-to-r ${currentItem?.color || "from-indigo-500 to-teal-500"}`} />
+      <div className="p-3 pb-2.5">
+        {/* Greeting + Streak — compact single row */}
+        <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">PrepWise Cockpit</p>
-            <h2 className="text-sm sm:text-base font-black text-slate-900 leading-snug">{greeting}</h2>
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-0.5">PrepWise Cockpit</p>
+            <h2 className="text-xs font-black text-slate-900 leading-snug truncate">{greeting}</h2>
           </div>
-          <div className={`shrink-0 flex flex-col items-center justify-center rounded-2xl px-3 py-2 ${streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"}`}>
-            <span className="text-xl leading-none">{streak > 0 ? "🔥" : "💤"}</span>
-            <span className={`text-sm font-black leading-tight ${streak > 0 ? "text-orange-600" : "text-slate-400"}`}>{streak}</span>
-            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">{streak === 1 ? "Day" : "Days"}</span>
+          {/* Streak — horizontal compact */}
+          <div className={`shrink-0 flex items-center gap-1 rounded-xl px-2.5 py-1.5 ${streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"}`}>
+            <span className="text-sm leading-none">{streak > 0 ? "🔥" : "💤"}</span>
+            <span className={`text-sm font-black leading-none ${streak > 0 ? "text-orange-600" : "text-slate-400"}`}>{streak}</span>
+            <span className="text-[9px] font-bold text-slate-500 uppercase">{streak === 1 ? "Day" : "Days"}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 mb-3">
-          <div className="flex-1 bg-teal-50 border border-teal-100 rounded-xl px-3 py-2 flex items-center gap-2">
-            <span className="text-base">⏱️</span>
+        {/* Today + Goal boxes — compact */}
+        <div className="flex items-center gap-2 mb-2">
+          <div className={`flex-1 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 ${goalReached ? "bg-emerald-50 border-emerald-200" : "bg-teal-50 border-teal-100"}`}>
+            <span className="text-sm">{goalReached ? "🎯" : "⏱️"}</span>
             <div>
-              <p className="text-[10px] font-bold text-teal-600 leading-none">Today</p>
-              <p className="text-sm font-black text-teal-900 leading-tight">{todayHours}h studied</p>
+              <p className={`text-[9px] font-bold leading-none ${goalReached ? "text-emerald-600" : "text-teal-600"}`}>{goalReached ? "Goal Reached!" : "Today"}</p>
+              <p className={`text-xs font-black leading-tight ${goalReached ? "text-emerald-900" : "text-teal-900"}`}>{todayHours}h studied</p>
             </div>
           </div>
-          <div className="flex-1 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2 flex items-center gap-2">
-            <span className="text-base">🎯</span>
-            <div>
-              <p className="text-[10px] font-bold text-indigo-600 leading-none">Goal</p>
-              <p className="text-sm font-black text-indigo-900 leading-tight">8h / day</p>
+          <div className="flex-1 bg-indigo-50 border border-indigo-100 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm">🎯</span>
+              <div>
+                <p className="text-[9px] font-bold text-indigo-600 leading-none">Goal</p>
+                <p className="text-xs font-black text-indigo-900 leading-tight">{goalHoursDisplay}h / day</p>
+              </div>
             </div>
+            <button type="button" onClick={() => { setGoalHours(Math.round(dailyGoalMins / 60) || 8); setShowGoalPopup(true); }} className="text-[9px] font-black text-indigo-600 bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded-lg hover:bg-indigo-200 shrink-0">Edit</button>
           </div>
         </div>
+
+        {/* Goal Edit Popup */}
+        {showGoalPopup && (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 w-full max-w-xs">
+              <h3 className="text-sm font-black text-slate-900 mb-1">Set Daily Study Goal</h3>
+              <p className="text-[10px] text-slate-500 font-semibold mb-3">Choose your target study hours per day</p>
+              <div className="grid grid-cols-4 gap-2 mb-4">
+                {Array.from({ length: 24 }, (_, i) => i + 1).map((h) => (
+                  <button key={h} type="button" onClick={() => setGoalHours(h)}
+                    className={`py-2 rounded-xl text-xs font-black border transition-all ${goalHours === h ? "bg-indigo-600 text-white border-indigo-600" : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"}`}>
+                    {h}h
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowGoalPopup(false)} className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-black text-xs">Cancel</button>
+                <button type="button" onClick={handleSaveGoal} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-xs shadow-md">Save Goal</button>
+              </div>
+            </div>
+          </div>
+        )}
+
 
         <div className="w-full p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-black flex items-center mb-2.5 shadow-inner">
           <button
@@ -288,8 +327,12 @@ function HeroWidget({ name, streak, todayStudyMins }: { name: string; streak: nu
             className={`w-full text-left rounded-2xl border ${currentItem.border} ${currentItem.bg} p-3 active:scale-[0.98] transition-all relative overflow-hidden group shadow-2xs`}
           >
             <div className="flex items-center gap-3">
-              <div className={`w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs text-3xl`}>
-                {currentItem.icon_or_sticker || "💡"}
+              <div className={`w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden`}>
+                {currentItem.icon_or_sticker && (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
+                  <img src={currentItem.icon_or_sticker} alt="" className="w-full h-full object-cover rounded-2xl" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                ) : (
+                  <span className="text-3xl">{currentItem.icon_or_sticker || "💡"}</span>
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className={`text-xs font-bold ${currentItem.text} leading-snug`}>"{currentItem.quote}"</p>
@@ -603,6 +646,7 @@ export default function DashboardPage() {
   const [doubtOpen, setDoubtOpen] = useState(false);
 
   const [todayStudyMins, setTodayStudyMins] = useState(0);
+  const [dailyGoalMins, setDailyGoalMins] = useState(480);
   const [todayQuestions, setTodayQuestions] = useState(0);
   const [totalQuestionsAllTime, setTotalQuestionsAllTime] = useState(0);
   const [avgQPerHr, setAvgQPerHr] = useState(0);
@@ -656,6 +700,7 @@ export default function DashboardPage() {
       if (uProf) {
         setProfile(uProf);
         setSelectedShiftId(uProf.selected_shift_id || null);
+        setDailyGoalMins(uProf.daily_goal_minutes || 480);
 
         const targetExam = uProf.target_exam || "JEE";
         const allowedClasses = classLevelsForContent(uProf.class_level);
@@ -690,11 +735,16 @@ export default function DashboardPage() {
           }
 
           const subIds = cleanedSubs.map((s) => s.id);
-          const { data: chaps } = await supabase
+          const isDropper = uProf?.class_level === "Dropper";
+          let chapQuery = supabase
             .from("chapters")
-            .select("id, title, subject_id")
+            .select("id, title, subject_id, in_competitive_syllabus")
             .in("subject_id", subIds)
             .order("display_order", { ascending: true });
+          if (isDropper) {
+            chapQuery = chapQuery.neq("in_competitive_syllabus", false);
+          }
+          const { data: chaps } = await chapQuery;
 
           if (chaps) {
             setChapters(chaps);
@@ -880,6 +930,13 @@ export default function DashboardPage() {
     }
   };
 
+  const handleGoalSaved = async (mins: number) => {
+    setDailyGoalMins(mins);
+    if (user?.id) {
+      await supabase.from("users").update({ daily_goal_minutes: mins }).eq("uid", user.id);
+    }
+  };
+
   const calculateDaysLeft = (targetDate: string) => {
     const diff = new Date(targetDate).getTime() - new Date().getTime();
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
@@ -913,10 +970,10 @@ export default function DashboardPage() {
 
       <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
         {/* 1. HERO WIDGET */}
-        <HeroWidget name={firstName} streak={streak} todayStudyMins={todayStudyMins} />
+        <HeroWidget name={firstName} streak={streak} todayStudyMins={todayStudyMins} dailyGoalMins={dailyGoalMins} onGoalSaved={handleGoalSaved} />
 
         {/* 2. EXAM COUNTDOWN */}
-        <div className={`grid gap-2 ${examSchedules.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
+        <div className={`grid gap-2 ${examSchedules.length === 1 ? "grid-cols-1" : examSchedules.length === 2 ? "grid-cols-2" : examSchedules.length === 3 ? "grid-cols-3" : "grid-cols-4"}`}>
           {examSchedules.map((exam) => {
             const days = calculateDaysLeft(exam.exam_date);
             const shifts = shiftsMap[exam.id] || [];
@@ -960,14 +1017,32 @@ export default function DashboardPage() {
         </div>
 
         {/* 3. AI MENTOR WIDGET */}
-        <AiMentorCard
-          userId={user?.id}
-          targetExam={profile?.target_exam || "JEE"}
-          report={mentorReport}
-          loading={mentorLoading}
-          onRefresh={() => {}}
-          onOpenDoubtSolver={() => setDoubtOpen(true)}
-        />
+        <div className="space-y-2">
+          <AiMentorCard
+            userId={user?.id}
+            targetExam={profile?.target_exam || "JEE"}
+            report={mentorReport}
+            loading={mentorLoading}
+            onRefresh={() => {}}
+            onOpenDoubtSolver={() => setDoubtOpen(true)}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => router.push("/mentor")} className="flex items-center gap-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all">
+              <span className="text-lg">🧠</span>
+              <div className="text-left">
+                <div className="text-xs font-black leading-none">AI Mentorship</div>
+                <div className="text-[9px] font-semibold text-indigo-200 leading-tight mt-0.5">7-day plan & analysis</div>
+              </div>
+            </button>
+            <button type="button" onClick={() => setDoubtOpen(true)} className="flex items-center gap-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all">
+              <span className="text-lg">✨</span>
+              <div className="text-left">
+                <div className="text-xs font-black leading-none">Doubt Solver</div>
+                <div className="text-[9px] font-semibold text-slate-400 leading-tight mt-0.5">Ask anything instantly</div>
+              </div>
+            </button>
+          </div>
+        </div>
 
         {/* 4. METRICS ROW (UPGRADED QUESTIONS CARD) */}
         <div className="grid grid-cols-3 gap-2">
@@ -987,7 +1062,7 @@ export default function DashboardPage() {
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-600 block">Questions</span>
+                <span className="text-[10px] font-bold text-slate-600 block">Questions Today</span>
                 <button
                   type="button"
                   onClick={() => setShowAddQuestionModal(true)}
@@ -1005,11 +1080,11 @@ export default function DashboardPage() {
           </div>
 
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
-            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Backlogs</span>
+            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Tasks</span>
             <div className="text-lg font-black text-slate-900 tracking-tight">
-              {allTasks.filter((t) => t.task_type === "backlog").length}
+              {allTasks.length}
             </div>
-            <span className="text-[10px] font-bold text-rose-600 block mt-0.5">Pending</span>
+            <span className={`text-[10px] font-bold block mt-0.5 ${allTasks.length > 0 ? "text-rose-600" : "text-emerald-600"}`}>{allTasks.length > 0 ? "Pending" : "All Done ✓"}</span>
           </div>
         </div>
 
@@ -1133,7 +1208,7 @@ export default function DashboardPage() {
             <div className="text-xl mb-1">📚</div>
             <div>
               <div className="text-xs font-black text-slate-900">Syllabus</div>
-              <div className="text-[9px] font-semibold text-slate-500">Chapters & Scope</div>
+              <div className="text-[9px] font-semibold text-slate-500">Chapters & Backlogs</div>
             </div>
           </button>
           <button
