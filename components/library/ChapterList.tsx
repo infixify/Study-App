@@ -271,7 +271,7 @@ export default function ChapterList({
               {/* Revision Box */}
               <div className="flex items-center justify-between bg-slate-50 dark:bg-[#162032] px-2.5 py-1.5 rounded-xl border border-slate-200/60 dark:border-white/5">
                 <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                  Rev:{" "}
+                  Revision:{" "}
                   <b className="text-teal dark:text-[#2DD4BF] font-black">
                     {revCount}x
                   </b>
