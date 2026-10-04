@@ -362,14 +362,23 @@ jobs:
               with open(kts_path, "r") as f:
                   a = f.read()
               mlkit_deps = (
-                  "\ndependencies {\n"
-                  "    implementation(\"com.google.mlkit:face-detection:16.1.7\")\n"
-                  "    implementation(\"androidx.camera:camera-core:1.3.4\")\n"
-                  "    implementation(\"androidx.camera:camera-camera2:1.3.4\")\n"
-                  "    implementation(\"androidx.camera:camera-lifecycle:1.3.4\")\n"
-                  "    implementation(\"androidx.lifecycle:lifecycle-service:2.8.7\")\n"
-                  "    implementation(\"com.google.android.gms:play-services-tasks:18.2.0\")\n"
-                  "}\n"
+                  "
+dependencies {
+"
+                  "    implementation("com.google.mlkit:face-detection:16.1.7")
+"
+                  "    implementation("androidx.camera:camera-core:1.3.4")
+"
+                  "    implementation("androidx.camera:camera-camera2:1.3.4")
+"
+                  "    implementation("androidx.camera:camera-lifecycle:1.3.4")
+"
+                  "    implementation("androidx.lifecycle:lifecycle-service:2.8.7")
+"
+                  "    implementation("com.google.android.gms:play-services-tasks:18.2.0")
+"
+                  "}
+"
               )
               if "mlkit:face-detection" not in a:
                   a += mlkit_deps
@@ -380,14 +389,23 @@ jobs:
               with open(gradle_path, "r") as f:
                   a = f.read()
               mlkit_deps = (
-                  "\ndependencies {\n"
-                  "    implementation 'com.google.mlkit:face-detection:16.1.7'\n"
-                  "    implementation 'androidx.camera:camera-core:1.3.4'\n"
-                  "    implementation 'androidx.camera:camera-camera2:1.3.4'\n"
-                  "    implementation 'androidx.camera:camera-lifecycle:1.3.4'\n"
-                  "    implementation 'androidx.lifecycle:lifecycle-service:2.8.7'\n"
-                  "    implementation 'com.google.android.gms:play-services-tasks:18.2.0'\n"
-                  "}\n"
+                  "
+dependencies {
+"
+                  "    implementation 'com.google.mlkit:face-detection:16.1.7'
+"
+                  "    implementation 'androidx.camera:camera-core:1.3.4'
+"
+                  "    implementation 'androidx.camera:camera-camera2:1.3.4'
+"
+                  "    implementation 'androidx.camera:camera-lifecycle:1.3.4'
+"
+                  "    implementation 'androidx.lifecycle:lifecycle-service:2.8.7'
+"
+                  "    implementation 'com.google.android.gms:play-services-tasks:18.2.0'
+"
+                  "}
+"
               )
               if "mlkit:face-detection" not in a:
                   a += mlkit_deps
@@ -615,7 +633,18 @@ jobs:
                                   result.error("APP_INFO_ERROR", e.message, null)
                               }
                           }
-                          "setBlockedApps", "setBlockingEnabled" -> result.success(true)
+                          "setBlockedApps" -> {
+                              val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
+                              val allowed = call.argument<List<String>>("allowedApps") ?: emptyList()
+                              val intent = Intent(this, FocusBlockerService::class.java).apply {
+                                  action = FocusBlockerService.ACTION_UPDATE_BLOCKED
+                                  putStringArrayListExtra(FocusBlockerService.EXTRA_BLOCKED_APPS, ArrayList(blocked))
+                                  putStringArrayListExtra(FocusBlockerService.EXTRA_ALLOWED_APPS, ArrayList(allowed))
+                              }
+                              startService(intent)
+                              result.success(true)
+                          }
+                          "setBlockingEnabled" -> result.success(true)
                           else -> result.notImplemented()
                       }
                   }
@@ -625,6 +654,7 @@ jobs:
                       when (call.method) {
                           "startFocusBlocker" -> {
                               val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
+                              val allowed = call.argument<List<String>>("allowedApps") ?: emptyList()
                               val subject = call.argument<String>("subject") ?: "General"
                               val mode = call.argument<String>("mode") ?: "Study"
                               val camEnabled = call.argument<Boolean>("camEnabled") ?: false
@@ -632,6 +662,7 @@ jobs:
                               val intent = Intent(this, FocusBlockerService::class.java).apply {
                                   action = FocusBlockerService.ACTION_START
                                   putStringArrayListExtra(FocusBlockerService.EXTRA_BLOCKED_APPS, ArrayList(blocked))
+                                  putStringArrayListExtra(FocusBlockerService.EXTRA_ALLOWED_APPS, ArrayList(allowed))
                                   putExtra(FocusBlockerService.EXTRA_SUBJECT, subject)
                                   putExtra(FocusBlockerService.EXTRA_MODE, mode)
                                   putExtra(FocusBlockerService.EXTRA_CAM_ENABLED, camEnabled)
@@ -654,9 +685,11 @@ jobs:
                           }
                           "updateBlockedApps" -> {
                               val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
+                              val allowed = call.argument<List<String>>("allowedApps") ?: emptyList()
                               startService(Intent(this, FocusBlockerService::class.java).apply {
                                   action = FocusBlockerService.ACTION_UPDATE_BLOCKED
                                   putStringArrayListExtra(FocusBlockerService.EXTRA_BLOCKED_APPS, ArrayList(blocked))
+                                  putStringArrayListExtra(FocusBlockerService.EXTRA_ALLOWED_APPS, ArrayList(allowed))
                               })
                               result.success(true)
                           }
@@ -899,6 +932,7 @@ jobs:
 
                   @Volatile var isStopping: Boolean = false
                   const val EXTRA_BLOCKED_APPS      = "blocked_apps"
+                  const val EXTRA_ALLOWED_APPS      = "allowed_apps"
                   const val EXTRA_SUBJECT           = "subject"
                   const val EXTRA_MODE              = "mode"
                   const val EXTRA_CAM_STATUS        = "cam_status"
@@ -918,6 +952,7 @@ jobs:
 
               private val handler = Handler(Looper.getMainLooper())
               private var blockedApps: List<String> = emptyList()
+              private var allowedApps: List<String> = emptyList()
               private var subject = "General"
               private var mode = "Study"
               private var camEnabled = false
@@ -1033,6 +1068,13 @@ jobs:
                       ACTION_START -> {
                           if (isStopping) isStopping = false
                           blockedApps = intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: emptyList()
+                          allowedApps = intent.getStringArrayListExtra(EXTRA_ALLOWED_APPS) ?: emptyList()
+                          if (allowedApps.isEmpty()) {
+                              val savedAllowed = prefs.getStringSet("active_allowed_apps", null)
+                              if (savedAllowed != null && savedAllowed.isNotEmpty()) {
+                                  allowedApps = savedAllowed.toList()
+                              }
+                          }
                           subject = intent.getStringExtra(EXTRA_SUBJECT) ?: "General"
                           mode = intent.getStringExtra(EXTRA_MODE) ?: "Study"
                           camEnabled = intent.getBooleanExtra(EXTRA_CAM_ENABLED, false)
@@ -1062,6 +1104,7 @@ jobs:
                               .putString("active_mode", mode)
                               .putBoolean("active_cam_enabled", camEnabled)
                               .putBoolean("active_blocker_enabled", blockerEnabled)
+                              .putStringSet("active_allowed_apps", allowedApps.toSet())
                               .putLong("active_start_timestamp_ms", startTimestampMs)
                               .apply()
 
@@ -1099,6 +1142,7 @@ jobs:
                               .putString("active_mode", mode)
                               .putBoolean("active_cam_enabled", camEnabled)
                               .putBoolean("active_blocker_enabled", blockerEnabled)
+                              .putStringSet("active_allowed_apps", allowedApps.toSet())
                               .apply()
 
                           if (savedStart > 0L) {
@@ -1173,7 +1217,9 @@ jobs:
                       }
                       ACTION_UPDATE_BLOCKED -> {
                           val apps = intent.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: arrayListOf()
+                          val allowed = intent.getStringArrayListExtra(EXTRA_ALLOWED_APPS) ?: arrayListOf()
                           blockedApps = apps.toList()
+                          if (allowed.isNotEmpty()) allowedApps = allowed.toList()
                       }
                       ACTION_SET_CAM_STATUS -> {
                           val status = intent.getStringExtra(EXTRA_CAM_STATUS) ?: "verified"
@@ -1347,33 +1393,74 @@ jobs:
                   updateNotification()
               }
 
-              // Core blocking logic
+              private fun isLauncherPackage(pkg: String): Boolean {
+                  return try {
+                      val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                      val resolveInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                      resolveInfo?.activityInfo?.packageName == pkg
+                  } catch (_: Exception) {
+                      pkg.contains("launcher") || pkg.contains("home")
+                  }
+              }
+
+              private fun isForegroundAllowed(pkg: String): Boolean {
+                  // 1. PrepWise app itself
+                  if (pkg == packageName) return true
+
+                  // 2. Critical Android system UI & OS components
+                  if (pkg == "com.android.systemui" || pkg == "android") return true
+
+                  // 3. Home Screen / Launcher
+                  if (isLauncherPackage(pkg)) return true
+
+                  // 4. Keyboards & Input methods
+                  if (pkg.contains("inputmethod") || pkg.contains("keyboard") || pkg.contains("ime")) return true
+
+                  // 5. Google Play Services / Core Framework
+                  if (pkg == "com.google.android.gms" || pkg == "com.google.android.gsf") return true
+
+                  // 6. Permissions / Package installer
+                  if (pkg.contains("permissioncontroller") || pkg.contains("packageinstaller")) return true
+
+                  // 7. Phone calls & Telecom
+                  if (pkg.contains("dialer") || pkg.contains("telecom") || pkg.contains("incall")) return true
+
+                  // 8. User's Allowed Apps (Matches ANY selected installed app!)
+                  val lowerPkg = pkg.lowercase(java.util.Locale.ROOT)
+                  for (a in allowedApps) {
+                      val lowerA = a.lowercase(java.util.Locale.ROOT).trim()
+                      if (lowerA.isEmpty()) continue
+                      if (lowerPkg == lowerA) return true
+                      if (lowerPkg.contains(lowerA) || lowerA.contains(lowerPkg)) return true
+                      if (lowerA.contains("youtube") && lowerPkg.contains("youtube")) return true
+                      if (lowerA.contains("whatsapp") && lowerPkg.contains("whatsapp")) return true
+                      if (lowerA.contains("calculator") && lowerPkg.contains("calculator")) return true
+                      if ((lowerA.contains("pdf") || lowerA.contains("reader")) && (lowerPkg.contains("pdf") || lowerPkg.contains("reader") || lowerPkg.contains("docs"))) return true
+                      if (lowerA.contains("telegram") && lowerPkg.contains("telegram")) return true
+                      if (lowerA.contains("instagram") && lowerPkg.contains("instagram")) return true
+                  }
+
+                  return false
+              }
+
+              // Core blocking logic: Allow selected apps + system essentials, BLOCK EVERYTHING ELSE!
               private fun checkAndBlock() {
                   if (!blockerEnabled || !hasUsagePermission()) return
                   val foreground = getForegroundPackage() ?: return
 
-                  if (foreground == packageName) {
+                  // If foreground is an allowed app or system essential -> NEVER BLOCK!
+                  if (isForegroundAllowed(foreground)) {
                       if (overlayView != null) removeOverlay()
                       if (camEnabled && canDrawOverlay()) showDotView()
                       return
                   }
 
-                  if (foreground == "com.android.systemui" || foreground == "com.android.launcher" ||
-                      foreground.startsWith("com.google.android.inputmethod")) {
-                      if (camEnabled) showDotView()
-                      return
-                  }
-
-                  if (blockedApps.contains(foreground)) {
-                      if (camEnabled) hideDotView()
-                      if (canDrawOverlay()) {
-                          showBlockingOverlay(foreground)
-                      } else {
-                          redirectToPrepWise()
-                      }
+                  // ANY other foreground app is not in the allowed list -> BLOCK IT!
+                  if (camEnabled) hideDotView()
+                  if (canDrawOverlay()) {
+                      showBlockingOverlay(foreground)
                   } else {
-                      if (overlayView != null) removeOverlay()
-                      if (camEnabled) showDotView()
+                      redirectToPrepWise()
                   }
               }
 
@@ -3138,9 +3225,25 @@ jobs:
                         allowedSet.add('com.prepwise.prepwise');
                         allowedSet.add('com.android.systemui');
 
+                        bool isAllowed(String pkg) {
+                          if (allowedSet.contains(pkg)) return true;
+                          for (final a in allowedSet) {
+                            final al = a.toLowerCase();
+                            final pl = pkg.toLowerCase();
+                            if (pl == al || pl.contains(al) || al.contains(pl)) return true;
+                            if (al == 'youtube' && pl.contains('youtube')) return true;
+                            if (al == 'whatsapp' && pl.contains('whatsapp')) return true;
+                            if (al == 'calculator' && pl.contains('calculator')) return true;
+                            if (al == 'pdf_reader' && (pl.contains('pdf') || pl.contains('reader') || pl.contains('docs'))) return true;
+                            if (al == 'telegram' && pl.contains('telegram')) return true;
+                            if (al == 'instagram' && pl.contains('instagram')) return true;
+                          }
+                          return false;
+                        }
+
                         blockedPackages = allApps
                             .map((a) => a['packageName']?.toString() ?? '')
-                            .where((pkg) => pkg.isNotEmpty && !allowedSet.contains(pkg))
+                            .where((pkg) => pkg.isNotEmpty && !isAllowed(pkg))
                             .toList();
                       } catch (_) {}
                     }
@@ -3149,6 +3252,7 @@ jobs:
                     try {
                       await const MethodChannel('com.prepwise/focusblocker').invokeMethod('startFocusBlocker', {
                         'blockedApps': blockedPackages,
+                        'allowedApps': allowed,
                         'subject': subject,
                         'mode': mode,
                         'camEnabled': camEnabled,
@@ -3270,6 +3374,24 @@ jobs:
                     break;
 
                   case 'checkAccessibilityEnabled':
+                  case 'getInstalledApps':
+                    try {
+                      final allInstalledRaw = await const MethodChannel('com.prepwise/apps').invokeMethod('getInstalledApps') as String;
+                      final dynamic decoded = jsonDecode(allInstalledRaw);
+                      final String encoded = jsonEncode(decoded);
+                      webViewController.runJavaScript("""
+                        (function() {
+                          try {
+                            window.__nativeInstalledApps = ;
+                            if (typeof window.onInstalledAppsReady === 'function') {
+                              window.onInstalledAppsReady(window.__nativeInstalledApps);
+                            }
+                          } catch(e) {}
+                        })();
+                      """);
+                    } catch (_) {}
+                    break;
+
                   case 'checkUsagePermission':
                     final bool enabled = await AppBlockerService().isAccessibilityEnabled();
                     await webViewController.runJavaScript("(function(){if(typeof window.onAccessibilityStatus==='function'){window.onAccessibilityStatus($enabled);}})();");
@@ -4240,7 +4362,6 @@ jobs:
           }
 
           DART_WEB_EOF
-
 
       - name: Accept Android Licenses and Ensure SDK 36
         run: |
