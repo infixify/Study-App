@@ -928,7 +928,7 @@ jobs:
                   // Shared elapsed seconds and session state - readable from MainActivity for sync
                   @Volatile var isRunning: Boolean = false
                   @Volatile var currentElapsedSeconds: Int = 0
-                  @Volatile var currentSubject: String = "General"
+                  @Volatile var currentSubject: String = "Physics"
                   @Volatile var currentMode: String = "Study"
                   @Volatile var currentCamEnabled: Boolean = false
                   @Volatile var currentBlockerEnabled: Boolean = false
@@ -937,7 +937,7 @@ jobs:
               private val handler = Handler(Looper.getMainLooper())
               private var blockedApps: List<String> = emptyList()
               private var allowedApps: List<String> = emptyList()
-              private var subject = "General"
+              private var subject = "Physics"
               private var mode = "Study"
               private var camEnabled = false
               private var blockerEnabled = false
@@ -1059,7 +1059,7 @@ jobs:
                                   allowedApps = savedAllowed.toList()
                               }
                           }
-                          subject = intent.getStringExtra(EXTRA_SUBJECT) ?: "General"
+                          val sIn = intent.getStringExtra(EXTRA_SUBJECT); subject = if (!sIn.isNullOrBlank() && !sIn.equals("General", true)) sIn else (prefs.getString("active_subject", "Physics") ?: "Physics")
                           mode = intent.getStringExtra(EXTRA_MODE) ?: "Study"
                           camEnabled = intent.getBooleanExtra(EXTRA_CAM_ENABLED, false)
                           blockerEnabled = intent.getBooleanExtra(EXTRA_BLOCKER_ENABLED, false)
@@ -2161,7 +2161,8 @@ jobs:
                       put("ended_at", endIso)
                       put("duration_seconds", elapsed)
                       put("counts_for_streak", elapsed >= 1200)
-                      put("subject", subject)
+                      val resolvedSub = if (subject.isBlank() || subject.equals("General", true)) (prefs.getString("active_subject", "Physics") ?: "Physics") else subject
+                      put("subject", resolvedSub)
                   }
                   val sessConn = URL("$supabaseUrl/rest/v1/focus_sessions").openConnection() as HttpURLConnection
                   sessConn.requestMethod = "POST"
