@@ -22,20 +22,14 @@ interface GroupRow {
   total_weekly_hours: number;
 }
 
-interface MembershipRow {
-  group_id: string;
-}
-
 const RANK_MEDALS = ["🥇", "🥈", "🥉"];
 
-function deadline<T>(p: PromiseLike<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("Request timed out")), ms);
-    p.then(
-      (v) => { clearTimeout(t); resolve(v); },
-      (e) => { clearTimeout(t); reject(e); }
-    );
-  });
+function getWeekStart() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  return d.toISOString().split("T")[0];
 }
 
 export default function LeaderboardPage() {
@@ -51,28 +45,87 @@ export default function LeaderboardPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const uid = sessionData?.session?.user?.id ?? null;
       setCurrentUserId(uid);
 
-      const studentRes = await deadline(supabase.rpc("get_leaderboard_students"), 8000);
-      if (studentRes.error) throw new Error(studentRes.error.message);
-      setStudents((studentRes.data ?? []) as StudentRow[]);
+      const weekStart = getWeekStart();
 
-      const groupRes = await deadline(supabase.rpc("get_leaderboard_groups"), 8000);
-      if (groupRes.error) throw new Error(groupRes.error.message);
-      setGroups((groupRes.data ?? []) as GroupRow[]);
+      const { data: usersData, error: usersErr } = await supabase
+        .from("users")
+        .select("uid, name, current_streak")
+        .limit(50);
+      if (usersErr) throw new Error(usersErr.message);
+
+      const { data: logsData } = await supabase
+        .from("daily_logs")
+        .select("user_id, study_time_minutes")
+        .gte("log_date", weekStart);
+
+      const logsByUser: Record<string, number> = {};
+      for (const row of (logsData ?? []) as { user_id: string; study_time_minutes: number }[]) {
+        logsByUser[row.user_id] = (logsByUser[row.user_id] ?? 0) + (row.study_time_minutes ?? 0);
+      }
+
+      const studentRows: StudentRow[] = ((usersData ?? []) as { uid: string; name: string; current_streak: number }[])
+        .map((u) => {
+          const weeklyMins = logsByUser[u.uid] ?? 0;
+          const weeklyHours = Math.round((weeklyMins / 60) * 10) / 10;
+          const streak = u.current_streak ?? 0;
+          return {
+            user_id: u.uid,
+            display_name: u.name ?? "Unknown",
+            streak,
+            weekly_hours: weeklyHours,
+            points: streak * 10 + Math.floor(weeklyHours) * 5,
+          };
+        })
+        .sort((a, b) => b.points - a.points);
+      setStudents(studentRows);
+
+      const { data: groupsData, error: groupsErr } = await supabase
+        .from("study_groups")
+        .select("id, name")
+        .limit(50);
+      if (groupsErr) throw new Error(groupsErr.message);
+
+      const { data: membersData } = await supabase
+        .from("group_members")
+        .select("group_id, user_id");
+
+      const membersByGroup: Record<string, string[]> = {};
+      for (const m of (membersData ?? []) as { group_id: string; user_id: string }[]) {
+        if (!membersByGroup[m.group_id]) membersByGroup[m.group_id] = [];
+        membersByGroup[m.group_id].push(m.user_id);
+      }
+
+      const userPointsMap: Record<string, number> = {};
+      for (const s of studentRows) userPointsMap[s.user_id] = s.points;
+
+      const groupRows: GroupRow[] = ((groupsData ?? []) as { id: string; name: string }[])
+        .map((g) => {
+          const members = membersByGroup[g.id] ?? [];
+          const totalMins = members.reduce((sum, uid2) => sum + (logsByUser[uid2] ?? 0), 0);
+          const totalHours = Math.round((totalMins / 60) * 10) / 10;
+          const avgPts = members.length > 0
+            ? Math.round(members.reduce((sum, uid2) => sum + (userPointsMap[uid2] ?? 0), 0) / members.length)
+            : 0;
+          return {
+            group_id: g.id,
+            group_name: g.name,
+            member_count: members.length,
+            avg_points: avgPts,
+            total_weekly_hours: totalHours,
+          };
+        })
+        .sort((a, b) => b.avg_points - a.avg_points);
+      setGroups(groupRows);
 
       if (uid) {
-        try {
-          const memberRes = await deadline(
-            supabase.from("group_members").select("group_id").eq("user_id", uid).maybeSingle(),
-            5000
-          );
-          setMyGroupId((memberRes.data as MembershipRow | null)?.group_id ?? null);
-        } catch (_) {}
+        const mine = (membersData ?? []) as { group_id: string; user_id: string }[];
+        const myEntry = mine.find((m) => m.user_id === uid);
+        setMyGroupId(myEntry?.group_id ?? null);
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load leaderboard");
