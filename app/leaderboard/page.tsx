@@ -46,8 +46,8 @@ export default function LeaderboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const { data: authData } = await supabase.auth.getUser();
-      const uid = authData?.user?.id ?? null;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData?.session?.user?.id ?? null;
       setCurrentUserId(uid);
 
       const weekStart = getWeekStart();
