@@ -1,16 +1,24 @@
+// lib/focus.ts
 import { supabase } from "@/lib/supabase";
 
-export const MIN_STREAK_SECONDS = 120; // 2 minutes
+export const MIN_STREAK_SECONDS = 120; // 2 minutes (qualifying study time)
 
 export interface StreakInfo {
   currentStreak: number;
   longestStreak: number;
   lastFocusDate: string | null;
-  streakWasReset: boolean; // true if a missed day was detected on this load
+  streakWasReset: boolean;
 }
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+// 1. Exact Indian Standard Time (IST) YYYY-MM-DD (No UTC midnight bugs!)
+export function getIstDateStr(date: Date = new Date()): string {
+  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+export function getYesterdayIstDateStr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return getIstDateStr(d);
 }
 
 function daysBetween(a: string, b: string) {
@@ -19,9 +27,58 @@ function daysBetween(a: string, b: string) {
   return Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
 }
 
-// Call this once when the Focus page loads. Detects a missed day and
-// resets the streak in the DB if needed, returning whether that happened
-// so the UI can show the reset modal.
+/**
+ * Calculates real streak directly from daily_logs (the true historical record)
+ * This guarantees that even if native Kotlin, offline logs, or background timer ran,
+ * streak is NEVER wrongly reset!
+ */
+export async function calculateActualStreakFromLogs(userId: string): Promise<number> {
+  const today = getIstDateStr();
+  const yesterday = getYesterdayIstDateStr();
+
+  // Fetch recent qualifying daily study logs
+  const { data: logs } = await supabase
+    .from("daily_logs")
+    .select("log_date, study_time_minutes")
+    .eq("user_id", userId)
+    .gt("study_time_minutes", 1) // At least 2 min study
+    .order("log_date", { ascending: false })
+    .limit(90);
+
+  if (!logs || logs.length === 0) return 0;
+
+  const studiedDates = new Set(logs.map((l) => l.log_date));
+
+  // Determine starting point
+  let checkDate = new Date();
+  if (!studiedDates.has(today)) {
+    // If not studied today yet, check if studied yesterday
+    if (!studiedDates.has(yesterday)) {
+      // Missed both today and yesterday -> streak broken
+      return 0;
+    }
+    // Studied yesterday -> streak still alive starting from yesterday!
+    checkDate.setDate(checkDate.getDate() - 1);
+  }
+
+  let streak = 0;
+  while (true) {
+    const dateStr = getIstDateStr(checkDate);
+    if (studiedDates.has(dateStr)) {
+      streak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+
+  return streak;
+}
+
+/**
+ * Call this when Dashboard or Focus loads.
+ * Reconciles streak accurately using IST dates and daily_logs verification.
+ */
 export async function loadAndReconcileStreak(userId: string): Promise<StreakInfo> {
   const { data: user } = await supabase
     .from("users")
@@ -29,37 +86,39 @@ export async function loadAndReconcileStreak(userId: string): Promise<StreakInfo
     .eq("uid", userId)
     .maybeSingle();
 
-  const currentStreak = user?.current_streak ?? 0;
-  const longestStreak = user?.longest_streak ?? 0;
-  const lastFocusDate = user?.last_focus_date ?? null;
+  const prevLongest = user?.longest_streak ?? 0;
+  const today = getIstDateStr();
+  const yesterday = getYesterdayIstDateStr();
 
-  if (!lastFocusDate || currentStreak === 0) {
-    return { currentStreak, longestStreak, lastFocusDate, streakWasReset: false };
-  }
+  // Calculate actual streak from ground truth
+  const actualStreak = await calculateActualStreakFromLogs(userId);
+  const newLongest = Math.max(prevLongest, actualStreak);
 
-  const gap = daysBetween(lastFocusDate, todayStr());
+  const streakWasReset = (user?.current_streak ?? 0) > 0 && actualStreak === 0;
 
-  // gap 0 = studied today already, gap 1 = studied yesterday (streak alive).
-  // gap >= 2 = missed at least one full day — streak breaks.
-  if (gap >= 2) {
+  // Update DB if there is any mismatch
+  if (user?.current_streak !== actualStreak || user?.longest_streak !== newLongest) {
     await supabase
       .from("users")
-      .update({ current_streak: 0 })
+      .update({
+        current_streak: actualStreak,
+        longest_streak: newLongest,
+        last_focus_date: actualStreak > 0 ? (actualStreak > 0 && user?.last_focus_date === today ? today : yesterday) : user?.last_focus_date,
+      })
       .eq("uid", userId);
-
-    return {
-      currentStreak: 0,
-      longestStreak,
-      lastFocusDate,
-      streakWasReset: true,
-    };
   }
 
-  return { currentStreak, longestStreak, lastFocusDate, streakWasReset: false };
+  return {
+    currentStreak: actualStreak,
+    longestStreak: newLongest,
+    lastFocusDate: user?.last_focus_date ?? null,
+    streakWasReset,
+  };
 }
 
-// Call this when a session ends. Saves the session and, if it's long
-// enough, updates the streak.
+/**
+ * Call this when a session ends.
+ */
 export async function saveFocusSession(
   userId: string,
   startedAt: Date,
@@ -80,6 +139,7 @@ export async function saveFocusSession(
     return { countedForStreak: false, newStreak: -1, newLongest: -1 };
   }
 
+  const today = getIstDateStr();
   const { data: user } = await supabase
     .from("users")
     .select("current_streak, longest_streak, last_focus_date")
@@ -89,18 +149,18 @@ export async function saveFocusSession(
   const prevStreak = user?.current_streak ?? 0;
   const prevLongest = user?.longest_streak ?? 0;
   const prevDate = user?.last_focus_date ?? null;
-  const today = todayStr();
 
   let newStreak: number;
   if (prevDate === today) {
-    // Already logged a qualifying session today — streak doesn't change.
-    newStreak = prevStreak;
+    // Already logged a qualifying session today in IST
+    newStreak = Math.max(prevStreak, 1);
   } else if (prevDate && daysBetween(prevDate, today) === 1) {
-    // Studied yesterday — extend the streak.
+    // Studied yesterday -> extend streak
     newStreak = prevStreak + 1;
   } else {
-    // First session ever, or a gap — streak starts fresh at 1.
-    newStreak = 1;
+    // Check ground truth from daily_logs
+    const verifiedStreak = await calculateActualStreakFromLogs(userId);
+    newStreak = Math.max(verifiedStreak, 1);
   }
 
   const newLongest = Math.max(prevLongest, newStreak);
@@ -115,4 +175,4 @@ export async function saveFocusSession(
     .eq("uid", userId);
 
   return { countedForStreak: true, newStreak, newLongest };
-            }
+}
