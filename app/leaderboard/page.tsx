@@ -1,7 +1,7 @@
 // app/leaderboard/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import AppHeader from "@/components/dashboard/AppHeader";
 import BottomNav from "@/components/dashboard/BottomNav";
@@ -24,6 +24,15 @@ interface GroupRow {
 
 const RANK_MEDALS = ["🥇", "🥈", "🥉"];
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("Request timed out")), ms)
+    ),
+  ]);
+}
+
 export default function LeaderboardPage() {
   const [tab, setTab] = useState<"students" | "groups">("students");
   const [students, setStudents] = useState<StudentRow[]>([]);
@@ -31,50 +40,56 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [myGroupId, setMyGroupId] = useState<string | null>(null); // Leaderboard Fix 2
-
-  // Leaderboard Fix 1: retryKey triggers re-fetch when Retry is clicked
+  const [myGroupId, setMyGroupId] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const { data: authData } = await supabase.auth.getUser();
-        const uid = authData?.user?.id ?? null;
-        setCurrentUserId(uid);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData?.user?.id ?? null;
+      setCurrentUserId(uid);
 
-        const [studentRes, groupRes] = await Promise.all([
+      const [studentRes, groupRes] = await withTimeout(
+        Promise.all([
           supabase.rpc("get_leaderboard_students"),
           supabase.rpc("get_leaderboard_groups"),
-        ]);
+        ]),
+        10000
+      );
 
-        if (studentRes.error) throw new Error(studentRes.error.message);
-        if (groupRes.error) throw new Error(groupRes.error.message);
+      if (studentRes.error) throw new Error(studentRes.error.message);
+      if (groupRes.error) throw new Error(groupRes.error.message);
 
-        setStudents((studentRes.data as StudentRow[]) ?? []);
-        setGroups((groupRes.data as GroupRow[]) ?? []);
+      setStudents((studentRes.data as StudentRow[]) ?? []);
+      setGroups((groupRes.data as GroupRow[]) ?? []);
 
-        // Leaderboard Fix 2: Find which group current user belongs to
-        if (uid) {
-          try {
-            const { data: membership } = await supabase
+      if (uid) {
+        try {
+          const { data: membership } = await withTimeout(
+            supabase
               .from("group_members")
               .select("group_id")
               .eq("user_id", uid)
-              .maybeSingle();
-            setMyGroupId(membership?.group_id ?? null);
-          } catch (_) {}
+              .maybeSingle(),
+            5000
+          );
+          setMyGroupId(membership?.group_id ?? null);
+        } catch (_) {
+          // non-fatal: group highlight just won't show
         }
-      } catch (e: any) {
-        setError(e?.message ?? "Failed to load leaderboard");
-      } finally {
-        setLoading(false);
       }
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load leaderboard");
+    } finally {
+      setLoading(false);
     }
+  }, [retryKey]);
+
+  useEffect(() => {
     load();
-  }, [retryKey]); // Leaderboard Fix 1: re-run on retry
+  }, [load]);
 
   return (
     <div className="min-h-screen bg-paper pb-28">
@@ -88,6 +103,7 @@ export default function LeaderboardPage() {
           </p>
         </div>
 
+        {/* Tabs — always clickable, not inside loading block */}
         <div className="flex gap-2">
           <button
             onClick={() => setTab("students")}
@@ -112,7 +128,10 @@ export default function LeaderboardPage() {
         </div>
 
         {loading ? (
-          <p className="text-center py-10 text-xs text-slate">Loading…</p>
+          <div className="flex flex-col items-center py-14 gap-3">
+            <div className="w-8 h-8 rounded-full border-2 border-teal border-t-transparent animate-spin" />
+            <p className="text-xs text-slate">Loading leaderboard…</p>
+          </div>
         ) : error ? (
           <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center">
             <p className="text-xs font-bold text-red-600 mb-1">Failed to load</p>
@@ -186,7 +205,9 @@ export default function LeaderboardPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-ink truncate">
                       {g.group_name}
-                      {isMyGroup && <span className="text-teal font-semibold"> (Your Group)</span>}
+                      {isMyGroup && (
+                        <span className="text-teal font-semibold"> (Your Group)</span>
+                      )}
                     </p>
                     <p className="text-[10px] text-slate mt-0.5">
                       {g.member_count} member{g.member_count === 1 ? "" : "s"} ·{" "}
