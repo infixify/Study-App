@@ -6,7 +6,6 @@ import { supabase } from "@/lib/supabase";
 const apiKey =
   process.env.GEMINI_API_KEY_MENTOR || process.env.GEMINI_API_KEY || "";
 
-// 100% Live Tested & Verified Active Models (Aapke exact models)
 const MODELS_CASCADE = [
   "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
@@ -42,26 +41,36 @@ async function generateWithFallback(prompt: string, key: string) {
   let lastError: any = null;
   for (const model of MODELS_CASCADE) {
     try {
-      const result = await callGeminiApi(model, prompt, key);
-      return result;
+      return await callGeminiApi(model, prompt, key);
     } catch (err: any) {
-      console.warn(`Model ${model} failed, falling back to next...`, err?.message);
+      console.warn(`Model ${model} failed, falling back...`, err?.message);
       lastError = err;
     }
   }
   throw lastError;
 }
 
+// Compute actual Q/hr from question_logs
+function computeQuestionsPerHour(questionLogs: any[], studyLogs: any[]): number | null {
+  const totalQuestions = questionLogs?.reduce((sum: number, l: any) => sum + (l.question_count || 0), 0) ?? 0;
+  const totalStudyHours = studyLogs?.reduce((sum: number, l: any) => sum + (l.study_time_minutes || 0), 0) / 60 ?? 0;
+  if (totalStudyHours < 1 || totalQuestions === 0) return null;
+  return Math.round(totalQuestions / totalStudyHours);
+}
+
+// Compute practice vs theory ratio from daily_logs
+function computePracticeRatio(studyLogs: any[]): number | null {
+  const totalStudy = studyLogs?.reduce((sum: number, l: any) => sum + (l.study_time_minutes || 0), 0) ?? 0;
+  const totalPractice = studyLogs?.reduce((sum: number, l: any) => sum + (l.practice_minutes || 0), 0) ?? 0;
+  if (totalStudy === 0) return null;
+  return Math.round((totalPractice / totalStudy) * 100);
+}
+
 export async function POST(req: Request) {
   try {
     const { userId, forceRefresh } = await req.json();
-    if (!userId) {
-      return NextResponse.json({ error: "Missing userId" }, { status: 400 });
-    }
-
-    if (!apiKey) {
-      return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
-    }
+    if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 });
+    if (!apiKey) return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
 
     if (!forceRefresh) {
       const { data: existingUser } = await supabase
@@ -84,6 +93,7 @@ export async function POST(req: Request) {
       { data: subjectSessions },
       { data: chapterProgress },
       { data: questionDetails },
+      { data: upcomingExam },
     ] = await Promise.all([
       supabase.from("users").select("*").eq("uid", userId).maybeSingle(),
       supabase
@@ -126,88 +136,85 @@ export async function POST(req: Request) {
         .eq("user_id", userId)
         .order("log_date", { ascending: false })
         .limit(30),
+      supabase
+        .from("exam_schedules")
+        .select("exam_date, label")
+        .eq("target_exam", profile?.target_exam || "JEE")
+        .gte("exam_date", new Date().toISOString().split("T")[0])
+        .order("exam_date", { ascending: true })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     const targetExam = profile?.target_exam || "JEE";
     const classLevel = profile?.class_level || "12";
+    const studentName = profile?.name || "Student";
+
+    // Compute real metrics
+    const actualQph = computeQuestionsPerHour(questionLogs || [], pastLogs || []);
+    const actualPracticeRatio = computePracticeRatio(pastLogs || []);
+
+    // Days remaining to exam
+    let daysToExam: number | null = null;
+    let examLabel: string | null = null;
+    if (upcomingExam?.exam_date) {
+      const examDate = new Date(upcomingExam.exam_date);
+      const today = new Date();
+      daysToExam = Math.ceil((examDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      examLabel = upcomingExam.label;
+    }
 
     const prompt = `
 You are the Chief Academic Strategist for an elite coaching platform preparing students for ${targetExam}.
 Analyze this student's telemetry and return a structured JSON response.
 
 Student Context:
+- Name: ${studentName}
 - Target Exam: ${targetExam}
 - Class Level: ${classLevel}
+- Days Remaining to Exam: ${daysToExam !== null ? `${daysToExam} days (${examLabel})` : "Exam date not set"}
 - Active Pending Backlogs: ${JSON.stringify(pendingBacklogs || [])}
-- Recent 14-day study logs (minutes, includes verified_minutes = time studied with BOTH face-cam AND app-blocker ON — this is the strict leaderboard-counted time, always <= study_time_minutes): ${JSON.stringify(pastLogs || [])}
+- Recent 14-day study logs (theory_minutes, practice_minutes, revision_minutes, verified_minutes = time with face-cam + app-blocker ON): ${JSON.stringify(pastLogs || [])}
 - Recent 14-day question solving numbers: ${JSON.stringify(questionLogs || [])}
+- Computed Actual Q/hr Pace: ${actualQph !== null ? `${actualQph} questions/hour` : "Not enough data yet"}
+- Computed Actual Practice Ratio: ${actualPracticeRatio !== null ? `${actualPracticeRatio}% of study time is practice` : "Not enough data yet"}
 - Last 5 Mock Test Results: ${JSON.stringify(recentTests || [])}
 - Subject-wise study time (last 30 sessions): ${JSON.stringify(subjectSessions || [])}
-- Chapter progress (what student has done/pending/backlog): ${JSON.stringify(chapterProgress || [])}
-- Detailed question solving log (last 30 entries with topic_name and question range coverage): ${JSON.stringify(questionDetails || [])}
+- Chapter progress (done/pending/backlog): ${JSON.stringify(chapterProgress || [])}
+- Detailed question solving log (last 30 entries): ${JSON.stringify(questionDetails || [])}
 
-Analyze actual subject_sessions data to determine which subjects student spends most/least time on.
-Cross-reference with question_logs topic_name to identify weak topics within each subject.
+Based on actual computed Q/hr (${actualQph ?? "unknown"}) and practice ratio (${actualPracticeRatio ?? "unknown"}%), generate REAL targets:
+- pace_target_qph: A specific achievable target slightly above their current pace (or 20 if no data)
+- practice_ratio_target: A specific target ratio to aim for (or 60 if no data)
 
-Required JSON Output schema strictly matching:
+Required JSON Output (strict schema):
 {
-  "overall_status": "Short status (e.g. Consistent Momentum, Needs Practice Velocity, Lagging in Numericals)",
-  "score_prediction": "Projected Percentile or Score Bracket (e.g. Projected: 98.2+ Percentile)",
-  "diagnostic_summary": "2-3 concise, actionable sentences on what to fix today (no generic advice).",
+  "overall_status": "Short status",
+  "score_prediction": "Projected Percentile or Score Bracket",
+  "diagnostic_summary": "2-3 concise actionable sentences based on real data.",
+  "pace_target_qph": 25,
+  "practice_ratio_target": 65,
   "today_plan": {
     "headline": "Target Tasks for Today • ${targetExam} Focus",
     "blocks": [
-      {
-        "tag": "High Priority",
-        "subject": "Physics",
-        "action": "Specific numerical problem or theory action",
-        "flexiNote": "Flexible time recommendation"
-      },
-      {
-        "tag": "Practice Sprint",
-        "subject": "${targetExam.includes("NEET") ? "Biology" : "Mathematics"}",
-        "action": "Specific problem solving or test action",
-        "flexiNote": "Flexible time recommendation"
-      },
-      {
-        "tag": "Retention Lock",
-        "subject": "Chemistry",
-        "action": "Specific NCERT recall or reaction review",
-        "flexiNote": "Flexible time recommendation"
-      }
+      { "tag": "High Priority", "subject": "Physics", "action": "Specific action", "flexiNote": "Time note" },
+      { "tag": "Practice Sprint", "subject": "${targetExam.includes("NEET") ? "Biology" : "Mathematics"}", "action": "Specific action", "flexiNote": "Time note" },
+      { "tag": "Retention Lock", "subject": "Chemistry", "action": "Specific action", "flexiNote": "Time note" }
     ]
   },
   "subject_analysis": [
-    {
-      "name": "Physics",
-      "status": "Velocity Focus / Strong / Weak",
-      "health": 75,
-      "recommendation": "One crisp specific tip",
-      "priority": "high"
-    },
-    {
-      "name": "Chemistry",
-      "status": "Reaction Retention / Formula Stable",
-      "health": 80,
-      "recommendation": "One crisp specific tip",
-      "priority": "medium"
-    },
-    {
-      "name": "${targetExam.includes("NEET") ? "Biology" : "Mathematics"}",
-      "status": "Speed Constraint / High Accuracy",
-      "health": 68,
-      "recommendation": "One crisp specific tip",
-      "priority": "high"
-    }
+    { "name": "Physics", "status": "Status", "health": 75, "recommendation": "Crisp tip", "priority": "high" },
+    { "name": "Chemistry", "status": "Status", "health": 80, "recommendation": "Crisp tip", "priority": "medium" },
+    { "name": "${targetExam.includes("NEET") ? "Biology" : "Mathematics"}", "status": "Status", "health": 68, "recommendation": "Crisp tip", "priority": "high" }
   ],
   "seven_day_plan": [
-    { "day": "Day 1", "focus": "Topic/Subject Focus", "target": "Specific Question & Time Target" },
-    { "day": "Day 2", "focus": "Topic/Subject Focus", "target": "Specific Question & Time Target" },
-    { "day": "Day 3", "focus": "Topic/Subject Focus", "target": "Specific Question & Time Target" },
-    { "day": "Day 4", "focus": "Topic/Subject Focus", "target": "Specific Question & Time Target" },
-    { "day": "Day 5", "focus": "Topic/Subject Focus", "target": "Specific Question & Time Target" },
-    { "day": "Day 6", "focus": "Topic/Subject Focus", "target": "Specific Question & Time Target" },
-    { "day": "Day 7", "focus": "Topic/Subject Focus", "target": "Specific Question & Time Target" }
+    { "day": "Day 1", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
+    { "day": "Day 2", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
+    { "day": "Day 3", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
+    { "day": "Day 4", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
+    { "day": "Day 5", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
+    { "day": "Day 6", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
+    { "day": "Day 7", "focus": "Topic Focus", "target": "Specific Q & Time Target" }
   ],
   "strengths": ["Real strength 1", "Real strength 2"],
   "weaknesses": ["Real mark leak 1", "Real mark leak 2"]
@@ -215,14 +222,29 @@ Required JSON Output schema strictly matching:
 `;
 
     const rawJson = await generateWithFallback(prompt, apiKey);
-    const parsed = JSON.parse(rawJson);
+    const cleaned = rawJson.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+
+    // Store student context for doubt solver (lightweight, no large arrays)
+    const studentContext = {
+      name: studentName,
+      targetExam,
+      classLevel,
+      daysToExam,
+      examLabel,
+      weakSubjects: parsed.subject_analysis
+        ?.filter((s: any) => s.priority === "high")
+        ?.map((s: any) => s.name) || [],
+      weaknesses: parsed.weaknesses || [],
+      pendingBacklogCount: pendingBacklogs?.length || 0,
+    };
 
     await supabase
       .from("users")
-      .update({ ai_mentor_report: parsed })
+      .update({ ai_mentor_report: parsed, ai_student_context: studentContext })
       .eq("uid", userId);
 
-    return NextResponse.json({ report: parsed });
+    return NextResponse.json({ report: parsed, studentContext });
   } catch (error: any) {
     console.error("AI Mentor Endpoint Error:", error);
     return NextResponse.json(
