@@ -26,7 +26,6 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable}`} suppressHydrationWarning>
       <head>
         <style>{`
-          /* Kinetic smooth touch scrolling without breaking position: fixed */
           html, body {
             -webkit-overflow-scrolling: touch;
             text-rendering: optimizeSpeed;
@@ -47,6 +46,13 @@ export default function RootLayout({
                   document.documentElement.classList.remove("dark");
                 }
               } catch (_) {}
+
+              // Safe Media Service Worker Registration
+              if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+                window.addEventListener("load", () => {
+                  navigator.serviceWorker.register("/sw.js").catch(() => {});
+                });
+              }
             `,
           }}
         />
