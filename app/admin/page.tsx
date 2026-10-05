@@ -155,7 +155,7 @@ export default function AdminPage() {
   }, []);
 
   const loadAdminData = async () => {
-    // 1. STATS: 100% Accurate & Case-Insensitive Calculation
+    // 1. STATS: Accurate & Case-Insensitive Calculation
     try {
       const { data: users, count } = await supabase
         .from("users")
@@ -355,7 +355,7 @@ export default function AdminPage() {
     }
   };
 
-  // Add Quote or Meme (Colors auto-picked!)
+  // Add Quote or Meme
   const handleAddDailyContent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contentQuote.trim() || !contentCharacter.trim()) return;
@@ -489,14 +489,15 @@ export default function AdminPage() {
             Strict Access: Only registered Super Admins can log in.
           </p>
 
-          <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3.5">
+          <form onSubmit={handleAuthSubmit} autoComplete="off" className="flex flex-col gap-3.5">
             <div>
               <label className="text-[10px] font-bold text-slate block mb-1">
                 Admin Email
               </label>
               <input
                 type="email"
-                placeholder="sarthaksinghyadav1@gmail.com"
+                placeholder="admin@prepwise.in"
+                autoComplete="new-password"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold outline-none focus:border-teal"
@@ -511,6 +512,7 @@ export default function AdminPage() {
               <input
                 type="password"
                 placeholder="••••••••••••"
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold outline-none focus:border-teal"
