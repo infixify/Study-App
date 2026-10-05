@@ -5,7 +5,6 @@ import { NextResponse } from "next/server";
 const apiKey =
   process.env.GEMINI_API_KEY_DOUBT || process.env.GEMINI_API_KEY || "";
 
-// 100% Live Tested & Verified Active Models
 const MODELS_CASCADE = [
   "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
@@ -26,10 +25,7 @@ async function callGeminiDoubt(
   if (imageBase64) {
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
     parts.unshift({
-      inlineData: {
-        mimeType: "image/jpeg",
-        data: cleanBase64,
-      },
+      inlineData: { mimeType: "image/jpeg", data: cleanBase64 },
     });
   }
 
@@ -38,10 +34,8 @@ async function callGeminiDoubt(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemText }] },
-      contents: [{ parts: parts }],
-      generationConfig: {
-        temperature: 0.3,
-      },
+      contents: [{ parts }],
+      generationConfig: { temperature: 0.3 },
     }),
   });
 
@@ -65,16 +59,9 @@ async function generateDoubtResponse(
   let lastError: any = null;
   for (const model of MODELS_CASCADE) {
     try {
-      const result = await callGeminiDoubt(
-        model,
-        systemText,
-        userText,
-        key,
-        imageBase64
-      );
-      return result;
+      return await callGeminiDoubt(model, systemText, userText, key, imageBase64);
     } catch (err: any) {
-      console.warn(`Doubt Solver: Model ${model} failed, switching to next...`, err?.message);
+      console.warn(`Doubt Solver: Model ${model} failed, switching...`, err?.message);
       lastError = err;
     }
   }
@@ -85,7 +72,6 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Universal support: query, message, prompt, or messages array
     let studentQuestion =
       body.query ||
       body.message ||
@@ -99,22 +85,36 @@ export async function POST(req: Request) {
     }
 
     if (!apiKey) {
-      return NextResponse.json(
-        { error: "Gemini API key not configured on server" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Gemini API key not configured on server" }, { status: 500 });
     }
 
+    // Build personalized system instruction using studentContext
+    const ctx = body.studentContext;
+    const targetExam = ctx?.targetExam || body.targetExam || "JEE / NEET";
+    const studentName = ctx?.name || "Student";
+    const daysToExam = ctx?.daysToExam;
+    const weakSubjects = ctx?.weakSubjects?.join(", ") || "";
+    const weaknesses = ctx?.weaknesses?.join(", ") || "";
+    const pendingBacklogs = ctx?.pendingBacklogCount || 0;
+
     const systemInstruction = `
-You are an elite Doubt Solver Faculty for JEE & NEET.
-Target Subject: ${body.subject || "General Science"}
-Target Exam: ${body.targetExam || "JEE / NEET"}
+You are an elite Doubt Solver Faculty for ${targetExam}, personally mentoring ${studentName}.
+
+Student Profile:
+- Target Exam: ${targetExam}
+- Days to Exam: ${daysToExam ? `${daysToExam} days remaining` : "Not specified"}
+- Weak Subjects: ${weakSubjects || "Not identified yet"}
+- Known Mark Leaks: ${weaknesses || "Not identified yet"}
+- Pending Backlogs: ${pendingBacklogs} chapters
 
 Guidelines:
-1. Provide mathematically rigorous, step-by-step solutions.
-2. Clearly state standard formulas, boundary conditions, and SI units.
-3. If an alternative shortcut exists, explain it under "⚡ Exam Shortcut".
-4. Keep explanations crisp, sharp and easy to read on mobile screens.
+1. Address the student as ${studentName} occasionally to keep it personal.
+2. Provide mathematically rigorous, step-by-step solutions.
+3. Clearly state standard formulas, boundary conditions, and SI units.
+4. If an alternative shortcut exists, explain it under "⚡ Exam Shortcut".
+5. If the question is from a weak subject (${weakSubjects}), add extra care and reinforce the concept.
+6. Keep explanations crisp, sharp and easy to read on mobile screens.
+7. End with a one-line exam tip relevant to ${targetExam} when appropriate.
 `;
 
     const fullPrompt = `
