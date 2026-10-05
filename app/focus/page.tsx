@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { loadAndReconcileStreak, saveFocusSession, MIN_STREAK_SECONDS } from "@/lib/focus";
+import { loadAndReconcileStreak, MIN_STREAK_SECONDS } from "@/lib/focus";
 import AppHeader from "@/components/dashboard/AppHeader";
 import BottomNav from "@/components/dashboard/BottomNav";
 
@@ -62,14 +62,16 @@ export default function FocusPage() {
   const [postStreakResult, setPostStreakResult] = useState<{ counted: boolean; newStreak: number } | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Manual Offline Modal State
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualSub, setManualSub] = useState<SubjectType>("Physics");
   const [manualTask, setManualTask] = useState<StudyTaskType>("questions");
   const [manualMinutes, setManualMinutes] = useState<number>(60);
   const [manualQs, setManualQs] = useState<number>(20);
-  const [manualDate, setManualDate] = useState<string>(
-    new Date().toISOString().split("T")[0]
-  );
+  const [manualDate, setManualDate] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  });
   const [manualError, setManualError] = useState<string | null>(null);
 
   const [faceVerificationEnabled, setFaceVerificationEnabled] = useState(false);
@@ -160,6 +162,8 @@ export default function FocusPage() {
       const endedAt = new Date();
       const durationSecs = Math.max(0, Math.round((endedAt.getTime() - startTime.getTime()) / 1000));
       const countsForStreak = durationSecs >= MIN_STREAK_SECONDS;
+      const validSub = selectedSub || "Physics";
+      const validMode = selectedTask || "questions";
 
       // 1. Guaranteed Direct Insert with User-Selected Subject (never null or General)
       try {
@@ -169,22 +173,18 @@ export default function FocusPage() {
           ended_at: endedAt.toISOString(),
           duration_seconds: durationSecs,
           counts_for_streak: countsForStreak,
-          subject: selectedSub || "Physics",
-          task_type: selectedTask || "questions",
+          subject: validSub,
+          task_type: validMode,
           verified: isVerifiedSession,
         });
       } catch (err) {
         console.error("Direct session insert err:", err);
       }
 
-      // 2. Reconcile streak
-      const streakResult = await saveFocusSession(userId, startTime, endedAt);
-      if (streakResult.countedForStreak) {
-        setCurrentStreak(streakResult.newStreak);
-        setPostStreakResult({ counted: true, newStreak: streakResult.newStreak });
-      } else {
-        setPostStreakResult({ counted: false, newStreak: currentStreak });
-      }
+      // 2. Reconcile streak cleanly
+      const streakInfo = await loadAndReconcileStreak(userId);
+      setCurrentStreak(streakInfo.currentStreak);
+      setPostStreakResult({ counted: countsForStreak, newStreak: streakInfo.currentStreak });
     } catch (_) {}
 
     setSaving(false);
@@ -439,59 +439,86 @@ export default function FocusPage() {
     setPostStreakResult(null);
   };
 
+  // ==========================================
+  // BULLETPROOF MANUAL ENTRY LOGIC (FIXED)
+  // ==========================================
   const handleSaveManualEntry = async () => {
     if (!userId) return;
     setSaving(true);
     setManualError(null);
     try {
-      const today = new Date().toISOString().split("T")[0];
+      const chosenSub = manualSub || "Physics";
+      const chosenTask = manualTask || "questions";
+      const chosenMinutes = Number(manualMinutes) || 0;
+      const chosenQs = Number(manualQs) || 0;
+
+      // 1. Fetch current daily log for chosen date
       const { data: dailyRow } = await supabase
         .from("daily_logs")
-        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes")
+        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, questions_solved, questions_count")
         .eq("user_id", userId)
         .eq("log_date", manualDate)
         .maybeSingle();
 
-      const newMins = (dailyRow?.study_time_minutes || 0) + manualMinutes;
-      const newTheory = (dailyRow?.theory_minutes || 0) + (manualTask === "theory" ? manualMinutes : 0);
-      const newPractice = (dailyRow?.practice_minutes || 0) + (manualTask === "questions" ? manualMinutes : 0);
-      const newRevision = (dailyRow?.revision_minutes || 0) + (manualTask === "revision" ? manualMinutes : 0);
+      const newMins = (dailyRow?.study_time_minutes || 0) + chosenMinutes;
+      const newTheory = (dailyRow?.theory_minutes || 0) + (chosenTask === "theory" ? chosenMinutes : 0);
+      const newPractice = (dailyRow?.practice_minutes || 0) + (chosenTask === "questions" ? chosenMinutes : 0);
+      const newRevision = (dailyRow?.revision_minutes || 0) + (chosenTask === "revision" ? chosenMinutes : 0);
 
-      // 1. Update daily summary in daily_logs
-      await supabase.from("daily_logs").upsert(
-        { user_id: userId, log_date: manualDate, study_time_minutes: newMins, theory_minutes: newTheory, practice_minutes: newPractice, revision_minutes: newRevision },
+      // Accumulate questions properly (both column names for compatibility)
+      const prevQs = (dailyRow as any)?.questions_solved ?? (dailyRow as any)?.questions_count ?? 0;
+      const newTotalQs = prevQs + chosenQs;
+
+      // 2. Update daily summary in daily_logs with Questions count!
+      const { error: dailyErr } = await supabase.from("daily_logs").upsert(
+        {
+          user_id: userId,
+          log_date: manualDate,
+          study_time_minutes: newMins,
+          theory_minutes: newTheory,
+          practice_minutes: newPractice,
+          revision_minutes: newRevision,
+          questions_solved: newTotalQs,
+          questions_count: newTotalQs,
+        },
         { onConflict: "user_id,log_date" }
       );
+      if (dailyErr) console.error("daily_logs upsert err:", dailyErr);
 
-      // 2. Direct insert into focus_sessions with selected subject
-      const syntheticEnd = new Date();
-      const syntheticStart = new Date(syntheticEnd.getTime() - manualMinutes * 60 * 1000);
-      try {
-        await supabase.from("focus_sessions").insert({
-          user_id: userId,
-          started_at: syntheticStart.toISOString(),
-          ended_at: syntheticEnd.toISOString(),
-          duration_seconds: manualMinutes * 60,
-          counts_for_streak: manualMinutes * 60 >= MIN_STREAK_SECONDS,
-          subject: manualSub || "Physics",
-          task_type: manualTask || "questions",
-          verified: false,
-        });
-      } catch (e) {
-        console.error("Manual focus_sessions insert err:", e);
-      }
+      // 3. Construct synthetic timestamp matching manualDate
+      const [year, month, day] = manualDate.split("-").map(Number);
+      const sessionDate = new Date();
+      sessionDate.setFullYear(year, month - 1, day);
+      const syntheticEnd = new Date(sessionDate);
+      const syntheticStart = new Date(syntheticEnd.getTime() - chosenMinutes * 60 * 1000);
 
-      // 3. Reconcile streak if today
-      if (manualDate === today && newMins * 60 >= MIN_STREAK_SECONDS) {
-        const streakResult = await saveFocusSession(userId, syntheticStart, syntheticEnd);
-        if (streakResult.countedForStreak) setCurrentStreak(streakResult.newStreak);
+      // 4. Single Direct Insert into focus_sessions with chosen subject (never null or General)
+      const { error: sessionErr } = await supabase.from("focus_sessions").insert({
+        user_id: userId,
+        started_at: syntheticStart.toISOString(),
+        ended_at: syntheticEnd.toISOString(),
+        duration_seconds: chosenMinutes * 60,
+        counts_for_streak: chosenMinutes * 60 >= MIN_STREAK_SECONDS,
+        subject: chosenSub,
+        task_type: chosenTask,
+        verified: false,
+        questions_solved: chosenQs,
+        questions_count: chosenQs,
+      });
+      if (sessionErr) console.error("focus_sessions insert err:", sessionErr);
+
+      // 5. Reconcile streak if today
+      const todayStr = new Date().toISOString().split("T")[0];
+      if (manualDate === todayStr && newMins * 60 >= MIN_STREAK_SECONDS) {
+        const streakInfo = await loadAndReconcileStreak(userId);
+        setCurrentStreak(streakInfo.currentStreak);
       }
 
       setSaving(false);
       setShowManualModal(false);
-    } catch (err) {
+    } catch (err: any) {
       setSaving(false);
-      setManualError("Failed to save entry");
+      setManualError(err?.message || "Failed to save entry");
     }
   };
 
@@ -844,20 +871,39 @@ export default function FocusPage() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-[11px] font-bold text-slate block mb-1">Minutes</label>
-                <input type="number" min={1} value={manualMinutes} onChange={(e) => setManualMinutes(parseInt(e.target.value) || 0)}
-                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15" />
+                <input
+                  type="number"
+                  min={1}
+                  value={manualMinutes}
+                  onChange={(e) => setManualMinutes(parseInt(e.target.value) || 0)}
+                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15 focus:border-teal outline-none"
+                />
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate block mb-1">Questions</label>
-                <input type="number" min={0} value={manualQs} onChange={(e) => setManualQs(parseInt(e.target.value) || 0)}
-                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15" />
+                <label className="text-[11px] font-bold text-slate block mb-1">Questions Solved</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={manualQs}
+                  onChange={(e) => setManualQs(parseInt(e.target.value) || 0)}
+                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15 focus:border-teal outline-none"
+                />
               </div>
             </div>
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">Date</label>
-              <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="w-full p-2 text-xs rounded-lg border border-ink/15" />
+              <input
+                type="date"
+                value={manualDate}
+                onChange={(e) => setManualDate(e.target.value)}
+                className="w-full p-2 text-xs rounded-lg border border-ink/15 focus:border-teal outline-none"
+              />
             </div>
-            <button disabled={saving} onClick={handleSaveManualEntry} className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs">
+            <button
+              disabled={saving}
+              onClick={handleSaveManualEntry}
+              className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs shadow-md transition-all active:scale-[0.98]"
+            >
               {saving ? "Saving..." : "Add to Daily Study Hours"}
             </button>
           </div>
