@@ -7,28 +7,6 @@ import { loadAndReconcileStreak, saveFocusSession, MIN_STREAK_SECONDS } from "@/
 import AppHeader from "@/components/dashboard/AppHeader";
 import BottomNav from "@/components/dashboard/BottomNav";
 
-declare global {
-  interface Window {
-    AppBridge?: { postMessage: (message: string) => void };
-    onNativeFCMToken?: (token: string) => void;
-    __nativeInstalledApps?: { name: string; packageName: string }[];
-    onInstalledAppsReady?: (apps: { name: string; packageName: string }[]) => void;
-    onNativeRequestStopFocus?: () => void;
-    onNativeDirectStopFocus?: (data?: any) => void;
-    onDirectLoggedSession?: (data?: any) => void;
-    onNativeFocusTimerSync?: (seconds: number) => void;
-    onNativeRestoreActiveSession?: (sess: {
-      subject: string;
-      mode: string;
-      elapsedSeconds: number;
-      camEnabled: boolean;
-      blockerEnabled: boolean;
-    }) => void;
-    onAccessibilityStatus?: (granted: boolean) => void;
-    onOverlayPermissionResult?: (granted: boolean) => void;
-  }
-}
-
 type SubjectType = "Physics" | "Chemistry" | "Mathematics" | "Biology";
 type StudyTaskType = "theory" | "questions" | "revision";
 
@@ -121,44 +99,51 @@ export default function FocusPage() {
   }
 
   async function checkOverlayPermission(): Promise<boolean> {
-    if (!isNativeApp) return false;
+    if (typeof window === "undefined") return false;
+    const w = window as any;
+    if (!w.AppBridge) return false;
     return new Promise<boolean>((resolve) => {
-      const prev = window.onOverlayPermissionResult;
-      window.onOverlayPermissionResult = (granted: boolean) => {
-        window.onOverlayPermissionResult = prev;
+      const prev = w.onOverlayPermissionResult;
+      w.onOverlayPermissionResult = (granted: boolean) => {
+        w.onOverlayPermissionResult = prev;
         setOverlayGranted(granted);
         resolve(granted);
       };
       try {
-        window.AppBridge!.postMessage(JSON.stringify({ action: "checkOverlayPermission" }));
+        w.AppBridge.postMessage(JSON.stringify({ action: "checkOverlayPermission" }));
       } catch (_) { resolve(false); }
-      setTimeout(() => { window.onOverlayPermissionResult = prev; resolve(false); }, 3000);
+      setTimeout(() => { w.onOverlayPermissionResult = prev; resolve(false); }, 3000);
     });
   }
 
   async function checkUsagePermission(): Promise<boolean> {
-    if (!isNativeApp) return false;
+    if (typeof window === "undefined") return false;
+    const w = window as any;
+    if (!w.AppBridge) return false;
     return new Promise<boolean>((resolve) => {
-      const prev = window.onAccessibilityStatus;
-      window.onAccessibilityStatus = (granted: boolean) => {
-        window.onAccessibilityStatus = prev;
+      const prev = w.onAccessibilityStatus;
+      w.onAccessibilityStatus = (granted: boolean) => {
+        w.onAccessibilityStatus = prev;
         setUsageGranted(granted);
         resolve(granted);
       };
       try {
-        window.AppBridge!.postMessage(JSON.stringify({ action: "checkUsagePermission" }));
+        w.AppBridge.postMessage(JSON.stringify({ action: "checkUsagePermission" }));
       } catch (_) { resolve(false); }
-      setTimeout(() => { window.onAccessibilityStatus = prev; resolve(false); }, 3000);
+      setTimeout(() => { w.onAccessibilityStatus = prev; resolve(false); }, 3000);
     });
   }
 
   const handleDirectStopAndSave = async () => {
-    if (typeof window !== "undefined" && window.AppBridge) {
-      try {
-        window.AppBridge.postMessage(JSON.stringify({ action: "stopStrictTimer" }));
-        window.AppBridge.postMessage(JSON.stringify({ action: "stopFocusNotification" }));
-        window.AppBridge.postMessage(JSON.stringify({ action: "vibrate", type: "heavy" }));
-      } catch (err) {}
+    if (typeof window !== "undefined") {
+      const bridge = (window as any).AppBridge;
+      if (bridge) {
+        try {
+          bridge.postMessage(JSON.stringify({ action: "stopStrictTimer" }));
+          bridge.postMessage(JSON.stringify({ action: "stopFocusNotification" }));
+          bridge.postMessage(JSON.stringify({ action: "vibrate", type: "heavy" }));
+        } catch (err) {}
+      }
     }
 
     setIsActive(false);
@@ -210,19 +195,20 @@ export default function FocusPage() {
   handleDirectStopAndSaveRef.current = handleDirectStopAndSave;
 
   useEffect(() => {
-    if (typeof window !== "undefined" && window.AppBridge) {
-      setIsNativeApp(true);
-      try {
-        window.AppBridge.postMessage(JSON.stringify({ action: "getInstalledApps" }));
-      } catch (_) {}
-    }
-
     if (typeof window !== "undefined") {
-      window.onNativeDirectStopFocus = () => { handleDirectStopAndSaveRef.current(); };
-      window.onNativeRequestStopFocus = () => { handleDirectStopAndSaveRef.current(); };
-      window.onDirectLoggedSession = () => { handleDirectStopAndSaveRef.current(); };
-      window.onNativeFocusTimerSync = (secs: number) => { setSeconds(secs); };
-      window.onNativeRestoreActiveSession = (sess) => {
+      const w = window as any;
+      if (w.AppBridge) {
+        setIsNativeApp(true);
+        try {
+          w.AppBridge.postMessage(JSON.stringify({ action: "getInstalledApps" }));
+        } catch (_) {}
+      }
+
+      w.onNativeDirectStopFocus = () => { handleDirectStopAndSaveRef.current(); };
+      w.onNativeRequestStopFocus = () => { handleDirectStopAndSaveRef.current(); };
+      w.onDirectLoggedSession = () => { handleDirectStopAndSaveRef.current(); };
+      w.onNativeFocusTimerSync = (secs: number) => { setSeconds(secs); };
+      w.onNativeRestoreActiveSession = (sess: any) => {
         if (sess && sess.elapsedSeconds > 0) {
           setIsActive(true);
           setSelectedSub((sess.subject as SubjectType) || "Physics");
@@ -233,6 +219,18 @@ export default function FocusPage() {
           setStartTime(new Date(Date.now() - sess.elapsedSeconds * 1000));
         }
       };
+
+      if (w.__nativeInstalledApps && w.__nativeInstalledApps.length > 0) {
+        applyNativeApps(w.__nativeInstalledApps);
+      } else {
+        w.onInstalledAppsReady = (apps: any) => applyNativeApps(apps);
+        setTimeout(() => {
+          if (!appsLoaded) {
+            setAllApps(WEB_FALLBACK_APPS);
+            setAppsLoaded(true);
+          }
+        }, 2000);
+      }
     }
 
     const savedFace = localStorage.getItem("prepwise_face_toggle");
@@ -266,20 +264,6 @@ export default function FocusPage() {
     if (savedAllowed) {
       try { setAllowedApps(JSON.parse(savedAllowed)); } catch (e) {}
     }
-
-    if (typeof window !== "undefined" && window.__nativeInstalledApps && window.__nativeInstalledApps.length > 0) {
-      applyNativeApps(window.__nativeInstalledApps);
-    } else {
-      if (typeof window !== "undefined") {
-        window.onInstalledAppsReady = (apps) => applyNativeApps(apps);
-      }
-      setTimeout(() => {
-        if (!appsLoaded) {
-          setAllApps(WEB_FALLBACK_APPS);
-          setAppsLoaded(true);
-        }
-      }, 2000);
-    }
   }, []);
 
   useEffect(() => {
@@ -291,10 +275,11 @@ export default function FocusPage() {
   async function handleFaceToggle() {
     const next = !faceVerificationEnabled;
     if (next) {
-      if (isNativeApp) {
+      if (isNativeApp && typeof window !== "undefined") {
+        const w = window as any;
         const granted = await checkOverlayPermission();
         if (!granted) {
-          try { window.AppBridge!.postMessage(JSON.stringify({ action: "requestOverlayPermission" })); } catch (_) {}
+          try { w.AppBridge?.postMessage(JSON.stringify({ action: "requestOverlayPermission" })); } catch (_) {}
           let tries = 0;
           const poll = setInterval(async () => {
             tries++;
@@ -349,20 +334,26 @@ export default function FocusPage() {
       : [...allowedApps, appId];
     setAllowedApps(updated);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify(updated));
-    if (isActive && appBlockerEnabled && typeof window !== "undefined" && window.AppBridge) {
-      try {
-        window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: updated }));
-      } catch (err) {}
+    if (isActive && appBlockerEnabled && typeof window !== "undefined") {
+      const bridge = (window as any).AppBridge;
+      if (bridge) {
+        try {
+          bridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: updated }));
+        } catch (err) {}
+      }
     }
   };
 
   const handleBlockAll = () => {
     setAllowedApps([]);
     localStorage.setItem("prepwise_allowed_apps", JSON.stringify([]));
-    if (isActive && appBlockerEnabled && typeof window !== "undefined" && window.AppBridge) {
-      try {
-        window.AppBridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: [] }));
-      } catch (err) {}
+    if (isActive && appBlockerEnabled && typeof window !== "undefined") {
+      const bridge = (window as any).AppBridge;
+      if (bridge) {
+        try {
+          bridge.postMessage(JSON.stringify({ action: "startStrictTimer", allowedApps: [] }));
+        } catch (err) {}
+      }
     }
   };
 
@@ -418,22 +409,25 @@ export default function FocusPage() {
   }, [isActive, userId, selectedTask, faceVerificationEnabled, appBlockerEnabled, overlayGranted, usageGranted]);
 
   const handleStartSession = async () => {
-    if (typeof window !== "undefined" && window.AppBridge) {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        window.AppBridge.postMessage(JSON.stringify({
-          action: "startFocusNotification",
-          userId: userId,
-          accessToken: session?.access_token || "",
-          subject: selectedSub || "Physics",
-          mode: selectedTask === "questions" ? "Practice" : selectedTask === "theory" ? "Theory" : "Revision",
-          initialSeconds: 0,
-          camEnabled: faceVerificationEnabled,
-          blockerEnabled: appBlockerEnabled,
-          allowedApps: appBlockerEnabled ? allowedApps : [],
-        }));
-        window.AppBridge.postMessage(JSON.stringify({ action: "vibrate", type: "light" }));
-      } catch (err) {}
+    if (typeof window !== "undefined") {
+      const bridge = (window as any).AppBridge;
+      if (bridge) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          bridge.postMessage(JSON.stringify({
+            action: "startFocusNotification",
+            userId: userId,
+            accessToken: session?.access_token || "",
+            subject: selectedSub || "Physics",
+            mode: selectedTask === "questions" ? "Practice" : selectedTask === "theory" ? "Theory" : "Revision",
+            initialSeconds: 0,
+            camEnabled: faceVerificationEnabled,
+            blockerEnabled: appBlockerEnabled,
+            allowedApps: appBlockerEnabled ? allowedApps : [],
+          }));
+          bridge.postMessage(JSON.stringify({ action: "vibrate", type: "light" }));
+        } catch (err) {}
+      }
     }
 
     setShowPreModal(false);
@@ -883,7 +877,11 @@ export default function FocusPage() {
             </p>
             <div className="space-y-2">
               <button
-                onClick={() => { try { window.AppBridge!.postMessage(JSON.stringify({ action: "requestUsagePermission" })); } catch (_) {} }}
+                onClick={() => {
+                  if (typeof window !== "undefined") {
+                    try { (window as any).AppBridge?.postMessage(JSON.stringify({ action: "requestUsagePermission" })); } catch (_) {}
+                  }
+                }}
                 className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20"
               >
                 Open Settings →
