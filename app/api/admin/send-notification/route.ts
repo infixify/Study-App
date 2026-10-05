@@ -1,4 +1,5 @@
 // app/api/admin/send-notification/route.ts
+export const runtime = 'edge';
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
