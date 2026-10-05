@@ -389,7 +389,7 @@ jobs:
                       f.write(a)
               print("ML Kit injected into build.gradle.kts")
           elif os.path.exists(gradle_path):
-              with open(gradle_path, "w") as f:
+              with open(gradle_path, "r") as f:
                   a = f.read()
               if "mlkit:face-detection" not in a:
                   a += deps_groovy
@@ -639,7 +639,7 @@ jobs:
                           "startFocusBlocker" -> {
                               val blocked = call.argument<List<String>>("blockedApps") ?: emptyList()
                               val allowed = call.argument<List<String>>("allowedApps") ?: emptyList()
-                              val subject = call.argument<String>("subject") ?: "General"
+                              val rawSub = call.argument<String>("subject"); val subject = if (!rawSub.isNullOrBlank() && !rawSub.equals("General", true)) rawSub else (getSharedPreferences("PrepWisePrefs", Context.MODE_PRIVATE).getString("active_subject", "Physics") ?: "Physics")
                               val mode = call.argument<String>("mode") ?: "Study"
                               val camEnabled = call.argument<Boolean>("camEnabled") ?: false
                               val blockerEnabled = call.argument<Boolean>("blockerEnabled") ?: false
@@ -696,7 +696,7 @@ jobs:
                                   val map = HashMap<String, Any>()
                                   map["isActive"] = true
                                   map["elapsedSeconds"] = elapsed
-                                  map["subject"] = FocusBlockerService.currentSubject.ifEmpty { prefs.getString("active_subject", "General") ?: "General" }
+                                  map["subject"] = FocusBlockerService.currentSubject.ifEmpty { prefs.getString("active_subject", "Physics") ?: "Physics" }
                                   map["mode"] = FocusBlockerService.currentMode.ifEmpty { prefs.getString("active_mode", "Study") ?: "Study" }
                                   map["camEnabled"] = FocusBlockerService.currentCamEnabled || prefs.getBoolean("active_cam_enabled", false)
                                   map["blockerEnabled"] = FocusBlockerService.currentBlockerEnabled || prefs.getBoolean("active_blocker_enabled", false)
@@ -736,7 +736,7 @@ jobs:
                                   val map = HashMap<String, Any>()
                                   map["hasPending"] = true
                                   map["seconds"] = prefs.getInt("pending_session_seconds", 0)
-                                  map["subject"] = prefs.getString("pending_session_subject", "General") ?: "General"
+                                  map["subject"] = prefs.getString("pending_session_subject", "Physics") ?: "Physics"
                                   map["mode"] = prefs.getString("pending_session_mode", "Study") ?: "Study"
                                   map["camEnabled"] = prefs.getBoolean("pending_session_cam_enabled", false)
                                   map["blockerEnabled"] = prefs.getBoolean("pending_session_blocker_enabled", false)
@@ -761,7 +761,7 @@ jobs:
                               val hasPending = prefs.getBoolean("has_pending_session", false)
                               if (hasPending) {
                                   val elapsed  = prefs.getInt("pending_session_seconds", 0)
-                                  val subj     = prefs.getString("pending_session_subject", "General") ?: "General"
+                                  val subj     = prefs.getString("pending_session_subject", "Physics") ?: "Physics"
                                   val md       = prefs.getString("pending_session_mode", "Study") ?: "Study"
                                   val camEn    = prefs.getBoolean("pending_session_cam_enabled", false)
                                   val blkEn    = prefs.getBoolean("pending_session_blocker_enabled", false)
@@ -1109,7 +1109,7 @@ jobs:
                           // Restore epoch-based timer from SharedPrefs after app was killed and restarted
                           if (isStopping) isStopping = false
                           blockedApps = intent?.getStringArrayListExtra(EXTRA_BLOCKED_APPS) ?: emptyList()
-                          subject = intent?.getStringExtra(EXTRA_SUBJECT) ?: "General"
+                          val sIn2 = intent?.getStringExtra(EXTRA_SUBJECT); subject = if (!sIn2.isNullOrBlank() && !sIn2.equals("General", true)) sIn2 else (prefs.getString("active_subject", "Physics") ?: "Physics")
                           mode = intent?.getStringExtra(EXTRA_MODE) ?: "Study"
                           camEnabled = intent?.getBooleanExtra(EXTRA_CAM_ENABLED, false) ?: false
                           blockerEnabled = intent?.getBooleanExtra(EXTRA_BLOCKER_ENABLED, false) ?: false
@@ -2398,7 +2398,7 @@ jobs:
             bool _isSessionActive = false;
             bool _camEnabled = false;
             bool _blockerEnabled = false;
-            String _subject = 'General';
+            String _subject = 'Physics';
             String _mode = 'Practice';
             int _startTimestampMs = 0;
             int _pausedDurationMs = 0;
@@ -2423,7 +2423,7 @@ jobs:
               required bool blockerEnabled,
             }) {
               _isSessionActive = true;
-              _subject = subject.isNotEmpty ? subject : 'General';
+              _subject = (subject.isNotEmpty && subject != 'General') ? subject : 'Physics';
               _mode = mode.isNotEmpty ? mode : 'Study';
               _camEnabled = camEnabled;
               _blockerEnabled = blockerEnabled;
@@ -2485,7 +2485,7 @@ jobs:
               _isSessionActive = true;
               _camEnabled = camEnabled;
               _blockerEnabled = blockerEnabled;
-              _subject = subject.isNotEmpty ? subject : 'General';
+              _subject = (subject.isNotEmpty && subject != 'General') ? subject : 'Physics';
               _mode = mode.isNotEmpty ? mode : 'Practice';
               _isPaused = false;
               _camStatus = 'verified';
@@ -3221,7 +3221,7 @@ jobs:
                     break;
 
                   case 'startFocusNotification':
-                    final String subject = data['subject'] ?? 'General';
+                    final String subject = (data['subject'] != null && data['subject'].toString().isNotEmpty && data['subject'] != 'General') ? data['subject'].toString() : 'Physics';
                     final String mode = data['mode'] ?? 'Practice';
                     final int initialSeconds = data['initialSeconds'] ?? 0;
                     final bool camEnabled = data['camEnabled'] == true;
@@ -3435,7 +3435,7 @@ jobs:
                           .invokeMethod<Map<dynamic, dynamic>>('getActiveSession');
                       if (activeMap != null && activeMap['isActive'] == true) {
                         final int secs = activeMap['elapsedSeconds'] as int? ?? 0;
-                        final String subj = activeMap['subject'] as String? ?? 'General';
+                        final String subj = (activeMap['subject'] != null && activeMap['subject'].toString().isNotEmpty && activeMap['subject'] != 'General') ? activeMap['subject'].toString() : 'Physics';
                         final String md = activeMap['mode'] as String? ?? 'Study';
                         final bool cam = activeMap['camEnabled'] == true;
                         final bool blk = activeMap['blockerEnabled'] == true;
@@ -4205,7 +4205,7 @@ jobs:
                     .invokeMethod<Map<dynamic, dynamic>>('getActiveSession');
                 if (active != null && active['isActive'] == true) {
                   final int secs = active['elapsedSeconds'] as int? ?? 0;
-                  final String subj = active['subject'] as String? ?? 'General';
+                  final String subj = (active['subject'] != null && active['subject'].toString().isNotEmpty && active['subject'] != 'General') ? active['subject'].toString() : 'Physics';
                   final String md = active['mode'] as String? ?? 'Study';
                   final bool cam = active['camEnabled'] == true;
                   final bool blk = active['blockerEnabled'] == true;
