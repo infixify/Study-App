@@ -1,4 +1,5 @@
 // app/api/ai-mentor/route.ts
+export const runtime = 'edge';
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
