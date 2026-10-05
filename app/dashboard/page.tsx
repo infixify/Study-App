@@ -1565,8 +1565,8 @@ export default function DashboardPage() {
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
               <span>📈</span> Recent Mock Performance
             </span>
-            <button type="button" onClick={() => router.push("/tests")} className="text-[11px] font-bold text-indigo-700 hover:underline">
-              View Hub →
+            <button type="button" onClick={() => router.push("/tests/analysis")} className="text-[11px] font-bold text-indigo-700 hover:underline">
+              View Detailed Analysis →
             </button>
           </div>
           {recentTests.length === 0 ? (
