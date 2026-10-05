@@ -6,7 +6,6 @@ import { supabase, classLevelsForContent } from "@/lib/supabase";
 import { loadAndReconcileStreak } from "@/lib/focus";
 import { useRouter } from "next/navigation";
 import BottomNav from "@/components/dashboard/BottomNav";
-import AppHeader from "@/components/dashboard/AppHeader";
 import AiMentorCard from "@/components/dashboard/AiMentorCard";
 import AiChatSheet from "@/components/dashboard/AiChatSheet";
 import { optimizeMediaUrl } from "@/lib/cloudinary";
@@ -1343,8 +1342,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased">
-      <AppHeader />
-
       <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
         {/* 1. HERO WIDGET */}
         <HeroWidget
