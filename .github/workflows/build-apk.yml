@@ -2876,9 +2876,9 @@ jobs:
               try {
                 _fcmToken = await _fcm.getToken();
                 debugPrint("FCM Device Token: $_fcmToken");
-      await _fcm.subscribeToTopic('all');
-      await _fcm.subscribeToTopic('jee');
-      await _fcm.subscribeToTopic('neet');
+                await _fcm.subscribeToTopic('all');
+                await _fcm.subscribeToTopic('jee');
+                await _fcm.subscribeToTopic('neet');
                 if (_fcmToken != null && onTokenReceived != null) {
                   onTokenReceived!(_fcmToken!);
                 }
