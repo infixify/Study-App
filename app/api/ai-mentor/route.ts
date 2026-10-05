@@ -52,16 +52,16 @@ async function generateWithFallback(prompt: string, key: string) {
 
 // Compute actual Q/hr from question_logs
 function computeQuestionsPerHour(questionLogs: any[], studyLogs: any[]): number | null {
-  const totalQuestions = questionLogs?.reduce((sum: number, l: any) => sum + (l.question_count || 0), 0) ?? 0;
-  const totalStudyHours = studyLogs?.reduce((sum: number, l: any) => sum + (l.study_time_minutes || 0), 0) / 60 ?? 0;
+  const totalQuestions = (questionLogs ?? []).reduce((sum: number, l: any) => sum + (l.question_count || 0), 0);
+  const totalStudyHours = (studyLogs ?? []).reduce((sum: number, l: any) => sum + (l.study_time_minutes || 0), 0) / 60;
   if (totalStudyHours < 1 || totalQuestions === 0) return null;
   return Math.round(totalQuestions / totalStudyHours);
 }
 
 // Compute practice vs theory ratio from daily_logs
 function computePracticeRatio(studyLogs: any[]): number | null {
-  const totalStudy = studyLogs?.reduce((sum: number, l: any) => sum + (l.study_time_minutes || 0), 0) ?? 0;
-  const totalPractice = studyLogs?.reduce((sum: number, l: any) => sum + (l.practice_minutes || 0), 0) ?? 0;
+  const totalStudy = (studyLogs ?? []).reduce((sum: number, l: any) => sum + (l.study_time_minutes || 0), 0);
+  const totalPractice = (studyLogs ?? []).reduce((sum: number, l: any) => sum + (l.practice_minutes || 0), 0);
   if (totalStudy === 0) return null;
   return Math.round((totalPractice / totalStudy) * 100);
 }
@@ -86,8 +86,8 @@ export async function POST(req: Request) {
 
     // Fetch profile first so target_exam is available for exam schedule query
     const profileRes = await supabase.from("users").select("*").eq("uid", userId).maybeSingle();
-const profile = profileRes.data;
-const targetExamForQuery = (profile?.target_exam as string) || "JEE";
+    const profile = profileRes.data;
+    const targetExamForQuery = (profile?.target_exam as string) || "JEE";
 
     const [
       { data: pastLogs },
