@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AppHeader from "@/components/dashboard/AppHeader";
 import BottomNav from "@/components/dashboard/BottomNav";
@@ -47,6 +48,7 @@ type ScheduleRow = {
 };
 
 export default function TestsPage() {
+  const router = useRouter();
   const [view, setView] = useState<View>("log");
   const [targetExam, setTargetExam] = useState<string | null>(null);
   const [isPureDropper, setIsPureDropper] = useState(false);
@@ -373,6 +375,14 @@ export default function TestsPage() {
               Target: <span className="font-bold text-teal">{targetExam}</span> • Score Tracker
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => router.push("/tests/analysis")}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-teal/10 border border-teal/25 text-teal text-[11px] font-extrabold hover:bg-teal/20 transition-all shrink-0"
+          >
+            <span>📊</span>
+            <span>View Analysis</span>
+          </button>
         </div>
 
         {error && (
