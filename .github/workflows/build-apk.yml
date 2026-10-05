@@ -2644,6 +2644,40 @@ jobs:
               return safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : "$safeTitle.pdf";
             }
 
+            static bool isValidPdfBytes(List<int> bytes) {
+              if (bytes.length < 5) return false;
+              return bytes[0] == 0x25 && // %
+                     bytes[1] == 0x50 && // P
+                     bytes[2] == 0x44 && // D
+                     bytes[3] == 0x46 && // F
+                     bytes[4] == 0x2D;   // -
+            }
+
+            static Future<bool> isValidPdfFile(File f) async {
+              try {
+                if (!await f.exists()) return false;
+                final len = await f.length();
+                if (len < 500) return false;
+                final raf = await f.open(mode: FileMode.read);
+                final header = await raf.read(5);
+                await raf.close();
+                return isValidPdfBytes(header);
+              } catch (_) {
+                return false;
+              }
+            }
+
+            static Map<String, String> getHeadersForUrl(String url) {
+              final headers = {
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+                'Accept': 'application/pdf,application/octet-stream,*/*',
+              };
+              if (url.contains('ncert.nic.in')) {
+                headers['Referer'] = 'https://ncert.nic.in/textbook.php';
+              }
+              return headers;
+            }
+
             /// 1. READ ACTION: Opens PDF in native reader (instant from cache, or loads with 'Opening/Loading...' toast)
             static Future<void> openPdfForReading(String url, {String? customTitle}) async {
               try {
@@ -2670,16 +2704,24 @@ jobs:
 
                 // Check if already in public Downloads folder too
                 final publicFile = File("/storage/emulated/0/Download/PrepWise/$filename");
-                if (await publicFile.exists() && await publicFile.length() > 2000) {
-                  AppToast.show("Opening $displayTitle (Offline)...");
-                  final res = await OpenFilex.open(publicFile.path);
-                  if (res.type == ResultType.done) return;
+                if (await publicFile.exists()) {
+                  if (await isValidPdfFile(publicFile)) {
+                    AppToast.show("Opening $displayTitle (Offline)...");
+                    final res = await OpenFilex.open(publicFile.path);
+                    if (res.type == ResultType.done) return;
+                  } else {
+                    try { await publicFile.delete(); } catch (_) {}
+                  }
                 }
 
-                if (await file.exists() && await file.length() > 2000) {
-                  AppToast.show("Opening $displayTitle (Offline)...");
-                  final cachedResult = await OpenFilex.open(file.path);
-                  if (cachedResult.type == ResultType.done) return;
+                if (await file.exists()) {
+                  if (await isValidPdfFile(file)) {
+                    AppToast.show("Opening $displayTitle (Offline)...");
+                    final cachedResult = await OpenFilex.open(file.path);
+                    if (cachedResult.type == ResultType.done) return;
+                  } else {
+                    try { await file.delete(); } catch (_) {}
+                  }
                 }
 
                 // Not cached - fetch smoothly without "Downloading" confusion
@@ -2688,14 +2730,13 @@ jobs:
                 final directUrl = resolveDirectUrl(url);
                 final response = await http.get(
                   Uri.parse(directUrl),
-                  headers: {
-                    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-                    'Accept': 'application/pdf,application/octet-stream,*/*',
-                  },
+                  headers: getHeadersForUrl(directUrl),
                 ).timeout(const Duration(seconds: 45));
 
-                if (response.statusCode != 200) {
-                  throw Exception("Server returned HTTP ${response.statusCode}");
+                if (response.statusCode != 200 || !isValidPdfBytes(response.bodyBytes)) {
+                  debugPrint("[PdfDownloadService] Non-PDF or error response (status ${response.statusCode}), opening in external browser");
+                  await launchUrl(Uri.parse(directUrl), mode: LaunchMode.externalApplication);
+                  return;
                 }
 
                 await file.writeAsBytes(response.bodyBytes);
@@ -2728,14 +2769,13 @@ jobs:
                 final directUrl = resolveDirectUrl(url);
                 final response = await http.get(
                   Uri.parse(directUrl),
-                  headers: {
-                    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-                    'Accept': 'application/pdf,application/octet-stream,*/*',
-                  },
+                  headers: getHeadersForUrl(directUrl),
                 ).timeout(const Duration(seconds: 60));
 
-                if (response.statusCode != 200) {
-                  throw Exception("Server returned HTTP ${response.statusCode}");
+                if (response.statusCode != 200 || !isValidPdfBytes(response.bodyBytes)) {
+                  debugPrint("[PdfDownloadService] Download received invalid PDF payload");
+                  await launchUrl(Uri.parse(directUrl), mode: LaunchMode.externalApplication);
+                  return;
                 }
 
                 // Save to standard Android public Downloads/PrepWise directory
