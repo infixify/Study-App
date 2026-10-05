@@ -129,11 +129,15 @@ export default function AiMentorCard({
         <div className="grid grid-cols-3 gap-1.5 my-2.5 relative z-10">
           <div className="bg-white/5 border border-white/10 rounded-xl p-2 text-center backdrop-blur-xs">
             <span className="text-[9px] font-bold text-slate-400 block uppercase">Pace Target</span>
-            <span className="text-xs font-black text-amber-300">22 Q/hr</span>
+            <span className="text-xs font-black text-amber-300">
+              {report?.pace_target_qph ? `${report.pace_target_qph} Q/hr` : "20 Q/hr"}
+            </span>
           </div>
           <div className="bg-white/5 border border-white/10 rounded-xl p-2 text-center backdrop-blur-xs">
             <span className="text-[9px] font-bold text-slate-400 block uppercase">Min. Practice</span>
-            <span className="text-xs font-black text-emerald-400">60% Ratio</span>
+            <span className="text-xs font-black text-emerald-400">
+              {report?.practice_ratio_target ? `${report.practice_ratio_target}% Ratio` : "60% Ratio"}
+            </span>
           </div>
           <div className="bg-white/5 border border-white/10 rounded-xl p-2 text-center backdrop-blur-xs">
             <span className="text-[9px] font-bold text-slate-400 block uppercase">Daily Goal</span>
