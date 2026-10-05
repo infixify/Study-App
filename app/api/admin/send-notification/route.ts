@@ -23,11 +23,31 @@ async function getGoogleAccessToken(clientEmail: string, privateKey: string) {
 
   const unsignedToken = `${b64Url(header)}.${b64Url(claimSet)}`;
 
-  const crypto = await import("crypto");
-  const sign = crypto.createSign("RSA-SHA256");
-  sign.update(unsignedToken);
-  const signature = sign
-    .sign(privateKey.replace(/\\n/g, "\n"), "base64")
+  // Web Crypto PKCS8 Signing — 100% native on Cloudflare Edge / Workers
+  const pemContents = privateKey
+    .replace(/\\n/g, "")
+    .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+    .replace(/-----END PRIVATE KEY-----/g, "")
+    .replace(/\s+/g, "");
+  const binaryDer = Buffer.from(pemContents, "base64");
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "pkcs8",
+    binaryDer,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const encoder = new TextEncoder();
+  const signatureBuffer = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    cryptoKey,
+    encoder.encode(unsignedToken)
+  );
+
+  const signature = Buffer.from(signatureBuffer)
+    .toString("base64")
     .replace(/=/g, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
@@ -87,7 +107,7 @@ export async function POST(req: Request) {
 
     if (!projectId || !clientEmail || !privateKey) {
       return NextResponse.json(
-        { error: "Firebase env vars missing on server. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY in Vercel." },
+        { error: "Firebase env vars missing on server. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY in Cloudflare Pages." },
         { status: 500 }
       );
     }
