@@ -74,7 +74,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [speechTranscript, setSpeechTranscript] = useState("");
 
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<any>(null);
 
@@ -131,16 +131,15 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     if (audioMuted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
     try {
       window.speechSynthesis.cancel();
-      // Strip markdown symbols for clean natural audio speaking
       const cleanText = text
         .replace(/[*_#`~]/g, "")
         .replace(/⚡/g, "Exam Shortcut: ")
-        .slice(0, 450); // Speaks the most essential solution part smoothly
+        .slice(0, 450);
 
       const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.rate = 1.05;
       utterance.pitch = 1.0;
-      utterance.lang = "en-IN"; // Natural Indian English / Hinglish voice
+      utterance.lang = "en-IN";
 
       utterance.onstart = () => setIsSpeaking(true);
       utterance.onend = () => setIsSpeaking(false);
@@ -161,18 +160,26 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
 
   // ─── LIVE CAMERA & TARIKA B (SPEAK & AUTO-SNAP) ───
   const startCamera = async () => {
+    setLiveCamOpen(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
       mediaStreamRef.current = stream;
+
+      // Attach stream to video immediately
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
       }
-      setLiveCamOpen(true);
     } catch (e) {
-      alert("Camera permission access nahi mili. Kripya camera allow karein.");
+      alert("Camera permission allow karein taaki aap live sawal dikha sakein.");
+      setLiveCamOpen(false);
     }
   };
 
@@ -180,6 +187,9 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
       mediaStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
     setLiveCamOpen(false);
     setIsRecordingVoice(false);
@@ -201,7 +211,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   const startVoiceCaptureAndSnap = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      // Fallback: direct snapshot if speech recognition not on browser
       const snap = captureFrameFromVideo();
       if (snap) {
         stopCamera();
@@ -359,15 +368,25 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               </button>
             </div>
 
-            {/* Video Viewfinder */}
-            <div className="relative flex-1 flex items-center justify-center my-2 overflow-hidden rounded-2xl border border-white/20">
+            {/* Video Viewfinder (Fixed Auto-Play Stream) */}
+            <div className="relative flex-1 flex items-center justify-center my-2 overflow-hidden rounded-2xl border border-white/20 bg-black">
               <video
-                ref={videoRef}
+                ref={(el) => {
+                  videoRef.current = el;
+                  if (el && mediaStreamRef.current && el.srcObject !== mediaStreamRef.current) {
+                    el.srcObject = mediaStreamRef.current;
+                    el.play().catch(() => {});
+                  }
+                }}
                 autoPlay
                 playsInline
                 muted
+                onLoadedMetadata={(e) => {
+                  (e.target as HTMLVideoElement).play().catch(() => {});
+                }}
                 className="w-full h-full object-cover"
               />
+
               {/* Question Focus Frame */}
               <div className="absolute inset-6 border-2 border-teal rounded-2xl pointer-events-none flex flex-col justify-between p-3">
                 <span className="text-[10px] font-bold text-teal bg-black/60 px-2 py-0.5 rounded-md w-fit">
