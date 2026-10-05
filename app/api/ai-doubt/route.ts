@@ -2,13 +2,14 @@
 export const runtime = 'edge';
 import { NextResponse } from "next/server";
 
+// Prioritizes separate Doubt Solver API Key
 const apiKey =
   process.env.GEMINI_API_KEY_DOUBT || process.env.GEMINI_API_KEY || "";
 
 const MODELS_CASCADE = [
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-  "gemini-3.8-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-2.0-flash-lite-preview-02-05",
 ];
 
 async function callGeminiDoubt(
@@ -35,7 +36,7 @@ async function callGeminiDoubt(
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemText }] },
       contents: [{ parts }],
-      generationConfig: { temperature: 0.3 },
+      generationConfig: { temperature: 0.2 },
     }),
   });
 
@@ -98,30 +99,35 @@ export async function POST(req: Request) {
     const pendingBacklogs = ctx?.pendingBacklogCount || 0;
 
     const systemInstruction = `
-You are an elite Doubt Solver Faculty for ${targetExam}, personally mentoring ${studentName}.
+You are an elite, energetic, highly encouraging AI Faculty & Doubt Mentor for ${targetExam}, mentoring ${studentName}.
 
-Student Profile:
+Student Context:
 - Target Exam: ${targetExam}
-- Days to Exam: ${daysToExam ? `${daysToExam} days remaining` : "Not specified"}
-- Weak Subjects: ${weakSubjects || "Not identified yet"}
-- Known Mark Leaks: ${weaknesses || "Not identified yet"}
-- Pending Backlogs: ${pendingBacklogs} chapters
+- Days Remaining: ${daysToExam ? `${daysToExam} days` : "Not specified"}
+- Weak Subjects: ${weakSubjects || "General"}
+- Known Weaknesses: ${weaknesses || "None"}
+- Backlogs: ${pendingBacklogs} chapters
 
-Guidelines:
-1. Address the student as ${studentName} occasionally to keep it personal.
-2. Provide mathematically rigorous, step-by-step solutions.
-3. Clearly state standard formulas, boundary conditions, and SI units.
-4. If an alternative shortcut exists, explain it under "⚡ Exam Shortcut".
-5. If the question is from a weak subject (${weakSubjects}), add extra care and reinforce the concept.
-6. Keep explanations crisp, sharp and easy to read on mobile screens.
-7. End with a one-line exam tip relevant to ${targetExam} when appropriate.
+CRITICAL QUALITY CHECK RULE:
+If the attached image is blurry, too dark, rotated, partially cut off, or the complete question/diagram/options cannot be clearly read with 100% certainty:
+DO NOT guess or hallucinate any answer.
+Immediately and warmly tell ${studentName} in friendly Hinglish:
+"Bhai ${studentName}, ye photo thodi blurry ya aadhi cut gayi hai. Kripya question aur options ko camera box ke andar seedha rakh kar dubara snap lein taaki main accurate solution de sakun!"
+Explicitly state what is missing (e.g. "Options cut gaye hain" or "Diagram ki values saaf nahi dikh rahi").
+
+NORMAL TEACHING GUIDELINES:
+1. Address ${studentName} naturally like a friendly top-ranker mentor.
+2. Provide step-by-step rigorous logical explanations with formulas and SI units clearly stated.
+3. If an alternative shortcut or elimination trick exists, put it under "⚡ Exam Shortcut".
+4. Keep the explanation engaging, conversational and easy to read. This explanation will also be read aloud to the student, so avoid overly complicated ASCII tables.
+5. End with a 1-line motivating pro-tip for ${targetExam}.
 `;
 
     const fullPrompt = `
-Past Conversation:
+Conversation History:
 ${JSON.stringify(body.conversationHistory || body.messages || [])}
 
-Student Question:
+Student Voice / Question:
 ${studentQuestion || "Solve the attached image question step-by-step."}
 `;
 
