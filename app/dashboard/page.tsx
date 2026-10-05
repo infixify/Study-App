@@ -438,6 +438,7 @@ function HeroWidget({
     <div className="rounded-2xl overflow-hidden border border-slate-200/90 bg-white shadow-2xs">
       <div className={`h-1 w-full bg-gradient-to-r ${currentItem?.color || "from-indigo-500 to-teal-500"}`} />
       <div className="p-3 pb-2.5">
+        {/* Greeting + Streak */}
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex-1 min-w-0">
             <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-0.5">
@@ -458,83 +459,106 @@ function HeroWidget({
           </div>
         </div>
 
+        {/* RESTORED: Today + Goal Side-by-Side Boxes */}
         <div className="flex items-center gap-2 mb-2">
           <div
             className={`flex-1 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 ${
-              goalReached
-                ? "bg-emerald-50 border-emerald-200"
-                : "bg-slate-50 border-slate-200"
+              goalReached ? "bg-emerald-50 border-emerald-200" : "bg-teal-50 border-teal-100"
             }`}
           >
             <span className="text-sm">{goalReached ? "🎯" : "⏱️"}</span>
-            <div className="flex-1 min-w-0">
-              <span className={`text-xs font-black ${goalReached ? "text-emerald-700" : "text-slate-900"}`}>
+            <div>
+              <p className={`text-[9px] font-bold leading-none ${goalReached ? "text-emerald-600" : "text-teal-600"}`}>
+                {goalReached ? "Goal Reached!" : "Today"}
+              </p>
+              <p className={`text-xs font-black leading-tight ${goalReached ? "text-emerald-900" : "text-teal-900"}`}>
                 {todayHours}h studied
-              </span>
-              {dailyGoalMins > 0 && (
-                <span className="text-[9px] font-semibold text-slate-400 ml-1">
-                  / {goalHoursDisplay}h goal
-                </span>
-              )}
+              </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowGoalPopup(true)}
-            className="shrink-0 text-[9px] font-black text-slate-500 bg-slate-50 border border-slate-200 px-2 py-1.5 rounded-xl hover:bg-slate-100"
-          >
-            ✎ Goal
-          </button>
+          <div className="flex-1 bg-indigo-50 border border-indigo-100 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm">🎯</span>
+              <div>
+                <p className="text-[9px] font-bold text-indigo-600 leading-none">Goal</p>
+                <p className="text-xs font-black text-indigo-900 leading-tight">{goalHoursDisplay}h / day</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setGoalHours(Math.round(dailyGoalMins / 60) || 8);
+                setShowGoalPopup(true);
+              }}
+              className="text-[9px] font-black text-indigo-600 bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded-lg hover:bg-indigo-200 shrink-0"
+            >
+              Edit
+            </button>
+          </div>
         </div>
 
+        {/* RESTORED: 24-Hour Grid Goal Edit Popup */}
         {showGoalPopup && (
-          <div className="mb-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-            <p className="text-[10px] font-black text-slate-600 mb-1.5">Daily Study Goal (hours)</p>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                min={1}
-                max={18}
-                value={goalHours}
-                onChange={(e) => setGoalHours(parseInt(e.target.value) || 8)}
-                className="flex-1 border border-slate-300 rounded-lg p-1.5 text-xs font-bold text-center bg-white"
-              />
-              <button
-                type="button"
-                onClick={handleSaveGoal}
-                className="px-3 bg-teal text-white text-xs font-bold rounded-lg"
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowGoalPopup(false)}
-                className="px-2 bg-slate-200 text-slate-700 text-xs font-bold rounded-lg"
-              >
-                ✕
-              </button>
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 w-full max-w-xs">
+              <h3 className="text-sm font-black text-slate-900 mb-1">Set Daily Study Goal</h3>
+              <p className="text-[10px] text-slate-500 font-semibold mb-3">Choose your target study hours per day</p>
+              <div className="grid grid-cols-4 gap-2 mb-4 max-h-60 overflow-y-auto pr-1">
+                {Array.from({ length: 24 }, (_, i) => i + 1).map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => setGoalHours(h)}
+                    className={`py-2 rounded-xl text-xs font-black border transition-all ${
+                      goalHours === h
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    {h}h
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGoalPopup(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-black text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveGoal}
+                  className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-xs shadow-md"
+                >
+                  Save Goal
+                </button>
+              </div>
             </div>
           </div>
         )}
 
-        <div className="flex gap-1.5 mb-2">
-          {(["motivation", "meme"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => {
-                setMode(m);
-                try { localStorage.setItem("pw_content_mode", m); } catch (_) {}
-              }}
-              className={`flex-1 text-[9px] font-black uppercase tracking-wide rounded-lg py-1 border transition-all ${
-                mode === m
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              {m === "motivation" ? "💡 Quote" : "😂 Meme"}
-            </button>
-          ))}
+        {/* Motivation / Meme Switcher */}
+        <div className="w-full p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-black flex items-center mb-2.5">
+          <button
+            type="button"
+            onClick={() => { setMode("motivation"); try { localStorage.setItem("pw_content_mode", "motivation"); } catch (_) {} }}
+            className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${
+              mode === "motivation" ? "bg-white text-slate-900 shadow-2xs font-black" : "text-slate-500 hover:text-slate-900"
+            }`}
+          >
+            <span>🔥</span> Motivation
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode("meme"); try { localStorage.setItem("pw_content_mode", "meme"); } catch (_) {} }}
+            className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${
+              mode === "meme" ? "bg-white text-slate-900 shadow-2xs font-black" : "text-slate-500 hover:text-slate-900"
+            }`}
+          >
+            <span>😂</span> Memes
+          </button>
         </div>
 
         {currentItem && (
@@ -587,7 +611,7 @@ function HeroWidget({
   );
 }
 
-// ─── 6. SYLLABUS COMPLETION WIDGET (RESTORED COMPLETE) ───────────────────────
+// ─── 6. SYLLABUS COMPLETION WIDGET ───────────────────────────────────────────
 function SyllabusCompletionWidget({
   subjects,
   chapters,
@@ -711,7 +735,7 @@ function SyllabusCompletionWidget({
   );
 }
 
-// ─── 7. COMBINED ACTION ITEMS WIDGET (RESTORED COMPLETE) ─────────────────────
+// ─── 7. COMBINED ACTION ITEMS WIDGET ─────────────────────────────────────────
 function ActionItemsWidget({
   tasks,
   scheduledTests,
@@ -817,7 +841,7 @@ function ActionItemsWidget({
   );
 }
 
-// ─── MAIN DASHBOARD PAGE (100% COMPLETE & RESTORED) ───────────────────────────
+// ─── MAIN DASHBOARD PAGE ─────────────────────────────────────────────────────
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -1512,7 +1536,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 6. SYLLABUS COMPLETION WIDGET (RESTORED) */}
+        {/* 6. SYLLABUS COMPLETION WIDGET */}
         <SyllabusCompletionWidget
           subjects={subjects}
           chapters={chapters}
@@ -1520,7 +1544,7 @@ export default function DashboardPage() {
           onOpenSyllabus={() => router.push("/library")}
         />
 
-        {/* 7. COMBINED ACTION ITEMS (RESTORED) */}
+        {/* 7. COMBINED ACTION ITEMS */}
         <ActionItemsWidget
           tasks={allTasks}
           scheduledTests={scheduledTests}
@@ -1530,7 +1554,7 @@ export default function DashboardPage() {
           onViewAll={() => router.push("/todo")}
         />
 
-        {/* 8. RECENT MOCK TESTS (RESTORED) */}
+        {/* 8. RECENT MOCK TESTS */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
@@ -1570,7 +1594,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 9. QUICK ROUTE CARDS (RESTORED) */}
+        {/* 9. QUICK ROUTE CARDS */}
         <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
@@ -1827,7 +1851,7 @@ export default function DashboardPage() {
       {/* 11. AI DOUBT SOLVER SHEET */}
       <AiChatSheet open={doubtOpen} onClose={() => setDoubtOpen(false)} />
 
-      {/* 12. BOTTOM NAVIGATION (NOW FLOATS PERFECTLY AT SCREEN BOTTOM) */}
+      {/* 12. BOTTOM NAVIGATION */}
       <BottomNav />
     </div>
   );
