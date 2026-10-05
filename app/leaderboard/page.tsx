@@ -52,14 +52,15 @@ export default function LeaderboardPage() {
         .limit(50);
       if (usersErr) throw new Error(usersErr.message);
 
+      // ONLY VERIFIED STUDY TIME (Both toggles ON) COUNTS FOR LEADERBOARD
       const { data: logsData } = await supabase
         .from("daily_logs")
-        .select("user_id, study_time_minutes")
+        .select("user_id, verified_minutes")
         .gte("log_date", weekStart);
 
       const logsByUser: Record<string, number> = {};
-      for (const row of (logsData ?? []) as { user_id: string; study_time_minutes: number }[]) {
-        logsByUser[row.user_id] = (logsByUser[row.user_id] ?? 0) + (row.study_time_minutes ?? 0);
+      for (const row of (logsData ?? []) as { user_id: string; verified_minutes: number }[]) {
+        logsByUser[row.user_id] = (logsByUser[row.user_id] ?? 0) + (row.verified_minutes ?? 0);
       }
 
       const studentRows: StudentRow[] = ((usersData ?? []) as { uid: string; name: string; current_streak: number }[])
@@ -97,6 +98,7 @@ export default function LeaderboardPage() {
       const userPointsMap: Record<string, number> = {};
       for (const s of studentRows) userPointsMap[s.user_id] = s.points;
 
+      // Group Ranking: Fair Average Points + Total Weekly Hours
       const groupRows: GroupRow[] = ((groupsData ?? []) as { id: string; name: string }[])
         .map((g) => {
           const members = membersByGroup[g.id] ?? [];
@@ -134,7 +136,7 @@ export default function LeaderboardPage() {
         <div>
           <h1 className="font-display text-2xl text-ink">🏆 Leaderboard</h1>
           <p className="text-[11px] text-slate mt-0.5">
-            Points = streak days × 10 + this week&apos;s study hours × 5
+            Points = streak days × 10 + this week&apos;s verified hours × 5 (Both toggles ON 🛡️)
           </p>
         </div>
 
@@ -172,7 +174,7 @@ export default function LeaderboardPage() {
           </div>
         ) : tab === "students" ? (
           <div className="flex flex-col gap-2">
-            {students.length === 0 && <p className="text-center py-10 text-xs text-slate">No data yet.</p>}
+            {students.length === 0 && <p className="text-center py-10 text-xs text-slate">No verified study data yet.</p>}
             {students.map((s, i) => (
               <div key={s.user_id} className="rounded-ticket border border-ink/10 bg-white p-3.5 flex items-center gap-3">
                 <div className="w-8 text-center shrink-0">
@@ -180,7 +182,7 @@ export default function LeaderboardPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-bold text-ink truncate">{s.display_name}</p>
-                  <p className="text-[10px] text-slate mt-0.5">🔥 {s.streak} day streak · {s.weekly_hours}h this week</p>
+                  <p className="text-[10px] text-slate mt-0.5">🔥 {s.streak} day streak · 🛡️ {s.weekly_hours}h verified</p>
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-sm font-bold text-ink">{s.points}</p>
@@ -200,7 +202,7 @@ export default function LeaderboardPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-bold text-ink truncate">{g.group_name}</p>
                   <p className="text-[10px] text-slate mt-0.5">
-                    {g.member_count} member{g.member_count === 1 ? "" : "s"} · {g.total_weekly_hours}h combined this week
+                    {g.member_count} member{g.member_count === 1 ? "" : "s"} · {g.total_weekly_hours}h verified total
                   </p>
                 </div>
                 <div className="text-right shrink-0">
