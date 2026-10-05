@@ -1313,7 +1313,7 @@ export default function DashboardPage() {
   const revisionPct = Math.round((splitRatio.revision / totalSplitMins) * 100);
 
   return (
-    <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased smooth-scroll">
+    <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased">
       <AppHeader />
 
       <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
@@ -1827,7 +1827,7 @@ export default function DashboardPage() {
       {/* 11. AI DOUBT SOLVER SHEET */}
       <AiChatSheet open={doubtOpen} onClose={() => setDoubtOpen(false)} />
 
-      {/* 12. BOTTOM NAVIGATION */}
+      {/* 12. BOTTOM NAVIGATION (NOW FLOATS PERFECTLY AT SCREEN BOTTOM) */}
       <BottomNav />
     </div>
   );
