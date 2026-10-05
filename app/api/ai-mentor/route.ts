@@ -85,9 +85,9 @@ export async function POST(req: Request) {
     }
 
     // Fetch profile first so target_exam is available for exam schedule query
-    const { data: profile } = await supabase.from("users").select("*").eq("uid", userId).maybeSingle();
-
-    const targetExamForQuery = profile?.target_exam || "JEE";
+    const profileRes = await supabase.from("users").select("*").eq("uid", userId).maybeSingle();
+const profile = profileRes.data;
+const targetExamForQuery = (profile?.target_exam as string) || "JEE";
 
     const [
       { data: pastLogs },
