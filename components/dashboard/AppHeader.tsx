@@ -44,6 +44,14 @@ export default function AppHeader() {
   // Bell button ref for positioning the fixed popup
   const [bellRect, setBellRect] = useState<DOMRect | null>(null);
 
+  // SMART PATH CHECK: Hide on onboarding, login, or public welcome screens
+  const isPublicPage =
+    !pathname ||
+    pathname === "/" ||
+    pathname === "/onboarding" ||
+    pathname === "/login" ||
+    pathname.startsWith("/auth");
+
   useEffect(() => {
     const isCurrentlyDark = document.documentElement.classList.contains("dark");
     setIsDark(isCurrentlyDark);
@@ -93,6 +101,8 @@ export default function AppHeader() {
   }, []);
 
   useEffect(() => {
+    if (isPublicPage) return;
+
     async function fetchUser() {
       const { data: authData } = await supabase.auth.getUser();
       const authUser = authData?.user;
@@ -119,7 +129,12 @@ export default function AppHeader() {
       fetchNotifications(authUser.id, profile?.target_exam || null);
     }
     fetchUser();
-  }, [fetchNotifications]);
+  }, [fetchNotifications, isPublicPage]);
+
+  // Agar public/login page hai, toh header render mat karo
+  if (isPublicPage) {
+    return null;
+  }
 
   const markAllAsRead = async () => {
     if (!user || unreadIds.length === 0) return;
@@ -213,7 +228,6 @@ export default function AppHeader() {
             <button
               type="button"
               onClick={(e) => {
-                // Capture bell position for fixed popup placement
                 setBellRect(e.currentTarget.getBoundingClientRect());
                 setNotifPopupOpen(!notifPopupOpen);
                 setProfilePopupOpen(false);
@@ -236,8 +250,6 @@ export default function AppHeader() {
                   className="fixed inset-0 z-40"
                   onClick={() => setNotifPopupOpen(false)}
                 />
-                {/* Fixed popup — positioned from the right edge of the screen
-                    so it never clips on any phone width */}
                 <div
                   className="fixed z-50 w-80 max-w-[calc(100vw-16px)] bg-white dark:bg-[#161F30] rounded-2xl border border-ink/12 dark:border-white/10 shadow-2xl p-4 animate-in fade-in zoom-in-95"
                   style={{
