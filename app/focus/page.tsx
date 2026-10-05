@@ -1,7 +1,7 @@
 // app/focus/page.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { loadAndReconcileStreak, MIN_STREAK_SECONDS } from "@/lib/focus";
 import AppHeader from "@/components/dashboard/AppHeader";
@@ -38,7 +38,7 @@ export default function FocusPage() {
   const [targetExam, setTargetExam] = useState<string>("JEE");
 
   const [currentStreak, setCurrentStreak] = useState<number>(0);
-  const [streakWasReset, setStreakWasReset] = useState(false);
+  const [, setStreakWasReset] = useState(false);
 
   const [seconds, setSeconds] = useState(0);
   const [isActive, setIsActive] = useState(false);
@@ -62,12 +62,12 @@ export default function FocusPage() {
   const [postStreakResult, setPostStreakResult] = useState<{ counted: boolean; newStreak: number } | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Manual Offline Modal State
+  // ─── REDESIGNED FROM/TO TIME MODAL STATE ───
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualSub, setManualSub] = useState<SubjectType>("Physics");
   const [manualTask, setManualTask] = useState<StudyTaskType>("questions");
-  const [manualMinutes, setManualMinutes] = useState<number>(60);
-  const [manualQs, setManualQs] = useState<number>(20);
+  const [manualFromTime, setManualFromTime] = useState<string>("14:00");
+  const [manualToTime, setManualToTime] = useState<string>("16:30");
   const [manualDate, setManualDate] = useState<string>(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -91,6 +91,16 @@ export default function FocusPage() {
   const isVerifiedSession = faceVerificationEnabled && appBlockerEnabled && overlayGranted && usageGranted;
 
   const handleDirectStopAndSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+  // ─── LIVE CALCULATED TIME IN MINUTES ───
+  const computedManualMinutes = useMemo(() => {
+    if (!manualFromTime || !manualToTime) return 0;
+    const [fH, fM] = manualFromTime.split(":").map(Number);
+    const [tH, tM] = manualToTime.split(":").map(Number);
+    let diff = (tH * 60 + tM) - (fH * 60 + fM);
+    if (diff < 0) diff += 24 * 60; // Handle overnight study (e.g. 23:00 to 01:30)
+    return diff;
+  }, [manualFromTime, manualToTime]);
 
   function applyNativeApps(raw: { name: string; packageName: string }[]) {
     if (!Array.isArray(raw) || raw.length === 0) return;
@@ -165,7 +175,6 @@ export default function FocusPage() {
       const validSub = selectedSub || "Physics";
       const validMode = selectedTask || "questions";
 
-      // 1. Guaranteed Direct Insert with User-Selected Subject (never null or General)
       try {
         await supabase.from("focus_sessions").insert({
           user_id: userId,
@@ -181,7 +190,6 @@ export default function FocusPage() {
         console.error("Direct session insert err:", err);
       }
 
-      // 2. Reconcile streak cleanly
       const streakInfo = await loadAndReconcileStreak(userId);
       setCurrentStreak(streakInfo.currentStreak);
       setPostStreakResult({ counted: countsForStreak, newStreak: streakInfo.currentStreak });
@@ -440,17 +448,21 @@ export default function FocusPage() {
   };
 
   // ==========================================
-  // BULLETPROOF MANUAL ENTRY WITH AUTO-RETRY
+  // FROM / TO TIME LOGGING (AUTO-COMPUTED)
   // ==========================================
   const handleSaveManualEntry = async () => {
     if (!userId) return;
+    if (computedManualMinutes <= 0) {
+      setManualError("To Time must be after From Time");
+      return;
+    }
+
     setSaving(true);
     setManualError(null);
     try {
       const chosenSub = manualSub || "Physics";
       const chosenTask = manualTask || "questions";
-      const chosenMinutes = Number(manualMinutes) || 0;
-      const chosenQs = Number(manualQs) || 0;
+      const chosenMinutes = computedManualMinutes;
 
       // 1. Fetch current daily log for chosen date
       const { data: dailyRow } = await supabase
@@ -465,10 +477,7 @@ export default function FocusPage() {
       const newPractice = (dailyRow?.practice_minutes || 0) + (chosenTask === "questions" ? chosenMinutes : 0);
       const newRevision = (dailyRow?.revision_minutes || 0) + (chosenTask === "revision" ? chosenMinutes : 0);
 
-      const prevQs = (dailyRow as any)?.questions_solved ?? (dailyRow as any)?.questions_count ?? 0;
-      const newTotalQs = prevQs + chosenQs;
-
-      // 2. Prepare payload with Questions
+      // 2. Prepare payload
       const logPayload: Record<string, any> = {
         user_id: userId,
         log_date: manualDate,
@@ -478,22 +487,10 @@ export default function FocusPage() {
         revision_minutes: newRevision,
       };
 
-      if (chosenQs > 0) {
-        logPayload.questions_solved = newTotalQs;
-        logPayload.questions_count = newTotalQs;
-      }
-
-      let { error: dailyErr } = await supabase.from("daily_logs").upsert(
+      await supabase.from("daily_logs").upsert(
         logPayload,
         { onConflict: "user_id,log_date" }
       );
-
-      // Graceful fallback: If questions column missing, retry without it so study time is never lost
-      if (dailyErr && dailyErr.message && dailyErr.message.includes("question")) {
-        delete logPayload.questions_solved;
-        delete logPayload.questions_count;
-        await supabase.from("daily_logs").upsert(logPayload, { onConflict: "user_id,log_date" });
-      }
 
       // 3. Construct synthetic timestamp matching manualDate
       const [year, month, day] = manualDate.split("-").map(Number);
@@ -502,7 +499,7 @@ export default function FocusPage() {
       const syntheticEnd = new Date(sessionDate);
       const syntheticStart = new Date(syntheticEnd.getTime() - chosenMinutes * 60 * 1000);
 
-      // 4. Single Direct Insert into focus_sessions with chosen subject (never null or General)
+      // 4. Single Direct Insert into focus_sessions
       const sessionPayload: Record<string, any> = {
         user_id: userId,
         started_at: syntheticStart.toISOString(),
@@ -514,17 +511,7 @@ export default function FocusPage() {
         verified: false,
       };
 
-      if (chosenQs > 0) {
-        sessionPayload.questions_solved = chosenQs;
-        sessionPayload.questions_count = chosenQs;
-      }
-
-      let { error: sessionErr } = await supabase.from("focus_sessions").insert(sessionPayload);
-      if (sessionErr && sessionErr.message && sessionErr.message.includes("question")) {
-        delete sessionPayload.questions_solved;
-        delete sessionPayload.questions_count;
-        await supabase.from("focus_sessions").insert(sessionPayload);
-      }
+      await supabase.from("focus_sessions").insert(sessionPayload);
 
       // 5. Reconcile streak if today
       const todayStr = new Date().toISOString().split("T")[0];
@@ -856,7 +843,7 @@ export default function FocusPage() {
         </div>
       )}
 
-      {/* Manual Offline Modal */}
+      {/* ─── REDESIGNED FROM / TO TIME MODAL ─── */}
       {showManualModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3">
@@ -887,28 +874,37 @@ export default function FocusPage() {
                 ))}
               </div>
             </div>
+            
+            {/* From Time & To Time Inputs */}
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-[11px] font-bold text-slate block mb-1">Minutes</label>
+                <label className="text-[11px] font-bold text-slate block mb-1">From Time</label>
                 <input
-                  type="number"
-                  min={1}
-                  value={manualMinutes}
-                  onChange={(e) => setManualMinutes(parseInt(e.target.value) || 0)}
-                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15 focus:border-teal outline-none"
+                  type="time"
+                  value={manualFromTime}
+                  onChange={(e) => setManualFromTime(e.target.value)}
+                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15 focus:border-teal outline-none bg-paper/30"
                 />
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate block mb-1">Questions Solved</label>
+                <label className="text-[11px] font-bold text-slate block mb-1">To Time</label>
                 <input
-                  type="number"
-                  min={0}
-                  value={manualQs}
-                  onChange={(e) => setManualQs(parseInt(e.target.value) || 0)}
-                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15 focus:border-teal outline-none"
+                  type="time"
+                  value={manualToTime}
+                  onChange={(e) => setManualToTime(e.target.value)}
+                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15 focus:border-teal outline-none bg-paper/30"
                 />
               </div>
             </div>
+
+            {/* Live Computed Duration Badge */}
+            <div className="bg-teal/10 border border-teal/20 rounded-xl p-2.5 flex items-center justify-between text-xs">
+              <span className="font-bold text-teal">⏱️ Session Duration</span>
+              <span className="font-black text-teal-900">
+                {Math.floor(computedManualMinutes / 60)}h {computedManualMinutes % 60}m ({computedManualMinutes} mins)
+              </span>
+            </div>
+
             <div>
               <label className="text-[11px] font-bold text-slate block mb-1">Date</label>
               <input
@@ -919,9 +915,9 @@ export default function FocusPage() {
               />
             </div>
             <button
-              disabled={saving}
+              disabled={saving || computedManualMinutes <= 0}
               onClick={handleSaveManualEntry}
-              className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs shadow-md transition-all active:scale-[0.98]"
+              className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs shadow-md transition-all active:scale-[0.98] disabled:opacity-40"
             >
               {saving ? "Saving..." : "Add to Daily Study Hours"}
             </button>
