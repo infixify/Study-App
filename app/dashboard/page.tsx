@@ -12,20 +12,24 @@ import AiChatSheet from "@/components/dashboard/AiChatSheet";
 
 declare global {
   interface Window {
-    AppBridge?: { postMessage: (message: string) => void; };
+    AppBridge?: {
+      postMessage: (message: string) => void;
+    };
     onNativeFCMToken?: (token: string) => void;
     onNativeFocusSessionLogged?: (mins: number) => void;
     onDirectLoggedSession?: (data: any) => void;
   }
 }
 
-// ─── HIGH-SPEED SWR IN-MEMORY CACHE (0ms Section Switch) ───
+// ─── HIGH-SPEED SWR IN-MEMORY CACHE (Eliminates Request Storms on Tab Switch) ───
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const globalMemoryCache: Record<string, { timestamp: number; data: any }> = {};
 
 function getMemCache<T>(key: string): T | null {
   const item = globalMemoryCache[key];
-  if (item && Date.now() - item.timestamp < CACHE_TTL_MS) return item.data as T;
+  if (item && Date.now() - item.timestamp < CACHE_TTL_MS) {
+    return item.data as T;
+  }
   try {
     const raw = localStorage.getItem(`pw_cache_${key}`);
     if (raw) {
@@ -42,38 +46,101 @@ function getMemCache<T>(key: string): T | null {
 function setMemCache<T>(key: string, data: T): void {
   const payload = { timestamp: Date.now(), data };
   globalMemoryCache[key] = payload;
-  try { localStorage.setItem(`pw_cache_${key}`, JSON.stringify(payload)); } catch (_) {}
+  try {
+    localStorage.setItem(`pw_cache_${key}`, JSON.stringify(payload));
+  } catch (_) {}
 }
 
 interface ExamScheduleItem {
-  id: string; exam_key: string; label: string; target_exam: string; year: number; exam_date: string; is_confirmed: boolean;
+  id: string;
+  exam_key: string;
+  label: string;
+  target_exam: string;
+  year: number;
+  exam_date: string;
+  is_confirmed: boolean;
 }
+
 interface ExamShift {
-  id: string; exam_schedule_id: string; shift_date: string; shift_time: string;
+  id: string;
+  exam_schedule_id: string;
+  shift_date: string;
+  shift_time: string;
 }
+
 interface TaskItem {
-  id: string; title: string; priority: string; status: string; task_type?: string; due_date?: string;
+  id: string;
+  title: string;
+  priority: string;
+  status: string;
+  task_type?: string;
+  due_date?: string;
 }
+
 interface ScheduledTest {
-  id: string; test_name: string; scheduled_date: string; subject?: string; status: string;
+  id: string;
+  test_name: string;
+  scheduled_date: string;
+  subject?: string;
+  status: string;
 }
+
 interface TestLog {
-  id: string; test_name: string; total_marks: number; max_marks: number; accuracy: number; test_date: string;
+  id: string;
+  test_name: string;
+  total_marks: number;
+  max_marks: number;
+  accuracy: number;
+  test_date: string;
 }
+
 interface SubjectItem {
-  id: string; name: string; class_level: string; target_exam?: string;
+  id: string;
+  name: string;
+  class_level: string;
+  target_exam?: string;
 }
+
 interface ChapterItem {
-  id: string; title: string; subject_id: string;
+  id: string;
+  title: string;
+  subject_id: string;
 }
+
 interface DailyLogItem {
-  log_date: string; study_time_minutes: number; theory_minutes?: number; practice_minutes?: number; revision_minutes?: number; verified_minutes?: number;
+  log_date: string;
+  study_time_minutes: number;
+  theory_minutes?: number;
+  practice_minutes?: number;
+  revision_minutes?: number;
+  verified_minutes?: number;
 }
+
 interface QuestionLogEntry {
-  id: string; subject_id: string; chapter_id: string; question_count: number; topic_name?: string; start_from?: number; end_on?: number; log_date: string; time_from?: string | null; time_to?: string | null; source?: string | null;
+  id: string;
+  subject_id: string;
+  chapter_id: string;
+  question_count: number;
+  topic_name?: string;
+  start_from?: number;
+  end_on?: number;
+  log_date: string;
+  time_from?: string | null;
+  time_to?: string | null;
+  source?: string | null;
 }
+
 interface ContentCardItem {
-  id: string; quote: string; character: string; show: string; icon_or_sticker: string; color: string; bg: string; border: string; text: string; badge: string;
+  id: string;
+  quote: string;
+  character: string;
+  show: string;
+  icon_or_sticker: string;
+  color: string;
+  bg: string;
+  border: string;
+  text: string;
+  badge: string;
 }
 
 const COLOR_PRESETS = [
@@ -89,9 +156,16 @@ const MEME_LIMIT = 2;
 function getTodayKey(): string {
   return `pw_content_state_${new Date().toISOString().split("T")[0]}`;
 }
+
 interface DailyContentState {
-  motivationIndex: number; memeIndex: number; motivationCount: number; memeCount: number; selectedMotivationId: string; selectedMemeId: string;
+  motivationIndex: number;
+  memeIndex: number;
+  motivationCount: number;
+  memeCount: number;
+  selectedMotivationId: string;
+  selectedMemeId: string;
 }
+
 function loadDailyContentState(): DailyContentState {
   try {
     const raw = localStorage.getItem(getTodayKey());
@@ -99,23 +173,65 @@ function loadDailyContentState(): DailyContentState {
   } catch (_) {}
   return { motivationIndex: 0, memeIndex: 0, motivationCount: 0, memeCount: 0, selectedMotivationId: "", selectedMemeId: "" };
 }
+
 function saveDailyContentState(state: DailyContentState): void {
-  try { localStorage.setItem(getTodayKey(), JSON.stringify(state)); } catch (_) {}
+  try {
+    localStorage.setItem(getTodayKey(), JSON.stringify(state));
+  } catch (_) {}
 }
+
 function getDailyIndex(deckLength: number, salt: string): number {
   if (!deckLength) return 0;
-  const str = new Date().toISOString().split("T")[0] + salt;
+  const dateStr = new Date().toISOString().split("T")[0];
+  const str = dateStr + salt;
   let hash = 0;
-  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) & 0xffffffff;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) & 0xffffffff;
+  }
   return Math.abs(hash) % deckLength;
 }
 
-const FALLBACK_MOTIVATION: ContentCardItem[] = [{
-  id: "m-1", quote: "Dream is not that which you see while sleeping, it is something that does not let you sleep.", character: "Dr. A.P.J. Abdul Kalam", show: "Wings of Fire", icon_or_sticker: "🚀", color: "from-sky-500 to-indigo-600", bg: "bg-sky-50", border: "border-sky-200", text: "text-sky-950", badge: "bg-sky-500",
-}];
-const FALLBACK_MEME: ContentCardItem[] = [{
-  id: "meme-1", quote: "PAKAD PAKAD PAKAD... Isne aaj tak numericals solve nahi kiye! Daya, iska phone tod do! 😂", character: "ACP Pradyuman", show: "CID (Meme)", icon_or_sticker: "👮", color: "from-gray-600 to-gray-800", bg: "bg-gray-50", border: "border-gray-300", text: "text-gray-950", badge: "bg-gray-600",
-}];
+const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
+  {
+    id: "m-1",
+    quote: "Dream is not that which you see while sleeping, it is something that does not let you sleep.",
+    character: "Dr. A.P.J. Abdul Kalam",
+    show: "Wings of Fire",
+    icon_or_sticker: "🚀",
+    color: "from-sky-500 to-indigo-600",
+    bg: "bg-sky-50",
+    border: "border-sky-200",
+    text: "text-sky-950",
+    badge: "bg-sky-500",
+  },
+  {
+    id: "m-2",
+    quote: "Arise, awake, and stop not until the goal is reached. Strength is life, weakness is death.",
+    character: "Swami Vivekananda",
+    show: "Rousing Call to Youth",
+    icon_or_sticker: "⚡",
+    color: "from-amber-500 to-orange-600",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-950",
+    badge: "bg-amber-500",
+  },
+];
+
+const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
+  {
+    id: "meme-1",
+    quote: "PAKAD PAKAD PAKAD... Isne aaj tak numericals solve nahi kiye! Daya, iska phone tod do! 😂",
+    character: "ACP Pradyuman",
+    show: "CID (Meme Edition)",
+    icon_or_sticker: "👮",
+    color: "from-gray-600 to-gray-800",
+    bg: "bg-gray-50",
+    border: "border-gray-300",
+    text: "text-gray-950",
+    badge: "bg-gray-600",
+  },
+];
 
 function getGreeting(name: string, hour: number): string {
   if (hour >= 5 && hour < 9) return `Rise & grind, ${name}! 🌅`;
@@ -145,28 +261,54 @@ function computeTodayAvgQPerHr(entries: QuestionLogEntry[]): number {
       totalQs += e.question_count || 0;
     }
   }
-  return totalMinutes > 0 ? Math.round((totalQs / totalMinutes) * 60) : 0;
+  if (totalMinutes <= 0) return 0;
+  return Math.round((totalQs / totalMinutes) * 60);
 }
 
-function timeRangesOverlap(aFrom?: string | null, aTo?: string | null, bFrom?: string | null, bTo?: string | null): boolean {
-  const af = timeToMinutes(aFrom), at = timeToMinutes(aTo), bf = timeToMinutes(bFrom), bt = timeToMinutes(bTo);
+function timeRangesOverlap(
+  aFrom: string | null | undefined,
+  aTo: string | null | undefined,
+  bFrom: string | null | undefined,
+  bTo: string | null | undefined
+): boolean {
+  const af = timeToMinutes(aFrom);
+  const at = timeToMinutes(aTo);
+  const bf = timeToMinutes(bFrom);
+  const bt = timeToMinutes(bTo);
   if (af === null || at === null || bf === null || bt === null) return false;
   return af < bt && bf < at;
 }
 
-function HeroWidget({ name, streak, todayStudyMins, dailyGoalMins, onGoalSaved }: any) {
+function HeroWidget({
+  name,
+  streak,
+  todayStudyMins,
+  dailyGoalMins,
+  onGoalSaved,
+}: {
+  name: string;
+  streak: number;
+  todayStudyMins: number;
+  dailyGoalMins: number;
+  onGoalSaved: (mins: number) => void;
+}) {
   const [hour, setHour] = useState(() => new Date().getHours());
   const [mode, setMode] = useState<"motivation" | "meme">(() => {
-    try { return (localStorage.getItem("pw_content_mode") as any) || "motivation"; } catch { return "motivation"; }
+    try { return (localStorage.getItem("pw_content_mode") as "motivation" | "meme") || "motivation"; } catch { return "motivation"; }
   });
-  const [dbItems, setDbItems] = useState(() => getMemCache<any>("daily_content_deck") || { motivation: FALLBACK_MOTIVATION, meme: FALLBACK_MEME });
+  
+  const [dbItems, setDbItems] = useState<Record<string, ContentCardItem[]>>(() => {
+    const cached = getMemCache<Record<string, ContentCardItem[]>>("daily_content_deck");
+    return cached || { motivation: FALLBACK_MOTIVATION_QUOTES, meme: FALLBACK_MEME_QUOTES };
+  });
+
   const [currentItem, setCurrentItem] = useState<ContentCardItem | null>(null);
   const [imgKey, setImgKey] = useState(0);
   const [showGoalPopup, setShowGoalPopup] = useState(false);
   const [goalHours, setGoalHours] = useState(Math.round(dailyGoalMins / 60) || 8);
   const [dailyState, setDailyState] = useState<DailyContentState>(() => loadDailyContentState());
   const [limitHit, setLimitHit] = useState(false);
-  const limitTimerRef = React.useRef<any>(null);
+  const limitTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const interval = setInterval(() => setHour(new Date().getHours()), 60_000);
@@ -174,77 +316,123 @@ function HeroWidget({ name, streak, todayStudyMins, dailyGoalMins, onGoalSaved }
   }, []);
 
   useEffect(() => {
-    if (getMemCache("daily_content_deck")) return;
-    supabase.from("daily_content").select("*").eq("is_active", true).then(({ data }) => {
-      if (data && data.length > 0) {
-        const mList: ContentCardItem[] = [], rList: ContentCardItem[] = [];
-        data.forEach((row: any, idx: number) => {
-          const fb = COLOR_PRESETS[idx % COLOR_PRESETS.length];
-          const it = {
-            id: row.id, quote: row.quote, character: row.character, show: row.show || "PrepWise",
-            icon_or_sticker: row.icon_or_sticker || "⚡", color: row.gradient_color || fb.color,
-            bg: row.bg_color || fb.bg, border: row.border_color || fb.border, text: row.text_color || fb.text, badge: row.badge_color || fb.badge,
+    const cached = getMemCache<Record<string, ContentCardItem[]>>("daily_content_deck");
+    if (cached) return;
+
+    async function fetchDynamicContent() {
+      try {
+        const { data, error } = await supabase.from("daily_content").select("*").eq("is_active", true);
+        if (!error && data && data.length > 0) {
+          const mList: ContentCardItem[] = [];
+          const rList: ContentCardItem[] = [];
+          data.forEach((row: any, idx: number) => {
+            const fallbackPreset = COLOR_PRESETS[idx % COLOR_PRESETS.length];
+            const item: ContentCardItem = {
+              id: row.id,
+              quote: row.quote,
+              character: row.character,
+              show: row.show || "PrepWise",
+              icon_or_sticker: row.icon_or_sticker || "⚡",
+              color: row.gradient_color || fallbackPreset.color,
+              bg: row.bg_color || fallbackPreset.bg,
+              border: row.border_color || fallbackPreset.border,
+              text: row.text_color || fallbackPreset.text,
+              badge: row.badge_color || fallbackPreset.badge,
+            };
+            if (row.content_type === "meme") rList.push(item);
+            else mList.push(item);
+          });
+          const deck = {
+            motivation: mList.length > 0 ? mList : FALLBACK_MOTIVATION_QUOTES,
+            meme: rList.length > 0 ? rList : FALLBACK_MEME_QUOTES,
           };
-          if (row.content_type === "meme") rList.push(it); else mList.push(it);
-        });
-        const deck = { motivation: mList.length ? mList : FALLBACK_MOTIVATION, meme: rList.length ? rList : FALLBACK_MEME };
-        setDbItems(deck);
-        setMemCache("daily_content_deck", deck);
-      }
-    });
+          setDbItems(deck);
+          setMemCache("daily_content_deck", deck);
+        }
+      } catch (_) {}
+    }
+    fetchDynamicContent();
   }, []);
 
   useEffect(() => {
-    const deck = mode === "motivation" ? (dbItems.motivation.length ? dbItems.motivation : FALLBACK_MOTIVATION) : (dbItems.meme.length ? dbItems.meme : FALLBACK_MEME);
+    const motDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
+    const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
     const saved = loadDailyContentState();
+
     if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
     setLimitHit(false);
 
-    let item = deck.find((c: any) => c.id === (mode === "motivation" ? saved.selectedMotivationId : saved.selectedMemeId));
-    if (!item) {
-      const idx = getDailyIndex(deck.length, mode);
-      item = deck[idx] || deck[0];
-      const next = mode === "motivation" ? { ...saved, motivationIndex: idx, selectedMotivationId: item.id } : { ...saved, memeIndex: idx, selectedMemeId: item.id };
-      setDailyState(next);
-      saveDailyContentState(next);
+    if (mode === "motivation") {
+      let item = motDeck.find((c) => c.id === saved.selectedMotivationId);
+      if (!item) {
+        const idx = getDailyIndex(motDeck.length, "motivation");
+        item = motDeck[idx] || motDeck[0];
+        const next: DailyContentState = { ...saved, motivationIndex: idx, selectedMotivationId: item.id };
+        setDailyState(next);
+        saveDailyContentState(next);
+      }
+      setCurrentItem(item || null);
+      setImgKey((k) => k + 1);
+    } else {
+      let item = memDeck.find((c) => c.id === saved.selectedMemeId);
+      if (!item) {
+        const idx = getDailyIndex(memDeck.length, "meme");
+        item = memDeck[idx] || memDeck[0];
+        const next: DailyContentState = { ...saved, memeIndex: idx, selectedMemeId: item.id };
+        setDailyState(next);
+        saveDailyContentState(next);
+      }
+      setCurrentItem(item || null);
+      setImgKey((k) => k + 1);
     }
-    setCurrentItem(item);
-    setImgKey((k) => k + 1);
   }, [dbItems, mode]);
 
-  const handleTap = useCallback(() => {
-    const deck = mode === "motivation" ? dbItems.motivation : dbItems.meme;
+  const handleTapCard = useCallback(() => {
+    const motDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
+    const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
     const saved = loadDailyContentState();
-    const count = mode === "motivation" ? saved.motivationCount : saved.memeCount;
-    const limit = mode === "motivation" ? QUOTE_LIMIT : MEME_LIMIT;
 
-    if (count >= limit) {
+    const showLimit = () => {
       setLimitHit(true);
       if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
       limitTimerRef.current = setTimeout(() => setLimitHit(false), 3000);
-      return;
-    }
+    };
 
-    const nextIdx = ((mode === "motivation" ? saved.motivationIndex : saved.memeIndex) + 1) % deck.length;
-    const nextItem = deck[nextIdx] || deck[0];
-    const nextState = mode === "motivation"
-      ? { ...saved, motivationIndex: nextIdx, motivationCount: count + 1, selectedMotivationId: nextItem.id }
-      : { ...saved, memeIndex: nextIdx, memeCount: count + 1, selectedMemeId: nextItem.id };
-
-    setDailyState(nextState);
-    saveDailyContentState(nextState);
-    setCurrentItem(nextItem);
-    setImgKey((k) => k + 1);
-    if (count + 1 >= limit) {
-      setLimitHit(true);
-      if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
-      limitTimerRef.current = setTimeout(() => setLimitHit(false), 3000);
+    if (mode === "motivation") {
+      if (saved.motivationCount >= QUOTE_LIMIT) { showLimit(); return; }
+      const newCount = saved.motivationCount + 1;
+      const nextIdx = (saved.motivationIndex + 1) % motDeck.length;
+      const nextItem = motDeck[nextIdx] || motDeck[0];
+      const next: DailyContentState = { ...saved, motivationIndex: nextIdx, motivationCount: newCount, selectedMotivationId: nextItem.id };
+      setDailyState(next);
+      saveDailyContentState(next);
+      setCurrentItem(nextItem);
+      setImgKey((k) => k + 1);
+      if (newCount >= QUOTE_LIMIT) showLimit();
+    } else {
+      if (saved.memeCount >= MEME_LIMIT) { showLimit(); return; }
+      const newCount = saved.memeCount + 1;
+      const nextIdx = (saved.memeIndex + 1) % memDeck.length;
+      const nextItem = memDeck[nextIdx] || memDeck[0];
+      const next: DailyContentState = { ...saved, memeIndex: nextIdx, memeCount: newCount, selectedMemeId: nextItem.id };
+      setDailyState(next);
+      saveDailyContentState(next);
+      setCurrentItem(nextItem);
+      setImgKey((k) => k + 1);
+      if (newCount >= MEME_LIMIT) showLimit();
     }
   }, [dbItems, mode]);
 
   const greeting = getGreeting(name, hour);
   const todayHours = (todayStudyMins / 60).toFixed(1);
+  const goalHoursDisplay = (dailyGoalMins / 60).toFixed(0);
   const goalReached = todayStudyMins >= dailyGoalMins && dailyGoalMins > 0;
+
+  const handleSaveGoal = async () => {
+    const mins = goalHours * 60;
+    onGoalSaved(mins);
+    setShowGoalPopup(false);
+  };
 
   return (
     <div className="rounded-2xl overflow-hidden border border-slate-200/90 bg-white shadow-2xs">
@@ -252,25 +440,49 @@ function HeroWidget({ name, streak, todayStudyMins, dailyGoalMins, onGoalSaved }
       <div className="p-3 pb-2.5">
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex-1 min-w-0">
-            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-0.5">PrepWise Cockpit</p>
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-0.5">
+              PrepWise Cockpit
+            </p>
             <h2 className="text-xs font-black text-slate-900 leading-snug truncate">{greeting}</h2>
           </div>
-          <div className={`shrink-0 flex items-center gap-1 rounded-xl px-2.5 py-1.5 ${streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"}`}>
+          <div
+            className={`shrink-0 flex items-center gap-1 rounded-xl px-2.5 py-1.5 ${
+              streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"
+            }`}
+          >
             <span className="text-sm leading-none">{streak > 0 ? "🔥" : "💤"}</span>
-            <span className={`text-sm font-black leading-none ${streak > 0 ? "text-orange-600" : "text-slate-400"}`}>{streak}</span>
+            <span className={`text-sm font-black leading-none ${streak > 0 ? "text-orange-600" : "text-slate-400"}`}>
+              {streak}
+            </span>
             <span className="text-[9px] font-bold text-slate-500 uppercase">{streak === 1 ? "Day" : "Days"}</span>
           </div>
         </div>
 
         <div className="flex items-center gap-2 mb-2">
-          <div className={`flex-1 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 ${goalReached ? "bg-emerald-50 border-emerald-200" : "bg-slate-50 border-slate-200"}`}>
+          <div
+            className={`flex-1 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 ${
+              goalReached
+                ? "bg-emerald-50 border-emerald-200"
+                : "bg-slate-50 border-slate-200"
+            }`}
+          >
             <span className="text-sm">{goalReached ? "🎯" : "⏱️"}</span>
             <div className="flex-1 min-w-0">
-              <span className={`text-xs font-black ${goalReached ? "text-emerald-700" : "text-slate-900"}`}>{todayHours}h studied</span>
-              {dailyGoalMins > 0 && <span className="text-[9px] font-semibold text-slate-400 ml-1">/ {(dailyGoalMins/60).toFixed(0)}h goal</span>}
+              <span className={`text-xs font-black ${goalReached ? "text-emerald-700" : "text-slate-900"}`}>
+                {todayHours}h studied
+              </span>
+              {dailyGoalMins > 0 && (
+                <span className="text-[9px] font-semibold text-slate-400 ml-1">
+                  / {goalHoursDisplay}h goal
+                </span>
+              )}
             </div>
           </div>
-          <button type="button" onClick={() => setShowGoalPopup(true)} className="text-[9px] font-black text-slate-500 bg-slate-50 border border-slate-200 px-2 py-1.5 rounded-xl hover:bg-slate-100">
+          <button
+            type="button"
+            onClick={() => setShowGoalPopup(true)}
+            className="shrink-0 text-[9px] font-black text-slate-500 bg-slate-50 border border-slate-200 px-2 py-1.5 rounded-xl hover:bg-slate-100"
+          >
             ✎ Goal
           </button>
         </div>
@@ -279,27 +491,71 @@ function HeroWidget({ name, streak, todayStudyMins, dailyGoalMins, onGoalSaved }
           <div className="mb-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
             <p className="text-[10px] font-black text-slate-600 mb-1.5">Daily Study Goal (hours)</p>
             <div className="flex gap-2">
-              <input type="number" min={1} max={18} value={goalHours} onChange={(e) => setGoalHours(parseInt(e.target.value) || 8)} className="flex-1 border border-slate-300 rounded-lg p-1.5 text-xs font-bold text-center bg-white" />
-              <button type="button" onClick={() => { onGoalSaved(goalHours * 60); setShowGoalPopup(false); }} className="px-3 bg-teal text-white text-xs font-bold rounded-lg">Save</button>
-              <button type="button" onClick={() => setShowGoalPopup(false)} className="px-2 bg-slate-200 text-slate-700 text-xs font-bold rounded-lg">✕</button>
+              <input
+                type="number"
+                min={1}
+                max={18}
+                value={goalHours}
+                onChange={(e) => setGoalHours(parseInt(e.target.value) || 8)}
+                className="flex-1 border border-slate-300 rounded-lg p-1.5 text-xs font-bold text-center bg-white"
+              />
+              <button
+                type="button"
+                onClick={handleSaveGoal}
+                className="px-3 bg-teal text-white text-xs font-bold rounded-lg"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowGoalPopup(false)}
+                className="px-2 bg-slate-200 text-slate-700 text-xs font-bold rounded-lg"
+              >
+                ✕
+              </button>
             </div>
           </div>
         )}
 
         <div className="flex gap-1.5 mb-2">
           {(["motivation", "meme"] as const).map((m) => (
-            <button key={m} type="button" onClick={() => { setMode(m); try { localStorage.setItem("pw_content_mode", m); } catch (_) {} }} className={`flex-1 text-[9px] font-black uppercase tracking-wide rounded-lg py-1 border transition-all ${mode === m ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-500 border-slate-200"}`}>
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setMode(m);
+                try { localStorage.setItem("pw_content_mode", m); } catch (_) {}
+              }}
+              className={`flex-1 text-[9px] font-black uppercase tracking-wide rounded-lg py-1 border transition-all ${
+                mode === m
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+              }`}
+            >
               {m === "motivation" ? "💡 Quote" : "😂 Meme"}
             </button>
           ))}
         </div>
 
         {currentItem && (
-          <button type="button" onClick={handleTap} className={`w-full text-left rounded-2xl border ${currentItem.border} ${currentItem.bg} p-3 active:scale-[0.98] transition-all relative overflow-hidden group shadow-2xs`}>
+          <button
+            type="button"
+            onClick={handleTapCard}
+            className={`w-full text-left rounded-2xl border ${currentItem.border} ${currentItem.bg} p-3 active:scale-[0.98] transition-all relative overflow-hidden group shadow-2xs`}
+          >
             <div className="flex items-center gap-3">
-              <div className={`w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center ${currentItem.badge} overflow-hidden`}>
-                {currentItem.icon_or_sticker && (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
-                  <img key={imgKey} src={currentItem.icon_or_sticker} alt="" className="w-full h-full object-cover rounded-2xl" onError={(e) => { (e.target as any).style.display = "none"; }} />
+              <div
+                className={`w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center ${currentItem.badge} overflow-hidden`}
+              >
+                {currentItem.icon_or_sticker &&
+                (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
+                  <img
+                    key={imgKey}
+                    src={currentItem.icon_or_sticker}
+                    alt=""
+                    className="w-full h-full object-cover rounded-2xl"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
                 ) : (
                   <span className="text-3xl">{currentItem.icon_or_sticker || "💡"}</span>
                 )}
@@ -308,7 +564,9 @@ function HeroWidget({ name, streak, todayStudyMins, dailyGoalMins, onGoalSaved }
                 <p className={`text-xs font-bold ${currentItem.text} leading-snug`}>"{currentItem.quote}"</p>
                 <div className="flex items-center justify-between mt-2 pt-1 border-t border-black/5">
                   <p className="text-[10px] font-black text-slate-600 truncate">— {currentItem.character}</p>
-                  <span className="text-[9.5px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-1.5 py-0.5 rounded-full shrink-0">Tap ↻</span>
+                  <span className="text-[9.5px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-1.5 py-0.5 rounded-full shrink-0">
+                    Tap ↻
+                  </span>
                 </div>
               </div>
             </div>
@@ -317,8 +575,11 @@ function HeroWidget({ name, streak, todayStudyMins, dailyGoalMins, onGoalSaved }
 
         {limitHit && (
           <p className="mt-1.5 text-center text-[10px] font-bold text-red-500">
-            {mode === "motivation" ? `Only ${QUOTE_LIMIT} quotes per day — come back tomorrow! 🌅` : `Only ${MEME_LIMIT} memes per day — back to books! 📚`}
-            {" · "}<span className="underline cursor-pointer">Upgrade for more</span>
+            {mode === "motivation"
+              ? `Only ${QUOTE_LIMIT} quotes per day — come back tomorrow! 🌅`
+              : `Only ${MEME_LIMIT} memes per day — back to books! 📚`}
+            {" · "}
+            <span className="underline underline-offset-2 cursor-pointer">Upgrade for more</span>
           </p>
         )}
       </div>
@@ -326,31 +587,273 @@ function HeroWidget({ name, streak, todayStudyMins, dailyGoalMins, onGoalSaved }
   );
 }
 
+// ─── 6. SYLLABUS COMPLETION WIDGET (RESTORED COMPLETE) ───────────────────────
+function SyllabusCompletionWidget({
+  subjects,
+  chapters,
+  progress,
+  onOpenSyllabus,
+}: {
+  subjects: SubjectItem[];
+  chapters: ChapterItem[];
+  progress: { chapter_id: string; status: string }[];
+  onOpenSyllabus: () => void;
+}) {
+  const doneSet = useMemo(() => {
+    const s = new Set<string>();
+    progress.forEach((p) => {
+      if (p.status === "done" || p.status === "completed") s.add(p.chapter_id);
+    });
+    return s;
+  }, [progress]);
+
+  const stats = useMemo(() => {
+    const groups: Record<string, { name: string; done: number; total: number; color: string }> = {};
+    const colorMap: Record<string, string> = {
+      physics: "#3b82f6",
+      chemistry: "#10b981",
+      maths: "#a855f7",
+      mathematics: "#a855f7",
+      biology: "#14b8a6",
+    };
+    let grandDone = 0;
+    let grandTotal = 0;
+    subjects.forEach((subj) => {
+      if (!subj.name || !subj.name.trim()) return;
+      const cleanName = subj.name.trim();
+      const normKey = cleanName.toLowerCase();
+      const chaps = chapters.filter((c) => c.subject_id === subj.id);
+      const doneCount = chaps.filter((c) => doneSet.has(c.id)).length;
+      const totalCount = chaps.length;
+      if (!groups[normKey]) {
+        groups[normKey] = { name: cleanName, done: 0, total: 0, color: colorMap[normKey] || "#f59e0b" };
+      }
+      groups[normKey].done += doneCount;
+      groups[normKey].total += totalCount;
+      grandDone += doneCount;
+      grandTotal += totalCount;
+    });
+    const subjectList = Object.values(groups).map((g) => ({
+      name: g.name, done: g.done, total: g.total,
+      pct: g.total > 0 ? Math.round((g.done / g.total) * 100) : 0,
+      color: g.color,
+    }));
+    const overallPct = grandTotal > 0 ? Math.round((grandDone / grandTotal) * 100) : 0;
+    return { subjectList, overallPct, grandDone, grandTotal };
+  }, [subjects, chapters, doneSet]);
+
+  const radius = 38;
+  const circumference = 2 * Math.PI * radius;
+  let accumulatedOffset = 0;
+
+  return (
+    <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+          <span>📚</span> Syllabus Completion
+        </h3>
+        <span className="text-[10px] font-bold text-teal bg-teal/10 px-2 py-0.5 rounded-md border border-teal/20">
+          {stats.grandDone}/{stats.grandTotal} Chapters Done
+        </span>
+      </div>
+      <div className="flex items-center justify-center gap-6 py-2">
+        <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+          <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r={radius} stroke="#e2e8f0" strokeWidth="10" fill="none" />
+            {stats.subjectList.map((s) => {
+              const segFraction = stats.grandTotal > 0 ? s.done / stats.grandTotal : 0;
+              const strokeLength = segFraction * circumference;
+              const dasharray = `${strokeLength} ${circumference}`;
+              const dashoffset = -accumulatedOffset;
+              accumulatedOffset += strokeLength;
+              return (
+                <circle
+                  key={s.name}
+                  cx="50" cy="50" r={radius}
+                  stroke={s.color} strokeWidth="10" fill="none"
+                  strokeDasharray={dasharray} strokeDashoffset={dashoffset}
+                  strokeLinecap="round" className="transition-all duration-500"
+                />
+              );
+            })}
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+            <span className="text-xl font-black text-slate-900 leading-none">{stats.overallPct}%</span>
+            <span className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Overall</span>
+          </div>
+        </div>
+        <div className="flex-1 space-y-2">
+          {stats.subjectList.map((s) => (
+            <div key={s.name} className="space-y-0.5">
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="flex items-center gap-1.5 text-slate-800">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                  <span className="truncate">{s.name}</span>
+                </span>
+                <span className="text-slate-500 text-[10px]">{s.done}/{s.total} ({s.pct}%)</span>
+              </div>
+              <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div style={{ width: `${s.pct}%`, backgroundColor: s.color }} className="h-full rounded-full transition-all" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onOpenSyllabus}
+        className="w-full py-2.5 bg-slate-50 hover:bg-slate-100 text-teal font-bold text-xs rounded-xl border border-slate-200 transition-all text-center flex items-center justify-center gap-1"
+      >
+        <span>Go to Syllabus Tracker</span>
+        <span>→</span>
+      </button>
+    </div>
+  );
+}
+
+// ─── 7. COMBINED ACTION ITEMS WIDGET (RESTORED COMPLETE) ─────────────────────
+function ActionItemsWidget({
+  tasks,
+  scheduledTests,
+  onCompleteTask,
+  onCompleteTest,
+  onAddTask,
+  onViewAll,
+}: {
+  tasks: TaskItem[];
+  scheduledTests: ScheduledTest[];
+  onCompleteTask: (id: string) => void;
+  onCompleteTest: (id: string) => void;
+  onAddTask: () => void;
+  onViewAll: () => void;
+}) {
+  const [filter, setFilter] = useState<"all" | "todo" | "backlog" | "tests">("all");
+
+  const { items, totalCount } = useMemo(() => {
+    let combined: { id: string; title: string; priority: string; itemType: "todo" | "backlog" | "test"; date?: string }[] = [];
+    if (filter === "all" || filter === "todo") {
+      const todos = tasks.filter((t) => t.task_type !== "backlog").map((t) => ({ id: t.id, title: t.title, priority: t.priority, itemType: "todo" as const, date: t.due_date }));
+      combined.push(...todos);
+    }
+    if (filter === "all" || filter === "backlog") {
+      const backlogs = tasks.filter((t) => t.task_type === "backlog").map((t) => ({ id: t.id, title: t.title, priority: t.priority, itemType: "backlog" as const, date: t.due_date }));
+      combined.push(...backlogs);
+    }
+    if (filter === "all" || filter === "tests") {
+      const tests = scheduledTests.map((t) => ({ id: t.id, title: t.test_name, priority: "medium", itemType: "test" as const, date: t.scheduled_date }));
+      combined.push(...tests);
+    }
+    return { items: combined.slice(0, 5), totalCount: combined.length };
+  }, [tasks, scheduledTests, filter]);
+
+  return (
+    <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+          <span>📋</span> Action Items
+        </h3>
+        <button
+          type="button"
+          onClick={onAddTask}
+          className="text-[11px] font-bold text-teal bg-teal/10 hover:bg-teal/20 border border-teal/20 px-2.5 py-1 rounded-lg transition-all"
+        >
+          + Add Task
+        </button>
+      </div>
+      <div className="flex p-0.5 bg-slate-100 rounded-xl border border-slate-200 text-[10px] font-black">
+        {(["all", "todo", "backlog", "tests"] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setFilter(tab)}
+            className={`flex-1 py-1 rounded-lg transition-all capitalize ${
+              filter === tab ? "bg-white text-slate-900 shadow-2xs font-black" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            {tab === "todo" ? "To-Do" : tab}
+          </button>
+        ))}
+      </div>
+      {items.length === 0 ? (
+        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-xs text-emerald-900 font-bold">
+          🎉 All caught up! No pending items in this category.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((it) => (
+            <div key={it.id} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    it.itemType === "test" ? "bg-indigo-600" : it.priority === "high" ? "bg-rose-600" : it.priority === "medium" ? "bg-amber-500" : "bg-emerald-600"
+                  }`}
+                />
+                <div className="truncate">
+                  <span className="font-bold text-slate-900 block truncate">{it.title}</span>
+                  {it.date && (
+                    <span className="text-[9.5px] font-semibold text-slate-500 block">
+                      {it.itemType === "test" ? `📅 Scheduled: ${it.date}` : `Target: ${it.date}`}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => (it.itemType === "test" ? onCompleteTest(it.id) : onCompleteTask(it.id))}
+                className="text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg hover:bg-emerald-200 active:scale-95 shrink-0"
+              >
+                Done ✓
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {totalCount > 5 && (
+        <button type="button" onClick={onViewAll} className="w-full text-center text-[11px] font-bold text-slate-600 hover:text-slate-900 pt-1 block">
+          View All ({totalCount}) →
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── MAIN DASHBOARD PAGE (100% COMPLETE & RESTORED) ───────────────────────────
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  const [mentorReport, setMentorReport] = useState<any>(null);
+  const [mentorLoading, setMentorLoading] = useState(false);
+  const [doubtOpen, setDoubtOpen] = useState(false);
+
   const [todayStudyMins, setTodayStudyMins] = useState(0);
   const [dailyGoalMins, setDailyGoalMins] = useState(480);
+
+  // Single Source of Truth: question_logs
   const [todayQuestions, setTodayQuestions] = useState(0);
   const [totalQuestionsAllTime, setTotalQuestionsAllTime] = useState(0);
   const [todayAvgQPerHr, setTodayAvgQPerHr] = useState(0);
+
   const [streak, setStreak] = useState(0);
 
+  const [allPastLogs, setAllPastLogs] = useState<DailyLogItem[]>([]);
   const [allTasks, setAllTasks] = useState<TaskItem[]>([]);
   const [scheduledTests, setScheduledTests] = useState<ScheduledTest[]>([]);
   const [recentTests, setRecentTests] = useState<TestLog[]>([]);
+
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
   const [chapters, setChapters] = useState<ChapterItem[]>([]);
   const [chapterProgress, setChapterProgress] = useState<{ chapter_id: string; status: string }[]>([]);
+
   const [splitRatio, setSplitRatio] = useState({ theory: 0, practice: 0, revision: 0, verified: 0 });
+
   const [examSchedules, setExamSchedules] = useState<ExamScheduleItem[]>([]);
   const [shiftsMap, setShiftsMap] = useState<Record<string, ExamShift[]>>({});
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
 
-  // Question Modal State
+  // Question logging modal state
   const [showAddQuestionModal, setShowAddQuestionModal] = useState(false);
   const [todayQuestionEntries, setTodayQuestionEntries] = useState<QuestionLogEntry[]>([]);
   const [selectedDistinctSubject, setSelectedDistinctSubject] = useState<string>("");
@@ -359,8 +862,15 @@ export default function DashboardPage() {
   const [qCount, setQCount] = useState("30");
   const [qStartFrom, setQStartFrom] = useState("1");
   const [qEndOn, setQEndOn] = useState("30");
-  const [qTimeFrom, setQTimeFrom] = useState<string>(() => `${String(new Date().getHours()).padStart(2, "0")}:00`);
-  const [qTimeTo, setQTimeTo] = useState<string>(() => `${String((new Date().getHours() + 1) % 24).padStart(2, "0")}:00`);
+  const [qTimeFrom, setQTimeFrom] = useState<string>(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, "0")}:00`;
+  });
+  const [qTimeTo, setQTimeTo] = useState<string>(() => {
+    const now = new Date();
+    const later = new Date(now.getTime() + 60 * 60 * 1000);
+    return `${String(later.getHours()).padStart(2, "0")}:00`;
+  });
   const [qLogDate, setQLogDate] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [savingQuestion, setSavingQuestion] = useState(false);
   const [questionConflictWarning, setQuestionConflictWarning] = useState<string | null>(null);
@@ -371,24 +881,42 @@ export default function DashboardPage() {
     let isCancelled = false;
 
     async function loadData() {
-      // 1. Instant Cache Hydration (0ms load)
+      // 1. SWR Memory Cache Instant Hydration (0ms latency)
       const cached = getMemCache<any>("full_dashboard_state");
       if (cached && !isCancelled) {
-        setProfile(cached.profile); setUser(cached.user); setSelectedShiftId(cached.selectedShiftId);
-        setDailyGoalMins(cached.dailyGoalMins); setSubjects(cached.subjects || []); setChapters(cached.chapters || []);
+        setProfile(cached.profile);
+        setUser(cached.user);
+        setSelectedShiftId(cached.selectedShiftId);
+        setDailyGoalMins(cached.dailyGoalMins);
+        setSubjects(cached.subjects || []);
+        setChapters(cached.chapters || []);
         if (cached.distinctSub) setSelectedDistinctSubject(cached.distinctSub);
         if (cached.initChap) setQChapterId(cached.initChap);
-        setExamSchedules(cached.examSchedules || []); setShiftsMap(cached.shiftsMap || {});
-        setTodayStudyMins(cached.todayStudyMins || 0); setSplitRatio(cached.splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 });
-        setTotalQuestionsAllTime(cached.totalQuestionsAllTime || 0); setTodayQuestions(cached.todayQuestions || 0);
-        setTodayQuestionEntries(cached.todayQuestionEntries || []); setTodayAvgQPerHr(cached.todayAvgQPerHr || 0);
-        setStreak(cached.streak || 0); setChapterProgress(cached.chapterProgress || []); setAllTasks(cached.allTasks || []);
-        setScheduledTests(cached.scheduledTests || []); setRecentTests(cached.recentTests || []);
+        setExamSchedules(cached.examSchedules || []);
+        setShiftsMap(cached.shiftsMap || {});
+        setTodayStudyMins(cached.todayStudyMins || 0);
+        setSplitRatio(cached.splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 });
+        setTotalQuestionsAllTime(cached.totalQuestionsAllTime || 0);
+        setTodayQuestions(cached.todayQuestions || 0);
+        setTodayQuestionEntries(cached.todayQuestionEntries || []);
+        setTodayAvgQPerHr(cached.todayAvgQPerHr || 0);
+        setStreak(cached.streak || 0);
+        setChapterProgress(cached.chapterProgress || []);
+        setAllTasks(cached.allTasks || []);
+        setScheduledTests(cached.scheduledTests || []);
+        setRecentTests(cached.recentTests || []);
         setLoading(false);
       }
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { if (!cached) router.push("/"); return; }
+      // 2. Auth Session Check
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        if (!cached) router.push("/");
+        return;
+      }
       const currentUser = session.user;
       const uid = currentUser.id;
       if (!isCancelled) setUser(currentUser);
@@ -406,31 +934,82 @@ export default function DashboardPage() {
       const wantsBoards = uProf.class_level !== "Dropper" && Boolean(uProf.wants_boards);
       const isDropper = uProf?.class_level === "Dropper";
 
-      // 2. Parallel Burst of all queries
-      const [subjectsRes, schedulesRes, pastLogsRes, qLogsRes, progRes, tasksRes, schedTestsRes, recentTestsRes] = await Promise.all([
-        supabase.from("subjects").select("id, name, class_level, target_exam").in("class_level", allowedClasses.length ? allowedClasses : ["11", "12"]),
-        supabase.from("exam_schedule").select("*").eq("year", targetYear).order("display_order", { ascending: true }),
-        supabase.from("daily_logs").select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, verified_minutes, streak_count, log_date").eq("user_id", uid).order("log_date", { ascending: false }).limit(84),
-        supabase.from("question_logs").select("id, question_count, log_date, topic_name, start_from, end_on, subject_id, chapter_id, time_from, time_to, source").eq("user_id", uid).order("log_date", { ascending: false }),
-        supabase.from("chapter_progress").select("chapter_id, status").eq("user_id", uid),
-        supabase.from("tasks").select("id, title, priority, status, task_type, due_date").eq("user_id", uid).neq("status", "completed").order("created_at", { ascending: false }),
-        supabase.from("test_schedule").select("id, test_name, scheduled_date, subject, status").eq("user_id", uid).eq("status", "upcoming").order("scheduled_date", { ascending: true }).limit(5),
-        supabase.from("test_logs").select("id, test_name, total_marks, max_marks, accuracy, test_date").eq("user_id", uid).order("test_date", { ascending: false }).limit(2),
+      // 3. Parallel Batch Fetching (Eliminates Waterfall Network Storms)
+      const [
+        subjectsRes,
+        schedulesRes,
+        pastLogsRes,
+        qLogsRes,
+        progRes,
+        tasksRes,
+        schedTestsRes,
+        recentTestsRes,
+      ] = await Promise.all([
+        supabase
+          .from("subjects")
+          .select("id, name, class_level, target_exam")
+          .in("class_level", allowedClasses.length ? allowedClasses : ["11", "12"]),
+        supabase
+          .from("exam_schedule")
+          .select("*")
+          .eq("year", targetYear)
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("daily_logs")
+          .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, verified_minutes, streak_count, log_date")
+          .eq("user_id", uid)
+          .order("log_date", { ascending: false })
+          .limit(84),
+        supabase
+          .from("question_logs")
+          .select("id, question_count, log_date, topic_name, start_from, end_on, subject_id, chapter_id, time_from, time_to, source")
+          .eq("user_id", uid)
+          .order("log_date", { ascending: false }),
+        supabase
+          .from("chapter_progress")
+          .select("chapter_id, status")
+          .eq("user_id", uid),
+        supabase
+          .from("tasks")
+          .select("id, title, priority, status, task_type, due_date")
+          .eq("user_id", uid)
+          .neq("status", "completed")
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("test_schedule")
+          .select("id, test_name, scheduled_date, subject, status")
+          .eq("user_id", uid)
+          .eq("status", "upcoming")
+          .order("scheduled_date", { ascending: true })
+          .limit(5),
+        supabase
+          .from("test_logs")
+          .select("id, test_name, total_marks, max_marks, accuracy, test_date")
+          .eq("user_id", uid)
+          .order("test_date", { ascending: false })
+          .limit(2),
       ]);
 
       if (isCancelled) return;
 
+      // Process Subjects & Chapters
       let cleanedSubs: SubjectItem[] = [];
       let chapsData: ChapterItem[] = [];
-      let distinctSub = "", initChap = "";
+      let distinctSub = "";
+      let initChap = "";
 
       if (subjectsRes.data) {
         cleanedSubs = subjectsRes.data.filter((s) => {
-          const norm = (s.name || "").trim().toLowerCase();
-          if (targetExam === "JEE" && (norm.includes("bio") || s.target_exam === "NEET")) return false;
-          if (targetExam === "NEET" && (norm.includes("math") || s.target_exam === "JEE")) return false;
+          if (!s.name || !s.name.trim()) return false;
+          const norm = s.name.trim().toLowerCase();
+          if (targetExam === "JEE") {
+            if (norm.includes("bio") || s.target_exam === "NEET") return false;
+          } else if (targetExam === "NEET") {
+            if (norm.includes("math") || s.target_exam === "JEE") return false;
+          }
           return true;
         });
+
         setSubjects(cleanedSubs);
         const distinctNames = Array.from(new Set(cleanedSubs.map((s) => s.name.trim())));
         distinctSub = distinctNames[0] || "";
@@ -438,23 +1017,35 @@ export default function DashboardPage() {
 
         const subIds = cleanedSubs.map((s) => s.id);
         if (subIds.length > 0) {
-          let cq = supabase.from("chapters").select("id, title, subject_id, in_competitive_syllabus").in("subject_id", subIds).order("display_order", { ascending: true });
-          if (isDropper) cq = cq.neq("in_competitive_syllabus", false);
-          const { data: chaps } = await cq;
+          let chapQuery = supabase
+            .from("chapters")
+            .select("id, title, subject_id, in_competitive_syllabus")
+            .in("subject_id", subIds)
+            .order("display_order", { ascending: true });
+          if (isDropper) chapQuery = chapQuery.neq("in_competitive_syllabus", false);
+          const { data: chaps } = await chapQuery;
           if (chaps) {
             chapsData = chaps;
             setChapters(chaps);
-            const firstActiveSubIds = cleanedSubs.filter((s) => s.name.trim().toLowerCase() === distinctSub.toLowerCase()).map((s) => s.id);
+            const firstActiveSubIds = cleanedSubs
+              .filter((s) => s.name.trim().toLowerCase() === distinctSub.toLowerCase())
+              .map((s) => s.id);
             const initialChaps = chaps.filter((c) => firstActiveSubIds.includes(c.subject_id));
-            if (initialChaps[0]) { initChap = initialChaps[0].id; setQChapterId(initChap); }
+            if (initialChaps[0]) {
+              initChap = initialChaps[0].id;
+              setQChapterId(initChap);
+            }
           }
         }
       }
 
+      // Process Exam Schedules & Shifts
       let studentSchedules: ExamScheduleItem[] = [];
       let sMap: Record<string, ExamShift[]> = {};
       if (schedulesRes.data && schedulesRes.data.length > 0) {
-        studentSchedules = schedulesRes.data.filter((s) => s.target_exam === "Boards" ? wantsBoards : s.target_exam === targetExam || s.target_exam === "ALL");
+        studentSchedules = schedulesRes.data.filter((s) =>
+          s.target_exam === "Boards" ? wantsBoards : s.target_exam === targetExam || s.target_exam === "ALL"
+        );
         const scheduleIds = studentSchedules.map((s) => s.id);
         if (scheduleIds.length > 0) {
           const { data: shifts } = await supabase.from("exam_shifts").select("*").in("exam_schedule_id", scheduleIds);
@@ -469,65 +1060,130 @@ export default function DashboardPage() {
       }
       setExamSchedules(studentSchedules);
 
-      let calcMins = 0, calcSplit = { theory: 0, practice: 0, revision: 0, verified: 0 };
+      // Process Daily Logs
+      let calculatedTodayMins = 0;
+      let calculatedSplit = { theory: 0, practice: 0, revision: 0, verified: 0 };
       if (pastLogsRes.data) {
+        setAllPastLogs(pastLogsRes.data);
         const todayLog = pastLogsRes.data.find((l) => l.log_date === todayStr);
-        calcMins = todayLog?.study_time_minutes || 0;
-        calcSplit = { theory: todayLog?.theory_minutes || 0, practice: todayLog?.practice_minutes || 0, revision: todayLog?.revision_minutes || 0, verified: todayLog?.verified_minutes || 0 };
-        setTodayStudyMins(calcMins); setSplitRatio(calcSplit);
+        calculatedTodayMins = todayLog?.study_time_minutes || 0;
+        calculatedSplit = {
+          theory: todayLog?.theory_minutes || 0,
+          practice: todayLog?.practice_minutes || 0,
+          revision: todayLog?.revision_minutes || 0,
+          verified: todayLog?.verified_minutes || 0,
+        };
+        setTodayStudyMins(calculatedTodayMins);
+        setSplitRatio(calculatedSplit);
       }
 
+      // Process Question Logs (Single Source of Truth)
       const allEntries = (qLogsRes.data || []) as QuestionLogEntry[];
       const totalQ = allEntries.reduce((acc, q) => acc + (q.question_count || 0), 0);
       setTotalQuestionsAllTime(totalQ);
 
       const todayEntries = allEntries.filter((q) => q.log_date === todayStr);
       setTodayQuestionEntries(todayEntries);
-      const calcTodayQ = todayEntries.reduce((acc, q) => acc + (q.question_count || 0), 0);
-      setTodayQuestions(calcTodayQ);
-      const calcAvg = computeTodayAvgQPerHr(todayEntries);
-      setTodayAvgQPerHr(calcAvg);
+      const calculatedTodayQ = todayEntries.reduce((acc, q) => acc + (q.question_count || 0), 0);
+      setTodayQuestions(calculatedTodayQ);
+      const calculatedAvg = computeTodayAvgQPerHr(todayEntries);
+      setTodayAvgQPerHr(calculatedAvg);
 
-      let recStreak = uProf?.current_streak || 0;
-      try { const sInfo = await loadAndReconcileStreak(uid); recStreak = sInfo.currentStreak; } catch (_) {}
-      setStreak(recStreak);
+      // Reconcile Streak
+      let reconciledStreak = uProf?.current_streak || 0;
+      try {
+        const sInfo = await loadAndReconcileStreak(uid);
+        reconciledStreak = sInfo.currentStreak;
+      } catch (_) {}
+      setStreak(reconciledStreak);
 
-      setChapterProgress(progRes.data || []);
-      setAllTasks(tasksRes.data || []);
-      setScheduledTests(schedTestsRes.data || []);
-      setRecentTests(recentTestsRes.data || []);
+      const progressData = progRes.data || [];
+      const tasksData = tasksRes.data || [];
+      const schedTestsData = schedTestsRes.data || [];
+      const recentTestsData = recentTestsRes.data || [];
 
+      setChapterProgress(progressData);
+      setAllTasks(tasksData);
+      setScheduledTests(schedTestsData);
+      setRecentTests(recentTestsData);
+
+      // Save to SWR Cache for 0ms next load
       setMemCache("full_dashboard_state", {
-        user: currentUser, profile: uProf, selectedShiftId: uProf.selected_shift_id || null,
-        dailyGoalMins: uProf.daily_goal_minutes || 480, subjects: cleanedSubs, chapters: chapsData,
-        distinctSub, initChap, examSchedules: studentSchedules, shiftsMap: sMap,
-        todayStudyMins: calcMins, splitRatio: calcSplit, totalQuestionsAllTime: totalQ,
-        todayQuestions: calcTodayQ, todayQuestionEntries: todayEntries, todayAvgQPerHr: calcAvg,
-        streak: recStreak, chapterProgress: progRes.data || [], allTasks: tasksRes.data || [],
-        scheduledTests: schedTestsRes.data || [], recentTests: recentTestsRes.data || [],
+        user: currentUser,
+        profile: uProf,
+        selectedShiftId: uProf.selected_shift_id || null,
+        dailyGoalMins: uProf.daily_goal_minutes || 480,
+        subjects: cleanedSubs,
+        chapters: chapsData,
+        distinctSub,
+        initChap,
+        examSchedules: studentSchedules,
+        shiftsMap: sMap,
+        todayStudyMins: calculatedTodayMins,
+        splitRatio: calculatedSplit,
+        totalQuestionsAllTime: totalQ,
+        todayQuestions: calculatedTodayQ,
+        todayQuestionEntries: todayEntries,
+        todayAvgQPerHr: calculatedAvg,
+        streak: reconciledStreak,
+        chapterProgress: progressData,
+        allTasks: tasksData,
+        scheduledTests: schedTestsData,
+        recentTests: recentTestsData,
       });
 
       setLoading(false);
     }
 
     loadData();
-    return () => { isCancelled = true; };
+
+    return () => {
+      isCancelled = true;
+    };
   }, [router, todayStr]);
 
-  const distinctSubjectNames = useMemo(() => Array.from(new Set(subjects.map((s) => s.name.trim()))).filter(Boolean), [subjects]);
+  const distinctSubjectNames = useMemo(() => {
+    return Array.from(new Set(subjects.map((s) => s.name.trim()))).filter(Boolean);
+  }, [subjects]);
 
   const filteredChaptersForSelectedSubject = useMemo(() => {
     if (!selectedDistinctSubject) return chapters;
-    const matching = subjects.filter((s) => s.name.trim().toLowerCase() === selectedDistinctSubject.toLowerCase()).map((s) => s.id);
-    return chapters.filter((c) => matching.includes(c.subject_id));
+    const matchingSubjectIds = subjects
+      .filter((s) => s.name.trim().toLowerCase() === selectedDistinctSubject.toLowerCase())
+      .map((s) => s.id);
+    return chapters.filter((c) => matchingSubjectIds.includes(c.subject_id));
   }, [chapters, subjects, selectedDistinctSubject]);
+
+  const handleSelectDistinctSubject = (name: string) => {
+    setSelectedDistinctSubject(name);
+    const matchingSubjectIds = subjects
+      .filter((s) => s.name.trim().toLowerCase() === name.toLowerCase())
+      .map((s) => s.id);
+    const chaps = chapters.filter((c) => matchingSubjectIds.includes(c.subject_id));
+    if (chaps[0]) setQChapterId(chaps[0].id);
+    else setQChapterId("");
+  };
+
+  const handleCompleteTask = async (id: string) => {
+    setAllTasks((prev) => prev.filter((t) => t.id !== id));
+    await supabase.from("tasks").update({ status: "completed" }).eq("id", id);
+  };
+
+  const handleCompleteTest = async (id: string) => {
+    setScheduledTests((prev) => prev.filter((t) => t.id !== id));
+    await supabase.from("test_schedule").update({ status: "completed" }).eq("id", id);
+  };
 
   const handleOpenQuestionModal = () => {
     const now = new Date();
+    const later = new Date(now.getTime() + 60 * 60 * 1000);
     setQTimeFrom(`${String(now.getHours()).padStart(2, "0")}:00`);
-    setQTimeTo(`${String((now.getHours() + 1) % 24).padStart(2, "0")}:00`);
+    setQTimeTo(`${String(later.getHours()).padStart(2, "0")}:00`);
     setQLogDate(now.toISOString().split("T")[0]);
-    setQTopicName(""); setQCount("30"); setQStartFrom("1"); setQEndOn("30");
+    setQTopicName("");
+    setQCount("30");
+    setQStartFrom("1");
+    setQEndOn("30");
     setQuestionConflictWarning(null);
     setShowAddQuestionModal(true);
   };
@@ -536,7 +1192,8 @@ export default function DashboardPage() {
     const sameDay = todayQuestionEntries.filter((e) => e.log_date === newDate);
     for (const e of sameDay) {
       if (timeRangesOverlap(newFrom, newTo, e.time_from, e.time_to)) {
-        return `Time overlap with "${e.topic_name || "previous entry"}" (${e.time_from || "?"} – ${e.time_to || "?"}). Alag time range use karo.`;
+        const label = e.topic_name || "a previous entry";
+        return `Time overlap with "${label}" (${e.time_from || "?"} – ${e.time_to || "?"}). Alag time range use karo.`;
       }
     }
     return null;
@@ -545,6 +1202,7 @@ export default function DashboardPage() {
   const handleSaveQuestionLog = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || savingQuestion) return;
+
     setQuestionConflictWarning(null);
 
     const fromMins = timeToMinutes(qTimeFrom);
@@ -556,83 +1214,225 @@ export default function DashboardPage() {
 
     if (qTimeFrom && qTimeTo) {
       const conflict = checkConflict(qTimeFrom, qTimeTo, qLogDate);
-      if (conflict) { setQuestionConflictWarning(conflict); return; }
+      if (conflict) {
+        setQuestionConflictWarning(conflict);
+        return;
+      }
     }
 
     setSavingQuestion(true);
+
     const count = parseInt(qCount) || 0;
+    const start = qStartFrom ? parseInt(qStartFrom) : null;
+    const end = qEndOn ? parseInt(qEndOn) : null;
+
     const selectedChap = chapters.find((c) => c.id === qChapterId);
-    const matchingSubjectId = selectedChap?.subject_id || subjects.find((s) => s.name.trim().toLowerCase() === selectedDistinctSubject.toLowerCase())?.id || null;
+    const matchingSubjectId =
+      selectedChap?.subject_id ||
+      subjects.find((s) => s.name.trim().toLowerCase() === selectedDistinctSubject.toLowerCase())?.id ||
+      null;
 
     try {
-      const { data, error } = await supabase.from("question_logs").insert({
-        user_id: user.id, log_date: qLogDate, subject_id: matchingSubjectId, chapter_id: qChapterId || null,
-        topic_name: qTopicName.trim(), question_count: count, start_from: qStartFrom ? parseInt(qStartFrom) : null,
-        end_on: qEndOn ? parseInt(qEndOn) : null, time_from: qTimeFrom || null, time_to: qTimeTo || null, source: "manual",
-      }).select().single();
+      const { data, error } = await supabase
+        .from("question_logs")
+        .insert({
+          user_id: user.id,
+          log_date: qLogDate,
+          subject_id: matchingSubjectId,
+          chapter_id: qChapterId || null,
+          topic_name: qTopicName.trim(),
+          question_count: count,
+          start_from: start,
+          end_on: end,
+          time_from: qTimeFrom || null,
+          time_to: qTimeTo || null,
+          source: "manual",
+        })
+        .select()
+        .single();
 
       if (!error && data) {
         const newEntry = data as QuestionLogEntry;
-        if (qLogDate === todayStr) {
-          setTodayQuestions((p) => p + count);
-          const updated = [newEntry, ...todayQuestionEntries];
-          setTodayQuestionEntries(updated);
-          setTodayAvgQPerHr(computeTodayAvgQPerHr(updated));
+        const isToday = qLogDate === todayStr;
+        if (isToday) {
+          setTodayQuestions((prev) => prev + count);
+          const updatedEntries = [newEntry, ...todayQuestionEntries];
+          setTodayQuestionEntries(updatedEntries);
+          setTodayAvgQPerHr(computeTodayAvgQPerHr(updatedEntries));
         }
-        setTotalQuestionsAllTime((p) => p + count);
+        setTotalQuestionsAllTime((prev) => prev + count);
         setShowAddQuestionModal(false);
       }
-    } finally { setSavingQuestion(false); }
+    } finally {
+      setSavingQuestion(false);
+    }
   };
 
-  const studentName = profile?.name || user?.user_metadata?.full_name || "Champion";
-  const firstName = studentName.split(" ")[0];
-  const todayHours = (todayStudyMins / 60).toFixed(1);
-  const sumSplit = splitRatio.theory + splitRatio.practice + splitRatio.revision;
-  const totalSplitMins = sumSplit > 0 ? sumSplit : 1;
+  const handleGoalSaved = async (mins: number) => {
+    setDailyGoalMins(mins);
+    if (user?.id) {
+      await supabase.from("users").update({ daily_goal_minutes: mins }).eq("uid", user.id);
+    }
+  };
+
+  const handleOpenMentorshipPopup = () => {
+    const buttons = Array.from(document.querySelectorAll("button"));
+    const mentorBtn = buttons.find((b) => {
+      const txt = (b.textContent || b.innerText || "").toUpperCase();
+      return txt.includes("GET MENTORSHIP");
+    });
+    if (mentorBtn) mentorBtn.click();
+    else router.push("/mentor");
+  };
+
+  const calculateDaysLeft = (targetDate: string) => {
+    const diff = new Date(targetDate).getTime() - new Date().getTime();
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center text-white p-6">
-        <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-2xl shadow-lg mb-4 animate-pulse">⚡</div>
+        <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-2xl shadow-lg mb-4 animate-pulse">
+          ⚡
+        </div>
         <h2 className="text-base font-black">PrepWise Cockpit</h2>
         <p className="text-xs text-slate-400 mt-1">Starting engine…</p>
       </div>
     );
   }
 
+  const studentName = profile?.name || user?.user_metadata?.full_name || "Champion";
+  const firstName = studentName.split(" ")[0];
+  const todayHours = (todayStudyMins / 60).toFixed(1);
+
+  const sumSplit = splitRatio.theory + splitRatio.practice + splitRatio.revision;
+  const totalSplitMins = sumSplit > 0 ? sumSplit : 1;
+  const theoryPct = Math.round((splitRatio.theory / totalSplitMins) * 100);
+  const practicePct = Math.round((splitRatio.practice / totalSplitMins) * 100);
+  const revisionPct = Math.round((splitRatio.revision / totalSplitMins) * 100);
+
   return (
     <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased smooth-scroll">
       <AppHeader />
-      <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
-        <HeroWidget name={firstName} streak={streak} todayStudyMins={todayStudyMins} dailyGoalMins={dailyGoalMins} onGoalSaved={(m: number) => { setDailyGoalMins(m); if (user?.id) supabase.from("users").update({ daily_goal_minutes: m }).eq("uid", user.id); }} />
 
-        {/* Exam Countdown */}
-        <div className={`grid gap-2 ${examSchedules.length === 1 ? "grid-cols-1" : examSchedules.length === 2 ? "grid-cols-2" : examSchedules.length === 3 ? "grid-cols-3" : "grid-cols-4"}`}>
+      <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
+        {/* 1. HERO WIDGET */}
+        <HeroWidget
+          name={firstName}
+          streak={streak}
+          todayStudyMins={todayStudyMins}
+          dailyGoalMins={dailyGoalMins}
+          onGoalSaved={handleGoalSaved}
+        />
+
+        {/* 2. EXAM COUNTDOWN */}
+        <div
+          className={`grid gap-2 ${
+            examSchedules.length === 1 ? "grid-cols-1"
+            : examSchedules.length === 2 ? "grid-cols-2"
+            : examSchedules.length === 3 ? "grid-cols-3"
+            : "grid-cols-4"
+          }`}
+        >
           {examSchedules.map((exam) => {
-            const days = Math.max(0, Math.ceil((new Date(exam.exam_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
+            const days = calculateDaysLeft(exam.exam_date);
             const shifts = shiftsMap[exam.id] || [];
+            const formattedDate = new Date(exam.exam_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+            let cleanLabel = exam.label;
+            const norm = cleanLabel.toLowerCase();
+            if (norm.includes("session 1") || norm.includes("jan")) cleanLabel = "JEE Main (Jan)";
+            else if (norm.includes("session 2") || norm.includes("apr")) cleanLabel = "JEE Main (Apr)";
+            else if (norm.includes("advanced")) cleanLabel = "JEE Advanced";
+
             return (
-              <div key={exam.id} className="rounded-2xl p-2.5 bg-gradient-to-b from-[#0B132B] to-[#162238] text-white shadow-md border border-slate-800 flex flex-col justify-between">
+              <div
+                key={exam.id}
+                className="rounded-2xl p-2.5 bg-gradient-to-b from-[#0B132B] to-[#162238] text-white shadow-md border border-slate-800 flex flex-col justify-between"
+              >
                 <div className="flex items-center justify-between gap-1 mb-1.5">
-                  <span className="text-[9px] font-black uppercase text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded-md truncate max-w-[70%]">{exam.label}</span>
-                  <span className="text-[8px] font-bold text-slate-400 uppercase">{exam.is_confirmed ? "Official" : "Proj."}</span>
+                  <span className="text-[9px] font-black uppercase tracking-wide text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded-md border border-amber-400/30 truncate max-w-[70%]">
+                    {cleanLabel}
+                  </span>
+                  <span className="text-[8px] font-bold text-slate-400 uppercase">
+                    {exam.is_confirmed ? "Official" : "Proj."}
+                  </span>
                 </div>
                 <div className="flex flex-col items-center justify-center my-1 bg-black/30 rounded-xl py-2 border border-white/5">
-                  <div className="text-2xl font-black text-amber-400 leading-none">{days}</div>
+                  <div className="text-2xl font-black text-amber-400 leading-none tracking-tight">{days}</div>
                   <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">DAYS LEFT</span>
                 </div>
-                <span className="text-[10px] font-bold text-slate-300 text-center">📅 {new Date(exam.exam_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
+                <div className="mt-1 pt-1.5 border-t border-white/10 flex flex-col items-center">
+                  <span className="text-[10px] font-bold text-slate-300 tracking-wide">📅 {formattedDate}</span>
+                  {shifts.length > 0 && (
+                    <div className="w-full mt-1.5">
+                      <select
+                        value={selectedShiftId || ""}
+                        onChange={(e) => setSelectedShiftId(e.target.value)}
+                        className="w-full bg-slate-800 text-white rounded-lg px-1.5 py-1 border border-slate-700 text-[9px] font-semibold truncate"
+                      >
+                        <option value="">Select Shift</option>
+                        {shifts.map((sh) => (
+                          <option key={sh.id} value={sh.id}>{sh.shift_date} ({sh.shift_time})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
 
-        {/* Metrics Row */}
+        {/* 3. AI MENTOR WIDGET */}
+        <div className="space-y-2">
+          <AiMentorCard
+            userId={user?.id}
+            targetExam={profile?.target_exam || "JEE"}
+            report={mentorReport}
+            loading={mentorLoading}
+            onRefresh={() => {}}
+            onOpenDoubtSolver={() => setDoubtOpen(true)}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={handleOpenMentorshipPopup}
+              className="flex items-center gap-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all"
+            >
+              <span className="text-lg">🧠</span>
+              <div className="text-left">
+                <div className="text-xs font-black leading-none">AI Mentorship</div>
+                <div className="text-[9px] font-semibold text-indigo-200 leading-tight mt-0.5">7-day plan & analysis</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDoubtOpen(true)}
+              className="flex items-center gap-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all"
+            >
+              <span className="text-lg">✨</span>
+              <div className="text-left">
+                <div className="text-xs font-black leading-none">Doubt Solver</div>
+                <div className="text-[9px] font-semibold text-slate-400 leading-tight mt-0.5">Ask anything instantly</div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* 4. METRICS ROW */}
         <div className="grid grid-cols-3 gap-2">
-          <button type="button" onClick={() => router.push("/focus")} className="bg-white p-3 rounded-2xl border border-slate-200/90 text-left active:scale-[0.98] transition-all shadow-2xs">
+          {/* Today Study */}
+          <button
+            type="button"
+            onClick={() => router.push("/focus")}
+            className="bg-white p-3 rounded-2xl border border-slate-200/90 text-left active:scale-[0.98] transition-all hover:border-teal-500 shadow-2xs"
+          >
             <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Today Study</span>
-            <div className="text-lg font-black text-slate-900 tracking-tight">{todayHours}<span className="text-xs font-semibold text-slate-500 ml-0.5">h</span></div>
+            <div className="text-lg font-black text-slate-900 tracking-tight">
+              {todayHours}
+              <span className="text-xs font-semibold text-slate-500 ml-0.5">h</span>
+            </div>
             <span className="text-[10px] font-bold text-teal block mt-0.5">Study Timer →</span>
           </button>
 
@@ -641,116 +1441,393 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-center justify-between mb-0.5">
                 <span className="text-[10px] font-bold text-slate-600">Questions Today</span>
-                <button type="button" onClick={handleOpenQuestionModal} className="text-[9.5px] font-black text-teal bg-teal/10 px-1.5 py-0.5 rounded border border-teal/20 hover:bg-teal/20">+Add</button>
+                <button
+                  type="button"
+                  onClick={handleOpenQuestionModal}
+                  className="text-[9.5px] font-black text-teal bg-teal/10 px-1.5 py-0.5 rounded border border-teal/20 hover:bg-teal/20"
+                >
+                  +Add
+                </button>
               </div>
               <div className="flex items-end gap-1.5 mt-0.5">
                 <span className="text-lg font-black text-slate-900 tracking-tight leading-none">{todayQuestions}</span>
-                {todayAvgQPerHr > 0 && <span className="text-[10px] font-bold text-indigo-600 leading-none mb-0.5 whitespace-nowrap">{todayAvgQPerHr} Q/h</span>}
+                {todayAvgQPerHr > 0 && (
+                  <span className="text-[10px] font-bold text-indigo-600 leading-none mb-0.5 whitespace-nowrap">
+                    {todayAvgQPerHr} Q/h
+                  </span>
+                )}
               </div>
             </div>
             <div className="mt-1 pt-1 border-t border-slate-100">
-              <span className="text-[9px] font-semibold text-slate-400">All time: <span className="font-bold text-slate-600">{totalQuestionsAllTime}</span></span>
+              <span className="text-[9px] font-semibold text-slate-400">
+                All time: <span className="font-bold text-slate-600">{totalQuestionsAllTime}</span>
+              </span>
             </div>
           </div>
 
+          {/* Tasks */}
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Tasks</span>
             <div className="text-lg font-black text-slate-900 tracking-tight">{allTasks.length}</div>
-            <span className={`text-[10px] font-bold block mt-0.5 ${allTasks.length > 0 ? "text-rose-600" : "text-emerald-600"}`}>{allTasks.length > 0 ? "Pending" : "All Done ✓"}</span>
+            <span className={`text-[10px] font-bold block mt-0.5 ${allTasks.length > 0 ? "text-rose-600" : "text-emerald-600"}`}>
+              {allTasks.length > 0 ? "Pending" : "All Done ✓"}
+            </span>
           </div>
         </div>
 
-        {/* Study Split */}
+        {/* 5. TODAY'S STUDY DISTRIBUTION */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
-          <div className="text-xs font-black text-slate-900 mb-2.5">⚖️ Today's Study Split</div>
-          <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex mb-2.5">
-            <div style={{ width: `${Math.round((splitRatio.theory / totalSplitMins) * 100)}%` }} className="bg-amber-500" />
-            <div style={{ width: `${Math.round((splitRatio.practice / totalSplitMins) * 100)}%` }} className="bg-teal" />
-            <div style={{ width: `${Math.round((splitRatio.revision / totalSplitMins) * 100)}%` }} className="bg-indigo-600" />
+          <div className="flex items-center justify-between text-xs font-black mb-2.5">
+            <span className="text-slate-900 font-bold flex items-center gap-1.5">
+              <span>⚖️</span> Today's Study Split
+            </span>
+          </div>
+          <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex mb-2.5 shadow-inner">
+            <div style={{ width: `${sumSplit > 0 ? theoryPct : 33}%` }} className="bg-amber-500 transition-all" />
+            <div style={{ width: `${sumSplit > 0 ? practicePct : 50}%` }} className="bg-teal transition-all" />
+            <div style={{ width: `${sumSplit > 0 ? revisionPct : 17}%` }} className="bg-indigo-600 transition-all" />
           </div>
           <div className="flex items-center justify-between text-[11px] font-bold px-0.5">
-            <span className="text-amber-800">Theory ({splitRatio.theory}m)</span>
-            <span className="text-teal-800">Practice ({splitRatio.practice}m)</span>
-            <span className="text-indigo-800">Revision ({splitRatio.revision}m)</span>
+            <span className="flex items-center gap-1.5 text-amber-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Theory ({splitRatio.theory}m)
+            </span>
+            <span className="flex items-center gap-1.5 text-teal-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-teal" /> Practice ({splitRatio.practice}m)
+            </span>
+            <span className="flex items-center gap-1.5 text-indigo-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" /> Revision ({splitRatio.revision}m)
+            </span>
           </div>
+          {splitRatio.verified > 0 && (
+            <div className="mt-2.5 flex items-center gap-2 bg-teal/10 border border-teal/20 rounded-xl px-3 py-2">
+              <span className="text-sm">🛡️</span>
+              <div className="flex-1">
+                <span className="text-[11px] font-bold text-teal">{splitRatio.verified}m Verified (Leaderboard Counted)</span>
+                <p className="text-[10px] text-teal/80 mt-0.5">Face cam + App blocker both ON</p>
+              </div>
+              <span className="text-xs font-black text-teal">
+                {Math.round((splitRatio.verified / Math.max(todayStudyMins, 1)) * 100)}%
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* 6. SYLLABUS COMPLETION WIDGET (RESTORED) */}
+        <SyllabusCompletionWidget
+          subjects={subjects}
+          chapters={chapters}
+          progress={chapterProgress}
+          onOpenSyllabus={() => router.push("/library")}
+        />
+
+        {/* 7. COMBINED ACTION ITEMS (RESTORED) */}
+        <ActionItemsWidget
+          tasks={allTasks}
+          scheduledTests={scheduledTests}
+          onCompleteTask={handleCompleteTask}
+          onCompleteTest={handleCompleteTest}
+          onAddTask={() => router.push("/todo")}
+          onViewAll={() => router.push("/todo")}
+        />
+
+        {/* 8. RECENT MOCK TESTS (RESTORED) */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
+          <div className="flex items-center justify-between text-xs font-black mb-2.5">
+            <span className="text-slate-900 font-bold flex items-center gap-1.5">
+              <span>📈</span> Recent Mock Performance
+            </span>
+            <button type="button" onClick={() => router.push("/tests")} className="text-[11px] font-bold text-indigo-700 hover:underline">
+              View Hub →
+            </button>
+          </div>
+          {recentTests.length === 0 ? (
+            <div className="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl flex items-center justify-between">
+              <div>
+                <div className="text-xs font-black text-indigo-950">No Tests Logged</div>
+                <div className="text-[10px] font-semibold text-slate-600">Log mock test marks to track accuracy</div>
+              </div>
+              <button type="button" onClick={() => router.push("/tests")} className="px-3 py-1.5 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-xs">
+                + Log Score
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {recentTests.slice(0, 2).map((t) => (
+                <div key={t.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+                  <div>
+                    <div className="font-black text-slate-900 text-xs">{t.test_name}</div>
+                    <div className="text-[10px] font-semibold text-slate-500">{t.test_date}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-black text-slate-900 text-sm">{t.total_marks} / {t.max_marks}</div>
+                    <div className="text-[10px] font-bold text-teal">
+                      Acc: {t.accuracy || Math.round((t.total_marks / t.max_marks) * 100)}%
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 9. QUICK ROUTE CARDS (RESTORED) */}
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => router.push("/library")}
+            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
+          >
+            <div className="text-xl mb-1">📚</div>
+            <div>
+              <div className="text-xs font-black text-slate-900">Syllabus</div>
+              <div className="text-[9px] font-semibold text-slate-500">Chapters & Backlogs</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/tests")}
+            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
+          >
+            <div className="text-xl mb-1">📊</div>
+            <div>
+              <div className="text-xs font-black text-slate-900">Test Hub</div>
+              <div className="text-[8.5px] font-semibold text-slate-500 leading-tight">LOG, VIEW & SCHEDULE</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/analytics")}
+            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
+          >
+            <div className="text-xl mb-1">📈</div>
+            <div>
+              <div className="text-xs font-black text-slate-900">Analytics</div>
+              <div className="text-[9px] font-semibold text-slate-500">Charts & Heatmap</div>
+            </div>
+          </button>
         </div>
       </main>
 
-      {/* Question Logging Modal */}
+      {/* 10. QUESTION LOGGING MODAL WITH LIVE TIME RANGE & CONFLICT DETECTION */}
       {showAddQuestionModal && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-sm w-full border border-slate-300 overflow-hidden flex flex-col max-h-[92vh] shadow-xl">
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
-              <h3 className="text-sm font-black text-slate-900">✏️ Log Questions Solved</h3>
-              <button type="button" onClick={() => setShowAddQuestionModal(false)} className="w-7 h-7 rounded-full text-slate-500 hover:bg-slate-200 text-sm font-bold">✕</button>
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-teal text-white flex items-center justify-center text-sm shadow-xs font-bold">
+                  ✏️
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Log Questions Solved</h3>
+                  <p className="text-[10px] font-semibold text-slate-500">Track today's practice velocity</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddQuestionModal(false)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-200 text-sm font-bold"
+              >
+                ✕
+              </button>
             </div>
+
             {todayQuestionEntries.length > 0 && (
-              <div className="p-3 bg-slate-100/80 border-b border-slate-200 text-xs shrink-0 max-h-20 overflow-y-auto">
-                <span className="text-[10px] font-black text-slate-500 uppercase block mb-1">Today's Entries</span>
-                {todayQuestionEntries.map((e) => (
-                  <div key={e.id} className="flex items-center justify-between bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px] font-bold mb-1">
-                    <span className="truncate">{e.topic_name || "Practice"} {e.time_from && `(${e.time_from}-${e.time_to})`}</span>
-                    <span className="text-teal ml-1">+{e.question_count} Qs</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <form onSubmit={handleSaveQuestionLog} className="p-4 space-y-3 overflow-y-auto text-xs">
-              {questionConflictWarning && <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-[11px] font-bold text-rose-700">⚠️ {questionConflictWarning}</div>}
-              <div>
-                <label className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">Date</label>
-                <input type="date" value={qLogDate} onChange={(e) => setQLogDate(e.target.value)} max={todayStr} className="w-full p-2 border border-slate-300 rounded-xl text-xs font-bold" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[9px] font-bold text-slate-500 mb-0.5">From</label>
-                  <input type="time" value={qTimeFrom} onChange={(e) => setQTimeFrom(e.target.value)} className="w-full p-2 border border-slate-300 rounded-xl text-xs font-bold" />
-                </div>
-                <div>
-                  <label className="block text-[9px] font-bold text-slate-500 mb-0.5">To</label>
-                  <input type="time" value={qTimeTo} onChange={(e) => setQTimeTo(e.target.value)} className="w-full p-2 border border-slate-300 rounded-xl text-xs font-bold" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">Subject</label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {distinctSubjectNames.map((n) => (
-                    <button key={n} type="button" onClick={() => setSelectedDistinctSubject(n)} className={`py-1.5 rounded-xl border text-xs font-bold ${selectedDistinctSubject.toLowerCase() === n.toLowerCase() ? "bg-slate-900 text-white" : "bg-white text-slate-700"}`}>{n}</button>
+              <div className="p-3 bg-slate-100/80 border-b border-slate-200 text-xs shrink-0">
+                <span className="text-[10px] font-black text-slate-500 uppercase block mb-1.5">Today's Entries</span>
+                <div className="space-y-1 max-h-20 overflow-y-auto pr-1">
+                  {todayQuestionEntries.map((e) => (
+                    <div
+                      key={e.id}
+                      className="flex items-center justify-between bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-[11px] font-bold"
+                    >
+                      <div className="truncate">
+                        <span className="text-slate-800">{e.topic_name || "Practice Session"}</span>
+                        {e.time_from && e.time_to && (
+                          <span className="ml-1.5 text-slate-400 font-normal text-[9px]">{e.time_from}–{e.time_to}</span>
+                        )}
+                        {e.source && e.source !== "manual" && (
+                          <span className="ml-1 text-[9px] text-indigo-500 font-semibold">[{e.source}]</span>
+                        )}
+                      </div>
+                      <span className="text-teal shrink-0 ml-2">+{e.question_count} Qs</span>
+                    </div>
                   ))}
                 </div>
               </div>
+            )}
+
+            <form onSubmit={handleSaveQuestionLog} className="p-4 space-y-3 overflow-y-auto text-xs">
+              {questionConflictWarning && (
+                <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-[11px] font-bold text-rose-700">
+                  ⚠️ {questionConflictWarning}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">Date</label>
+                <input
+                  type="date"
+                  value={qLogDate}
+                  onChange={(e) => {
+                    setQLogDate(e.target.value);
+                    setQuestionConflictWarning(null);
+                  }}
+                  max={todayStr}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">Study Time Frame</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <p className="text-[9px] font-bold text-slate-500 mb-0.5">From</p>
+                    <input
+                      type="time"
+                      value={qTimeFrom}
+                      onChange={(e) => {
+                        setQTimeFrom(e.target.value);
+                        setQuestionConflictWarning(null);
+                      }}
+                      className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-bold text-slate-500 mb-0.5">To</p>
+                    <input
+                      type="time"
+                      value={qTimeTo}
+                      onChange={(e) => {
+                        setQTimeTo(e.target.value);
+                        setQuestionConflictWarning(null);
+                      }}
+                      className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
+                    />
+                  </div>
+                </div>
+                {qTimeFrom && qTimeTo && (() => {
+                  const f = timeToMinutes(qTimeFrom);
+                  const t = timeToMinutes(qTimeTo);
+                  if (f !== null && t !== null && t > f) {
+                    const dur = t - f;
+                    const hrs = Math.floor(dur / 60);
+                    const mins = dur % 60;
+                    return (
+                      <p className="text-[10px] font-bold text-teal mt-1">
+                        ⏱ Duration: {hrs > 0 ? `${hrs}h ` : ""}{mins > 0 ? `${mins}m` : ""}
+                        {parseInt(qCount) > 0 && (t - f) > 0
+                          ? ` · ${Math.round((parseInt(qCount) / (t - f)) * 60)} Q/hr`
+                          : ""}
+                      </p>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">Subject</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {distinctSubjectNames.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => handleSelectDistinctSubject(name)}
+                      className={`py-2 rounded-xl border text-xs font-bold transition-all ${
+                        selectedDistinctSubject.toLowerCase() === name.toLowerCase()
+                          ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+                          : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">Chapter</label>
-                <select value={qChapterId} onChange={(e) => setQChapterId(e.target.value)} className="w-full p-2 border border-slate-300 rounded-xl text-xs font-bold">
-                  {filteredChaptersForSelectedSubject.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+                <select
+                  value={qChapterId}
+                  onChange={(e) => setQChapterId(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
+                >
+                  {filteredChaptersForSelectedSubject.map((c) => (
+                    <option key={c.id} value={c.id}>{c.title}</option>
+                  ))}
                 </select>
               </div>
+
               <div>
-                <label className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">Topic / DPP</label>
-                <input type="text" value={qTopicName} onChange={(e) => setQTopicName(e.target.value)} placeholder="e.g. Kinematics DPP 1" className="w-full p-2 border border-slate-300 rounded-xl text-xs" />
+                <label className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">Topic / DPP Name</label>
+                <input
+                  type="text"
+                  value={qTopicName}
+                  onChange={(e) => setQTopicName(e.target.value)}
+                  placeholder="e.g. Kinematics Level 2 DPP"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
+                />
               </div>
+
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-[9px] font-extrabold text-slate-700 uppercase mb-0.5">Total Qs</label>
-                  <input type="number" min="1" value={qCount} onChange={(e) => setQCount(e.target.value)} required className="w-full p-2 border border-slate-300 rounded-xl text-xs font-bold text-center" />
+                  <label className="block text-[9.5px] font-extrabold text-slate-700 uppercase mb-1">Total Qs</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={qCount}
+                    onChange={(e) => setQCount(e.target.value)}
+                    required
+                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-center"
+                  />
                 </div>
                 <div>
-                  <label className="block text-[9px] font-extrabold text-slate-700 uppercase mb-0.5">From #</label>
-                  <input type="number" value={qStartFrom} onChange={(e) => setQStartFrom(e.target.value)} className="w-full p-2 border border-slate-300 rounded-xl text-xs text-center" />
+                  <label className="block text-[9.5px] font-extrabold text-slate-700 uppercase mb-1">From Q#</label>
+                  <input
+                    type="number"
+                    value={qStartFrom}
+                    onChange={(e) => setQStartFrom(e.target.value)}
+                    placeholder="1"
+                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-center"
+                  />
                 </div>
                 <div>
-                  <label className="block text-[9px] font-extrabold text-slate-700 uppercase mb-0.5">To #</label>
-                  <input type="number" value={qEndOn} onChange={(e) => setQEndOn(e.target.value)} className="w-full p-2 border border-slate-300 rounded-xl text-xs text-center" />
+                  <label className="block text-[9.5px] font-extrabold text-slate-700 uppercase mb-1">To Q#</label>
+                  <input
+                    type="number"
+                    value={qEndOn}
+                    onChange={(e) => setQEndOn(e.target.value)}
+                    placeholder="30"
+                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-center"
+                  />
                 </div>
               </div>
+
               <div className="pt-2 flex gap-2">
-                <button type="button" onClick={() => setShowAddQuestionModal(false)} className="flex-1 py-2.5 rounded-xl border border-slate-300 font-black text-xs">Cancel</button>
-                <button type="submit" disabled={savingQuestion} className="flex-1 py-2.5 rounded-xl bg-teal text-white font-black text-xs">{savingQuestion ? "Saving…" : "Save Entry"}</button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddQuestionModal(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-black text-xs hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingQuestion}
+                  className="flex-1 py-2.5 rounded-xl bg-teal text-white font-black text-xs hover:bg-teal/90 disabled:opacity-50 shadow-md"
+                >
+                  {savingQuestion ? "Saving…" : "Save Entry"}
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* 11. AI DOUBT SOLVER SHEET */}
+      <AiChatSheet open={doubtOpen} onClose={() => setDoubtOpen(false)} />
+
+      {/* 12. BOTTOM NAVIGATION */}
       <BottomNav />
     </div>
   );
