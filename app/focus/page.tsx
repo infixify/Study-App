@@ -440,7 +440,7 @@ export default function FocusPage() {
   };
 
   // ==========================================
-  // BULLETPROOF MANUAL ENTRY LOGIC (FIXED)
+  // BULLETPROOF MANUAL ENTRY WITH AUTO-RETRY
   // ==========================================
   const handleSaveManualEntry = async () => {
     if (!userId) return;
@@ -455,7 +455,7 @@ export default function FocusPage() {
       // 1. Fetch current daily log for chosen date
       const { data: dailyRow } = await supabase
         .from("daily_logs")
-        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, questions_solved, questions_count")
+        .select("*")
         .eq("user_id", userId)
         .eq("log_date", manualDate)
         .maybeSingle();
@@ -465,25 +465,35 @@ export default function FocusPage() {
       const newPractice = (dailyRow?.practice_minutes || 0) + (chosenTask === "questions" ? chosenMinutes : 0);
       const newRevision = (dailyRow?.revision_minutes || 0) + (chosenTask === "revision" ? chosenMinutes : 0);
 
-      // Accumulate questions properly (both column names for compatibility)
       const prevQs = (dailyRow as any)?.questions_solved ?? (dailyRow as any)?.questions_count ?? 0;
       const newTotalQs = prevQs + chosenQs;
 
-      // 2. Update daily summary in daily_logs with Questions count!
-      const { error: dailyErr } = await supabase.from("daily_logs").upsert(
-        {
-          user_id: userId,
-          log_date: manualDate,
-          study_time_minutes: newMins,
-          theory_minutes: newTheory,
-          practice_minutes: newPractice,
-          revision_minutes: newRevision,
-          questions_solved: newTotalQs,
-          questions_count: newTotalQs,
-        },
+      // 2. Prepare payload with Questions
+      const logPayload: Record<string, any> = {
+        user_id: userId,
+        log_date: manualDate,
+        study_time_minutes: newMins,
+        theory_minutes: newTheory,
+        practice_minutes: newPractice,
+        revision_minutes: newRevision,
+      };
+
+      if (chosenQs > 0) {
+        logPayload.questions_solved = newTotalQs;
+        logPayload.questions_count = newTotalQs;
+      }
+
+      let { error: dailyErr } = await supabase.from("daily_logs").upsert(
+        logPayload,
         { onConflict: "user_id,log_date" }
       );
-      if (dailyErr) console.error("daily_logs upsert err:", dailyErr);
+
+      // Graceful fallback: If questions column missing, retry without it so study time is never lost
+      if (dailyErr && dailyErr.message && dailyErr.message.includes("question")) {
+        delete logPayload.questions_solved;
+        delete logPayload.questions_count;
+        await supabase.from("daily_logs").upsert(logPayload, { onConflict: "user_id,log_date" });
+      }
 
       // 3. Construct synthetic timestamp matching manualDate
       const [year, month, day] = manualDate.split("-").map(Number);
@@ -493,7 +503,7 @@ export default function FocusPage() {
       const syntheticStart = new Date(syntheticEnd.getTime() - chosenMinutes * 60 * 1000);
 
       // 4. Single Direct Insert into focus_sessions with chosen subject (never null or General)
-      const { error: sessionErr } = await supabase.from("focus_sessions").insert({
+      const sessionPayload: Record<string, any> = {
         user_id: userId,
         started_at: syntheticStart.toISOString(),
         ended_at: syntheticEnd.toISOString(),
@@ -502,10 +512,19 @@ export default function FocusPage() {
         subject: chosenSub,
         task_type: chosenTask,
         verified: false,
-        questions_solved: chosenQs,
-        questions_count: chosenQs,
-      });
-      if (sessionErr) console.error("focus_sessions insert err:", sessionErr);
+      };
+
+      if (chosenQs > 0) {
+        sessionPayload.questions_solved = chosenQs;
+        sessionPayload.questions_count = chosenQs;
+      }
+
+      let { error: sessionErr } = await supabase.from("focus_sessions").insert(sessionPayload);
+      if (sessionErr && sessionErr.message && sessionErr.message.includes("question")) {
+        delete sessionPayload.questions_solved;
+        delete sessionPayload.questions_count;
+        await supabase.from("focus_sessions").insert(sessionPayload);
+      }
 
       // 5. Reconcile streak if today
       const todayStr = new Date().toISOString().split("T")[0];
