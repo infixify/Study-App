@@ -4,7 +4,7 @@ import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import PostHogInit from "@/components/PostHogInit";
 import FcmSync from "@/components/FcmSync";
-import AppHeader from "@/components/dashboard/AppHeader";
+import { HeaderProvider } from "@/components/dashboard/AppHeader";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const spaceGrotesk = Space_Grotesk({
@@ -39,6 +39,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
               try {
+                // 1. Theme recovery
                 const saved = localStorage.getItem("prepwise_theme");
                 const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
                 if (saved === "dark" || (!saved && prefersDark)) {
@@ -46,12 +47,22 @@ export default function RootLayout({
                 } else {
                   document.documentElement.classList.remove("dark");
                 }
+
+                // 2. ZERO-FLASH AUTH REDIRECT:
+                // Runs synchronously in 0ms BEFORE React renders login UI
+                const isAuth = Object.keys(localStorage).some(function(k) {
+                  return (k.includes("auth-token") || k.includes("sb-")) && 
+                         (localStorage.getItem(k) || "").includes("access_token");
+                });
+                if (isAuth && (window.location.pathname === "/" || window.location.pathname === "/login")) {
+                  window.location.replace("/dashboard");
+                }
               } catch (_) {}
 
-              // Safe Media Service Worker Registration
+              // 3. Safe Media Service Worker Registration
               if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-                window.addEventListener("load", () => {
-                  navigator.serviceWorker.register("/sw.js").catch(() => {});
+                window.addEventListener("load", function() {
+                  navigator.serviceWorker.register("/sw.js").catch(function() {});
                 });
               }
             `,
@@ -61,8 +72,9 @@ export default function RootLayout({
       <body className="font-body bg-paper text-ink antialiased selection:bg-teal-500/20">
         <PostHogInit />
         <FcmSync />
-        <AppHeader />
-        {children}
+        <HeaderProvider>
+          {children}
+        </HeaderProvider>
       </body>
     </html>
   );
