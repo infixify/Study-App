@@ -15,14 +15,18 @@ interface SubjectItem {
   chapters: ChapterItem[];
 }
 
+// In-Memory cache for Resources to guarantee 0ms instant display on tab switch
+const RESOURCE_CACHE_KEY = "pw_resources_cache";
+let inMemoryResourcesCache: { subjects: SubjectItem[]; resources: Resource[]; timestamp: number } | null = null;
+
 export default function ResourcesPage() {
-  const [subjects, setSubjects] = useState<SubjectItem[]>([]);
-  const [resources, setResources] = useState<Resource[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [subjects, setSubjects] = useState<SubjectItem[]>(() => inMemoryResourcesCache?.subjects || []);
+  const [resources, setResources] = useState<Resource[]>(() => inMemoryResourcesCache?.resources || []);
+  const [loading, setLoading] = useState(() => !inMemoryResourcesCache);
   const [activeType, setActiveType] = useState<string | null>(null);
   const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
 
-  // Auto-intercept direct PDF & Google Drive downloads to use Native DownloadManager instead of opening Google Drive App
+  // Auto-intercept direct PDF & Google Drive downloads
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
       const target = (event.target as HTMLElement).closest("a, button");
@@ -81,6 +85,24 @@ export default function ResourcesPage() {
     let cancelled = false;
 
     async function load() {
+      // Check cached localStorage snapshot first
+      if (!inMemoryResourcesCache) {
+        try {
+          const raw = localStorage.getItem(RESOURCE_CACHE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Date.now() - parsed.timestamp < 5 * 60 * 1000) {
+              inMemoryResourcesCache = parsed;
+              if (!cancelled) {
+                setSubjects(parsed.subjects);
+                setResources(parsed.resources);
+                setLoading(false);
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
       const { data: authData } = await supabase.auth.getUser();
       const user = authData?.user;
       if (!user) {
@@ -120,6 +142,7 @@ export default function ResourcesPage() {
 
       const subjectRowIds: string[] = subjectRows.map((s) => s.id);
 
+      // Batch queries in parallel
       const [chapterRes, chapterResourceRes, subjectResourceRes] = await Promise.all([
         supabase
           .from("chapters")
@@ -173,10 +196,19 @@ export default function ResourcesPage() {
         entry.chapters.push(...chaptersForRow);
       }
 
+      const finalSubjects = Array.from(grouped.values());
+
       if (!cancelled) {
-        setSubjects(Array.from(grouped.values()));
+        setSubjects(finalSubjects);
         setResources(allResources);
         setLoading(false);
+
+        // Store snapshot in memory + localStorage
+        const cachePayload = { subjects: finalSubjects, resources: allResources, timestamp: Date.now() };
+        inMemoryResourcesCache = cachePayload;
+        try {
+          localStorage.setItem(RESOURCE_CACHE_KEY, JSON.stringify(cachePayload));
+        } catch (_) {}
       }
     }
 
@@ -293,7 +325,7 @@ export default function ResourcesPage() {
 
   return e(
     "div",
-    { className: "min-h-screen bg-paper pb-28" },
+    { className: "min-h-screen bg-paper pb-28 smooth-scroll" },
     e("div", { className: "max-w-md mx-auto px-5 pt-8" }, body),
     e(BottomNav)
   );
