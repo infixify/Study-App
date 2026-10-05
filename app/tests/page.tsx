@@ -1,7 +1,7 @@
 // app/tests/page.tsx
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AppHeader from "@/components/dashboard/AppHeader";
@@ -65,15 +65,25 @@ export default function TestsPage() {
   const [subjectKey, setSubjectKey] = useState("");
   const [chapterId, setChapterId] = useState("");
   const [testName, setTestName] = useState("");
+
+  // Default to empty strings so placeholders '0' show cleanly
   const [correct, setCorrect] = useState("");
   const [wrong, setWrong] = useState("");
   const [unattempted, setUnattempted] = useState("");
-  const [marksScored, setMarksScored] = useState("");
-  const [maxMarks, setMaxMarks] = useState("300");
+
   const [pMarks, setPMarks] = useState("");
   const [cMarks, setCMarks] = useState("");
   const [mMarks, setMMarks] = useState("");
   const [testDate, setTestDate] = useState(new Date().toISOString().slice(0, 10));
+
+  // --- LIVE AUTO-CALCULATION OF QUESTIONS & MARKS ---
+  const cNum = Number(correct) || 0;
+  const wNum = Number(wrong) || 0;
+  const uNum = Number(unattempted) || 0;
+
+  const totalQuestionsLive = useMemo(() => cNum + wNum + uNum, [cNum, wNum, uNum]);
+  const marksScoredLive = useMemo(() => (cNum * 4) - (wNum * 1), [cNum, wNum]);
+  const maxMarksLive = useMemo(() => (totalQuestionsLive > 0 ? totalQuestionsLive * 4 : 300), [totalQuestionsLive]);
 
   // --- schedule form state ---
   const [schedTitle, setSchedTitle] = useState("");
@@ -195,9 +205,7 @@ export default function TestsPage() {
 
   // Load chapters when schedSubjectKey changes
   useEffect(() => {
-    if (!schedSubjectKey) {
-      return;
-    }
+    if (!schedSubjectKey) return;
     const subj = subjects.find((s) => s.key === schedSubjectKey);
     if (!subj) return;
 
@@ -226,7 +234,7 @@ export default function TestsPage() {
     fetchSchedChapters();
   }, [schedSubjectKey, subjects, isPureDropper]);
 
-  // Log test submit
+  // Log test submit with auto-calculated values
   const handleLogSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -238,11 +246,8 @@ export default function TestsPage() {
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Please log in to record a test score.");
 
-      const c = Number(correct) || 0;
-      const w = Number(wrong) || 0;
-      const u = Number(unattempted) || 0;
-      const totalQ = c + w + u;
-      const accuracy = totalQ > 0 ? Math.round((c / (c + w)) * 100) || 0 : null;
+      const totalQ = totalQuestionsLive;
+      const accuracy = (cNum + wNum) > 0 ? Math.round((cNum / (cNum + wNum)) * 100) : null;
 
       const chosenSubj = subjects.find((s) => s.key === subjectKey);
       let representativeSubjectId = null;
@@ -258,11 +263,11 @@ export default function TestsPage() {
           scope === "chapter" || scope === "subject" ? representativeSubjectId : null,
         chapter_id: scope === "chapter" && chapterId ? chapterId : null,
         total_questions: totalQ,
-        correct_count: c,
-        wrong_count: w,
-        unattempted_count: u,
-        marks_scored: marksScored !== "" ? Number(marksScored) : null,
-        max_marks: maxMarks !== "" ? Number(maxMarks) : null,
+        correct_count: cNum,
+        wrong_count: wNum,
+        unattempted_count: uNum,
+        marks_scored: marksScoredLive,
+        max_marks: maxMarksLive,
         physics_marks: pMarks ? Number(pMarks) : null,
         chemistry_marks: cMarks ? Number(cMarks) : null,
         maths_marks: mMarks ? Number(mMarks) : null,
@@ -278,7 +283,6 @@ export default function TestsPage() {
       setCorrect("");
       setWrong("");
       setUnattempted("");
-      setMarksScored("");
       setPMarks("");
       setCMarks("");
       setMMarks("");
@@ -335,7 +339,6 @@ export default function TestsPage() {
     }
   };
 
-  // Toggle schedule is_done
   const toggleScheduleDone = async (id: string, current: boolean) => {
     try {
       await supabase
@@ -391,7 +394,7 @@ export default function TestsPage() {
           </div>
         )}
 
-        {/* 📈 JEETrack-Style Summary */}
+        {/* 📈 Summary */}
         {logs.length > 0 && (
           <div className="rounded-ticket border border-ink/10 bg-white p-5 shadow-xs mb-5">
             <div className="grid grid-cols-3 gap-2 pb-4 border-b border-ink/8 text-center">
@@ -552,26 +555,6 @@ export default function TestsPage() {
                 </select>
               )}
 
-              {/* 🎯 GUIDANCE PROMPT FOR CHAPTER SCOPE (Requested Addition) */}
-              {scope === "chapter" && (
-                <div className="p-3 bg-teal/10 border border-teal/20 rounded-xl flex items-center justify-between gap-2 mb-3">
-                  <div>
-                    <p className="text-[11px] font-bold text-teal-900 leading-tight">
-                      Chapter Micro Practice & Revision?
-                    </p>
-                    <p className="text-[10px] text-slate mt-0.5">
-                      Log questions directly under chapter card in Syllabus.
-                    </p>
-                  </div>
-                  <a
-                    href="/library"
-                    className="px-3 py-1.5 bg-teal text-white rounded-lg text-[10px] font-extrabold hover:bg-teal/90 transition-all shrink-0"
-                  >
-                    Go to Syllabus ➔
-                  </a>
-                </div>
-              )}
-
               <input
                 type="text"
                 placeholder="Test name (e.g. Allen Major Test 04 / FIITJEE AITS)"
@@ -580,7 +563,7 @@ export default function TestsPage() {
                 className="w-full rounded-xl border border-ink/15 p-2.5 text-xs font-semibold mb-3 bg-white focus:outline-none focus:border-teal"
               />
 
-              {/* 🎯 SUBJECT BREAKDOWN ONLY FOR FULL SYLLABUS (Removed redundancy from Subject Test) */}
+              {/* Subject Breakdown for Full Mock */}
               {scope === "full_syllabus" && (
                 <div className="p-3 rounded-xl bg-paper/60 border border-ink/8 mb-3">
                   <p className="text-[11px] font-bold text-ink mb-1.5">
@@ -588,9 +571,7 @@ export default function TestsPage() {
                   </p>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
-                      <span className="text-[9.5px] font-bold text-slate block mb-0.5">
-                        Physics
-                      </span>
+                      <span className="text-[9.5px] font-bold text-slate block mb-0.5">Physics</span>
                       <input
                         type="number"
                         placeholder="0"
@@ -600,9 +581,7 @@ export default function TestsPage() {
                       />
                     </div>
                     <div>
-                      <span className="text-[9.5px] font-bold text-slate block mb-0.5">
-                        Chemistry
-                      </span>
+                      <span className="text-[9.5px] font-bold text-slate block mb-0.5">Chemistry</span>
                       <input
                         type="number"
                         placeholder="0"
@@ -612,9 +591,7 @@ export default function TestsPage() {
                       />
                     </div>
                     <div>
-                      <span className="text-[9.5px] font-bold text-slate block mb-0.5">
-                        Maths / Bio
-                      </span>
+                      <span className="text-[9.5px] font-bold text-slate block mb-0.5">Maths / Bio</span>
                       <input
                         type="number"
                         placeholder="0"
@@ -627,14 +604,13 @@ export default function TestsPage() {
                 </div>
               )}
 
-              {/* Question counts */}
+              {/* Question counts (Inputs default to 0 placeholder) */}
               <div className="grid grid-cols-3 gap-2 mb-3">
                 <div>
-                  <label className="text-[10px] font-bold text-slate block mb-0.5">
-                    Correct (+)
-                  </label>
+                  <label className="text-[10px] font-bold text-slate block mb-0.5">Correct (+4)</label>
                   <input
                     type="number"
+                    min={0}
                     placeholder="0"
                     value={correct}
                     onChange={(e) => setCorrect(e.target.value)}
@@ -642,11 +618,10 @@ export default function TestsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-slate block mb-0.5">
-                    Wrong (-)
-                  </label>
+                  <label className="text-[10px] font-bold text-slate block mb-0.5">Wrong (-1)</label>
                   <input
                     type="number"
+                    min={0}
                     placeholder="0"
                     value={wrong}
                     onChange={(e) => setWrong(e.target.value)}
@@ -654,11 +629,10 @@ export default function TestsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-slate block mb-0.5">
-                    Skipped
-                  </label>
+                  <label className="text-[10px] font-bold text-slate block mb-0.5">Skipped (0)</label>
                   <input
                     type="number"
+                    min={0}
                     placeholder="0"
                     value={unattempted}
                     onChange={(e) => setUnattempted(e.target.value)}
@@ -667,38 +641,24 @@ export default function TestsPage() {
                 </div>
               </div>
 
-              {/* Overall Score & Date */}
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <div>
-                  <label className="text-[10px] font-bold text-slate block mb-0.5">
-                    Total Marks Scored
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="e.g. 185"
-                    value={marksScored}
-                    onChange={(e) => setMarksScored(e.target.value)}
-                    className="w-full rounded-xl border border-ink/15 p-2 text-xs font-bold bg-white text-ink"
-                  />
+              {/* 🎯 LIVE AUTO-CALCULATED BADGES: TOTAL QS & MARKS SCORED */}
+              <div className="grid grid-cols-2 gap-2 mb-3.5">
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-[9.5px] font-bold text-slate-500 uppercase block">Total Questions</span>
+                  <div className="text-base font-black text-slate-900 mt-0.5">{totalQuestionsLive}</div>
+                  <span className="text-[9px] text-slate-400">Sum of C + W + S</span>
                 </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate block mb-0.5">
-                    Max Marks
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="300"
-                    value={maxMarks}
-                    onChange={(e) => setMaxMarks(e.target.value)}
-                    className="w-full rounded-xl border border-ink/15 p-2 text-xs font-bold bg-white text-ink"
-                  />
+                <div className="p-2.5 rounded-xl bg-teal/10 border border-teal/20">
+                  <span className="text-[9.5px] font-bold text-teal-800 uppercase block">Score (Auto-Calculated)</span>
+                  <div className="text-base font-black text-teal-900 mt-0.5">
+                    {marksScoredLive} <span className="text-xs font-bold text-slate-500">/ {maxMarksLive}</span>
+                  </div>
+                  <span className="text-[9px] text-teal-700">Formula: (+4 × C) - (1 × W)</span>
                 </div>
               </div>
 
               <div className="mb-4">
-                <label className="text-[10px] font-bold text-slate block mb-0.5">
-                  Test Date
-                </label>
+                <label className="text-[10px] font-bold text-slate block mb-0.5">Test Date</label>
                 <input
                   type="date"
                   value={testDate}
@@ -752,9 +712,10 @@ export default function TestsPage() {
                     </div>
 
                     <div className="flex items-center gap-3 mt-2 pt-2 border-t border-ink/5 text-[10px] text-slate font-semibold">
+                      <span>Total Qs: {log.total_questions}</span>
                       <span>Acc: {log.accuracy ?? 0}%</span>
-                      <span>Correct: {log.correct_count}</span>
-                      <span>Wrong: {log.wrong_count}</span>
+                      <span>✓ {log.correct_count}</span>
+                      <span>✗ {log.wrong_count}</span>
                       <span className="ml-auto">
                         {new Date(log.test_date).toLocaleDateString("en-IN", {
                           day: "numeric",
@@ -787,11 +748,7 @@ export default function TestsPage() {
                         : "bg-white text-slate border-ink/10 hover:text-ink"
                     }`}
                   >
-                    {s === "full_syllabus"
-                      ? "Full"
-                      : s === "subject"
-                      ? "Subject"
-                      : "Chapter"}
+                    {s === "full_syllabus" ? "Full" : s === "subject" ? "Subject" : "Chapter"}
                   </button>
                 ))}
               </div>
@@ -835,9 +792,7 @@ export default function TestsPage() {
               />
 
               <div className="mb-4">
-                <label className="text-[10px] font-bold text-slate block mb-0.5">
-                  Scheduled Date
-                </label>
+                <label className="text-[10px] font-bold text-slate block mb-0.5">Scheduled Date</label>
                 <input
                   type="date"
                   value={schedDate}
