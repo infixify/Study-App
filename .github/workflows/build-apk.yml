@@ -3731,7 +3731,7 @@ jobs:
             Timer? _syncTimer;
             static const _appsChannel = MethodChannel('com.prepwise/apps');
 
-            static String get appUrl => "https://study-app-infixify1.vercel.app?v=${DateTime.now().millisecondsSinceEpoch}";
+            static String get appUrl => "https://eterprep.pages.dev?v=${DateTime.now().millisecondsSinceEpoch}";
             @override
             void initState() {
               super.initState();
