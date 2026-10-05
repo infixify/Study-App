@@ -9,6 +9,7 @@ import BottomNav from "@/components/dashboard/BottomNav";
 import AppHeader from "@/components/dashboard/AppHeader";
 import AiMentorCard from "@/components/dashboard/AiMentorCard";
 import AiChatSheet from "@/components/dashboard/AiChatSheet";
+import { optimizeMediaUrl } from "@/lib/cloudinary";
 
 declare global {
   interface Window {
@@ -575,10 +576,14 @@ function HeroWidget({
                 (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
                   <img
                     key={imgKey}
-                    src={currentItem.icon_or_sticker}
+                    src={optimizeMediaUrl(currentItem.icon_or_sticker, 180)}
                     alt=""
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover rounded-2xl"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
                   />
                 ) : (
                   <span className="text-3xl">{currentItem.icon_or_sticker || "💡"}</span>
