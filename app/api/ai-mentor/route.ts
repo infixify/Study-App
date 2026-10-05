@@ -190,6 +190,13 @@ Based on actual computed Q/hr (${actualQph ?? "unknown"}) and practice ratio (${
 - pace_target_qph: A specific achievable target slightly above their current pace (or 20 if no data)
 - practice_ratio_target: A specific target ratio to aim for (or 60 if no data)
 
+IMPORTANT RULES FOR JSON OUTPUT:
+1. "daily_tasks": These are DAILY HABITS & STRATEGIES — NOT chapter or topic names. Focus on HOW to study, not WHAT to study. Examples: "Use a timer for every practice session", "Log every wrong answer with reason". Make them personalized based on student's actual weak patterns (low practice ratio, no mock tests, etc).
+2. "subject_analysis" recommendation: Do NOT mention specific chapter or topic names. Instead, suggest WHAT KIND OF ACTION to take based on their patterns. Example: "Your practice ratio in this subject is low — start solving timed MCQ sets daily" NOT "Read Electrostatics chapter".
+3. "subject_analysis" health: If no real data available for a subject, set health to 0. Only set real values if actual data exists.
+4. "score_prediction": Be honest — if no mock test data, say "Baseline Pending (Give 1 Diagnostic Mock)".
+5. "rank_forecast": Dynamic values based on actual student data — baseline_mock_score from real test data or "No mock data yet", practice_boost from their actual practice ratio gap, backlog_potential based on actual pending backlog count.
+
 Required JSON Output (strict schema):
 {
   "overall_status": "Short status",
@@ -197,30 +204,23 @@ Required JSON Output (strict schema):
   "diagnostic_summary": "2-3 concise actionable sentences based on real data.",
   "pace_target_qph": 25,
   "practice_ratio_target": 65,
-  "today_plan": {
-    "headline": "Target Tasks for Today • ${targetExam} Focus",
-    "blocks": [
-      { "tag": "High Priority", "subject": "Physics", "action": "Specific action", "flexiNote": "Time note" },
-      { "tag": "Practice Sprint", "subject": "${targetExam.includes("NEET") ? "Biology" : "Mathematics"}", "action": "Specific action", "flexiNote": "Time note" },
-      { "tag": "Retention Lock", "subject": "Chemistry", "action": "Specific action", "flexiNote": "Time note" }
-    ]
-  },
+  "daily_tasks": [
+    { "tag": "Study Habit", "title": "Short habit title", "description": "Personalized reason why this matters for this student based on their data", "emoji": "⏱️" },
+    { "tag": "Practice Strategy", "title": "Short strategy title", "description": "Personalized description", "emoji": "📝" },
+    { "tag": "Exam Mindset", "title": "Short mindset tip", "description": "Personalized based on days to exam and weak areas", "emoji": "🎯" }
+  ],
   "subject_analysis": [
-    { "name": "Physics", "status": "Status", "health": 75, "recommendation": "Crisp tip", "priority": "high" },
-    { "name": "Chemistry", "status": "Status", "health": 80, "recommendation": "Crisp tip", "priority": "medium" },
-    { "name": "${targetExam.includes("NEET") ? "Biology" : "Mathematics"}", "status": "Status", "health": 68, "recommendation": "Crisp tip", "priority": "high" }
+    { "name": "Physics", "status": "Status label", "health": 0, "recommendation": "Action-oriented advice without chapter names — based on their actual data patterns", "priority": "high" },
+    { "name": "Chemistry", "status": "Status label", "health": 0, "recommendation": "Action-oriented advice without chapter names", "priority": "medium" },
+    { "name": "${targetExam.includes("NEET") ? "Biology" : "Mathematics"}", "status": "Status label", "health": 0, "recommendation": "Action-oriented advice without chapter names", "priority": "high" }
   ],
-  "seven_day_plan": [
-    { "day": "Day 1", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
-    { "day": "Day 2", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
-    { "day": "Day 3", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
-    { "day": "Day 4", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
-    { "day": "Day 5", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
-    { "day": "Day 6", "focus": "Topic Focus", "target": "Specific Q & Time Target" },
-    { "day": "Day 7", "focus": "Topic Focus", "target": "Specific Q & Time Target" }
-  ],
-  "strengths": ["Real strength 1", "Real strength 2"],
-  "weaknesses": ["Real mark leak 1", "Real mark leak 2"]
+  "rank_forecast": {
+    "baseline_mock_score": "Based on real test data or 'No mock data yet'",
+    "practice_boost": "Dynamic value based on their actual practice ratio gap",
+    "backlog_potential": "Dynamic value based on actual pending backlog count"
+  },
+  "strengths": ["Real strength based on data 1", "Real strength based on data 2"],
+  "weaknesses": ["Real mark leak based on data 1", "Real mark leak based on data 2"]
 }
 `;
 
