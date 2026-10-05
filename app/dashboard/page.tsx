@@ -854,6 +854,7 @@ export default function DashboardPage() {
 
   const [mentorReport, setMentorReport] = useState<any>(null);
   const [mentorLoading, setMentorLoading] = useState(false);
+  const [studentContext, setStudentContext] = useState<any>(null);
   const [doubtOpen, setDoubtOpen] = useState(false);
 
   const [todayStudyMins, setTodayStudyMins] = useState(0);
@@ -1161,6 +1162,32 @@ export default function DashboardPage() {
       });
 
       setLoading(false);
+
+      // Load AI Mentor Report (cached first, then generate if missing)
+      try {
+        const cachedReport = uProf?.ai_mentor_report;
+        const cachedContext = uProf?.ai_student_context;
+        if (cachedReport && !isCancelled) {
+          setMentorReport(cachedReport);
+          if (cachedContext) setStudentContext(cachedContext);
+        } else {
+          setMentorLoading(true);
+          const res = await fetch("/api/ai-mentor", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: uid }),
+          });
+          if (res.ok && !isCancelled) {
+            const data = await res.json();
+            setMentorReport(data.report);
+            if (data.studentContext) setStudentContext(data.studentContext);
+          }
+        }
+      } catch (_) {
+        // Mentor report is non-critical, silently fail
+      } finally {
+        if (!isCancelled) setMentorLoading(false);
+      }
     }
 
     loadData();
@@ -1417,7 +1444,23 @@ export default function DashboardPage() {
             targetExam={profile?.target_exam || "JEE"}
             report={mentorReport}
             loading={mentorLoading}
-            onRefresh={() => {}}
+            onRefresh={async () => {
+              if (!user?.id) return;
+              setMentorLoading(true);
+              try {
+                const res = await fetch("/api/ai-mentor", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId: user.id, forceRefresh: true }),
+                });
+                if (res.ok) {
+                  const data = await res.json();
+                  setMentorReport(data.report);
+                  if (data.studentContext) setStudentContext(data.studentContext);
+                }
+              } catch (_) {}
+              finally { setMentorLoading(false); }
+            }}
             onOpenDoubtSolver={() => setDoubtOpen(true)}
           />
           <div className="grid grid-cols-2 gap-2">
@@ -1851,7 +1894,7 @@ export default function DashboardPage() {
       )}
 
       {/* 11. AI DOUBT SOLVER SHEET */}
-      <AiChatSheet open={doubtOpen} onClose={() => setDoubtOpen(false)} />
+      <AiChatSheet open={doubtOpen} onClose={() => setDoubtOpen(false)} studentContext={studentContext} />
 
       {/* 12. BOTTOM NAVIGATION */}
       <BottomNav />
