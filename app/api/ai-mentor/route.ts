@@ -84,8 +84,12 @@ export async function POST(req: Request) {
       }
     }
 
+    // Fetch profile first so target_exam is available for exam schedule query
+    const { data: profile } = await supabase.from("users").select("*").eq("uid", userId).maybeSingle();
+
+    const targetExamForQuery = profile?.target_exam || "JEE";
+
     const [
-      { data: profile },
       { data: pastLogs },
       { data: questionLogs },
       { data: recentTests },
@@ -95,7 +99,6 @@ export async function POST(req: Request) {
       { data: questionDetails },
       { data: upcomingExam },
     ] = await Promise.all([
-      supabase.from("users").select("*").eq("uid", userId).maybeSingle(),
       supabase
         .from("daily_logs")
         .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, verified_minutes, streak_count, log_date")
@@ -139,14 +142,14 @@ export async function POST(req: Request) {
       supabase
         .from("exam_schedules")
         .select("exam_date, label")
-        .eq("target_exam", profile?.target_exam || "JEE")
+        .eq("target_exam", targetExamForQuery)
         .gte("exam_date", new Date().toISOString().split("T")[0])
         .order("exam_date", { ascending: true })
         .limit(1)
         .maybeSingle(),
     ]);
 
-    const targetExam = profile?.target_exam || "JEE";
+    const targetExam = targetExamForQuery;
     const classLevel = profile?.class_level || "12";
     const studentName = profile?.name || "Student";
 
