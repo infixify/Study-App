@@ -1,23 +1,32 @@
 // lib/cloudinary.ts
 
 /**
- * Injects Cloudinary transformations (f_auto, q_auto, and optional width)
- * to minimize bandwidth by up to 90%.
+ * Optimizes media URLs:
+ * 1. If relative path (GitHub /public): Returns as-is (delivered free via Cloudflare Pages).
+ * 2. If Cloudinary: Injects f_auto, q_auto, w_180 and routes via Cloudflare Edge Proxy.
  */
-export function optimizeCloudinaryUrl(url: string | null | undefined, width: number = 240): string {
+export function optimizeMediaUrl(url: string | null | undefined, width: number = 180): string {
   if (!url || typeof url !== "string") return "";
 
-  // Only apply to Cloudinary upload URLs
-  if (!url.includes("res.cloudinary.com") || !url.includes("/image/upload/")) {
-    return url;
+  const trimmed = url.trim();
+
+  // If local GitHub asset (/stickers/..., /memes/...)
+  if (trimmed.startsWith("/") || !trimmed.startsWith("http")) {
+    return trimmed;
   }
 
-  // Already transformed?
-  if (url.includes("/f_auto,q_auto") || url.includes("/f_auto/")) {
-    return url;
+  // If Cloudinary URL
+  if (trimmed.includes("res.cloudinary.com") && trimmed.includes("/image/upload/")) {
+    let optimized = trimmed;
+    if (!trimmed.includes("/f_auto,q_auto") && !trimmed.includes("/f_auto/")) {
+      optimized = trimmed.replace(
+        "/image/upload/",
+        `/image/upload/f_auto,q_auto,w_${width},c_limit/`
+      );
+    }
+    // Route via Cloudflare Edge proxy to save 100% Cloudinary repeat bandwidth
+    return `/api/media-proxy?url=${encodeURIComponent(optimized)}`;
   }
 
-  // Insert transformations right after /upload/
-  const transformParams = `f_auto,q_auto,w_${width},c_limit`;
-  return url.replace("/image/upload/", `/image/upload/${transformParams}/`);
+  return trimmed;
 }
