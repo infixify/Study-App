@@ -156,7 +156,7 @@ export default function AnalyticsPage() {
   const maxHours = Math.max(8, ...chartData.map((d) => d.totalHours));
   const activeDetail = selectedDay || chartData[chartData.length - 1];
 
-  // Subject-wise split calculation
+  // Subject-wise split calculation — GENERAL IS COMPLETELY EXCLUDED
   const subjectBreakdown = useMemo(() => {
     const now = new Date();
     let cutoff = new Date(0);
@@ -167,8 +167,11 @@ export default function AnalyticsPage() {
       cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     }
 
+    // Filter out null, empty, or 'General' test data completely
     const filtered = sessions.filter((s) => {
       if (!s.started_at) return false;
+      const sub = (s.subject || "").trim().toLowerCase();
+      if (!sub || sub === "general") return false;
       return new Date(s.started_at) >= cutoff;
     });
 
@@ -176,8 +179,8 @@ export default function AnalyticsPage() {
     let totalSecs = 0;
 
     filtered.forEach((s) => {
-      const subj = (s.subject || "General").trim();
-      const normKey = subj.toLowerCase();
+      const subj = (s.subject || "").trim();
+      if (!subj || subj.toLowerCase() === "general") return;
       const capitalSubj = subj.charAt(0).toUpperCase() + subj.slice(1);
       const secs = s.duration_seconds || 0;
       sumMap[capitalSubj] = (sumMap[capitalSubj] || 0) + secs;
@@ -279,7 +282,7 @@ export default function AnalyticsPage() {
           </div>
 
           {subjectBreakdown.list.length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-6">No study sessions logged for this range.</p>
+            <p className="text-xs text-slate-400 text-center py-6">No subject study sessions logged for this range.</p>
           ) : (
             <div className="space-y-2.5 pt-1">
               {subjectBreakdown.list.map((item) => (
