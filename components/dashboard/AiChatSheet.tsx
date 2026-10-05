@@ -25,6 +25,47 @@ interface AiChatSheetProps {
   studentContext?: StudentContext;
 }
 
+const SESSION_KEY = "pw_doubt_chat_session";
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+interface StoredSession {
+  messages: Message[];
+  savedAt: number;
+}
+
+function saveSession(messages: Message[]) {
+  try {
+    // Strip images before saving to keep sessionStorage light
+    const stripped = messages.map((m) => ({ ...m, image: undefined }));
+    const payload: StoredSession = { messages: stripped, savedAt: Date.now() };
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+  } catch (_) {
+    // sessionStorage full or unavailable — silently ignore
+  }
+}
+
+function loadSession(): Message[] | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed: StoredSession = JSON.parse(raw);
+    // Clear if older than 24 hours
+    if (Date.now() - parsed.savedAt > SESSION_TTL_MS) {
+      sessionStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return parsed.messages;
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearSession() {
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch (_) {}
+}
+
 function buildWelcomeMessage(ctx?: StudentContext): string {
   const name = ctx?.name || "Champion";
   const exam = ctx?.targetExam || "JEE/NEET";
@@ -32,15 +73,8 @@ function buildWelcomeMessage(ctx?: StudentContext): string {
   const weak = ctx?.weakSubjects?.join(", ");
 
   let msg = `Namaste ${name}! Main aapka AI Doubt Solver hoon. `;
-
-  if (days && days > 0) {
-    msg += `${exam} mein sirf **${days} din** bacha hai — `;
-  }
-
-  if (weak) {
-    msg += `${weak} pe focus karo aaj. `;
-  }
-
+  if (days && days > 0) msg += `${exam} mein sirf **${days} din** bacha hai — `;
+  if (weak) msg += `${weak} pe focus karo aaj. `;
   msg += `Koi bhi question, formula ya concept mein doubt ho toh type karein ya direct photo upload karein! ✍️`;
   return msg;
 }
@@ -50,33 +84,62 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [sessionRestored, setSessionRestored] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Reset messages with personalized welcome when sheet opens
+  // On open: try to restore session, else show fresh welcome
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+
+    const saved = loadSession();
+    if (saved && saved.length > 1) {
+      // Restored session — prepend a small note at the top
+      setMessages([
+        {
+          role: "assistant",
+          content: `🔄 Pichli conversation restore ki gayi (last 24 hrs mein). Naya session chahiye toh neeche "Clear Chat" dabao.`,
+        },
+        ...saved,
+      ]);
+      setSessionRestored(true);
+    } else {
       setMessages([
         {
           role: "assistant",
           content: buildWelcomeMessage(studentContext),
         },
       ]);
+      setSessionRestored(false);
     }
   }, [open]);
 
+  // Auto-scroll
   useEffect(() => {
-    if (open) {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
+    if (open) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, open]);
 
+  // Save to sessionStorage whenever messages change (skip saving only-welcome state)
+  useEffect(() => {
+    if (messages.length > 1) saveSession(messages);
+  }, [messages]);
+
   if (!open) return null;
+
+  const handleClearChat = () => {
+    clearSession();
+    setMessages([
+      {
+        role: "assistant",
+        content: buildWelcomeMessage(studentContext),
+      },
+    ]);
+    setSessionRestored(false);
+  };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (uploadEvent) => {
       const img = new Image();
@@ -84,14 +147,12 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
       img.onload = () => {
         const canvas = document.createElement("canvas");
         const maxDim = 1000;
-        let w = img.width;
-        let h = img.height;
+        let w = img.width, h = img.height;
         if (w > maxDim || h > maxDim) {
           if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
           else { w = Math.round((w * maxDim) / h); h = maxDim; }
         }
-        canvas.width = w;
-        canvas.height = h;
+        canvas.width = w; canvas.height = h;
         const ctx = canvas.getContext("2d");
         ctx?.drawImage(img, 0, 0, w, h);
         setSelectedImage(canvas.toDataURL("image/jpeg", 0.75));
@@ -151,6 +212,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end animate-in fade-in">
       <div className="w-full max-w-md mx-auto bg-white rounded-t-3xl shadow-2xl flex flex-col h-[82vh] border-t border-ink/10 relative">
+
         {/* Header */}
         <div className="p-4 border-b border-ink/8 flex items-center justify-between bg-paper/50 rounded-t-3xl">
           <div className="flex items-center gap-2">
@@ -164,10 +226,34 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               </p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="w-7 h-7 rounded-full flex items-center justify-center text-slate hover:bg-ink/10">
-            ✕
-          </button>
+          <div className="flex items-center gap-2">
+            {sessionRestored && (
+              <button
+                type="button"
+                onClick={handleClearChat}
+                className="text-[10px] font-bold text-rose-500 hover:underline px-2 py-1 rounded-lg hover:bg-rose-50 transition-all"
+              >
+                Clear Chat
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-7 h-7 rounded-full flex items-center justify-center text-slate hover:bg-ink/10"
+            >
+              ✕
+            </button>
+          </div>
         </div>
+
+        {/* Session note banner */}
+        {sessionRestored && (
+          <div className="mx-3 mt-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2">
+            <span className="text-[10px] text-amber-700 font-semibold">
+              💡 Chat history 24 ghante tak save rehti hai. Band karne par bhi wapas milegi.
+            </span>
+          </div>
+        )}
 
         {/* Chat History */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -211,7 +297,12 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         <div className="p-3 border-t border-ink/10 bg-white">
           <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex items-center gap-2">
             <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageSelect} className="hidden" />
-            <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 rounded-xl border border-ink/12 text-slate hover:text-ink active:scale-95 transition-all text-sm flex-shrink-0" title="Upload question photo">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2.5 rounded-xl border border-ink/12 text-slate hover:text-ink active:scale-95 transition-all text-sm flex-shrink-0"
+              title="Upload question photo"
+            >
               📷
             </button>
             <input
@@ -221,11 +312,16 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               placeholder="Ask formula, question or concept…"
               className="flex-1 text-xs font-semibold p-2.5 rounded-xl border border-ink/15 bg-white focus:outline-none focus:border-teal"
             />
-            <button type="submit" disabled={loading || (!input.trim() && !selectedImage)} className="px-4 py-2.5 rounded-xl bg-teal text-white text-xs font-bold shadow-xs hover:bg-teal/90 disabled:opacity-40 transition-all flex-shrink-0">
+            <button
+              type="submit"
+              disabled={loading || (!input.trim() && !selectedImage)}
+              className="px-4 py-2.5 rounded-xl bg-teal text-white text-xs font-bold shadow-xs hover:bg-teal/90 disabled:opacity-40 transition-all flex-shrink-0"
+            >
               Send
             </button>
           </form>
         </div>
+
       </div>
     </div>
   );
