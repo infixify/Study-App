@@ -21,6 +21,36 @@ declare global {
   }
 }
 
+// ─── HIGH-SPEED SWR IN-MEMORY CACHE (Eliminates Request Storms on Tab Switch) ───
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes fresh cache
+const globalMemoryCache: Record<string, { timestamp: number; data: any }> = {};
+
+function getMemCache<T>(key: string): T | null {
+  const item = globalMemoryCache[key];
+  if (item && Date.now() - item.timestamp < CACHE_TTL_MS) {
+    return item.data as T;
+  }
+  try {
+    const raw = localStorage.getItem(`pw_cache_${key}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Date.now() - parsed.timestamp < CACHE_TTL_MS * 3) {
+        globalMemoryCache[key] = parsed;
+        return parsed.data as T;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+function setMemCache<T>(key: string, data: T): void {
+  const payload = { timestamp: Date.now(), data };
+  globalMemoryCache[key] = payload;
+  try {
+    localStorage.setItem(`pw_cache_${key}`, JSON.stringify(payload));
+  } catch (_) {}
+}
+
 interface ExamScheduleItem {
   id: string;
   exam_key: string;
@@ -117,7 +147,6 @@ const COLOR_PRESETS = [
   { color: "from-teal-500 to-emerald-600", bg: "bg-teal-50", border: "border-teal-200", text: "text-teal-950", badge: "bg-teal-500" },
 ];
 
-// ─── DAILY CONTENT STATE (localStorage persistence + daily limit) ─────────────
 const QUOTE_LIMIT = 3;
 const MEME_LIMIT = 2;
 
@@ -148,7 +177,6 @@ function saveDailyContentState(state: DailyContentState): void {
   } catch (_) {}
 }
 
-// Deterministic daily seed — different card each day, cycles through deck
 function getDailyIndex(deckLength: number, salt: string): number {
   if (!deckLength) return 0;
   const dateStr = new Date().toISOString().split("T")[0];
@@ -225,19 +253,21 @@ function HeroWidget({
   dailyGoalMins: number;
   onGoalSaved: (mins: number) => void;
 }) {
-  const [hour, setHour] = useState(new Date().getHours());
-  // Mode persisted in localStorage
+  const [hour, setHour] = useState(() => new Date().getHours());
   const [mode, setMode] = useState<"motivation" | "meme">(() => {
     try { return (localStorage.getItem("pw_content_mode") as "motivation" | "meme") || "motivation"; } catch { return "motivation"; }
   });
-  const [dbItems, setDbItems] = useState<Record<string, ContentCardItem[]>>({ motivation: [], meme: [] });
+  
+  const [dbItems, setDbItems] = useState<Record<string, ContentCardItem[]>>(() => {
+    const cached = getMemCache<Record<string, ContentCardItem[]>>("daily_content_deck");
+    return cached || { motivation: FALLBACK_MOTIVATION_QUOTES, meme: FALLBACK_MEME_QUOTES };
+  });
+
   const [currentItem, setCurrentItem] = useState<ContentCardItem | null>(null);
-  const [imgKey, setImgKey] = useState(0); // force-remount image on card change to kill GIF flicker
+  const [imgKey, setImgKey] = useState(0);
   const [showGoalPopup, setShowGoalPopup] = useState(false);
   const [goalHours, setGoalHours] = useState(Math.round(dailyGoalMins / 60) || 8);
-  // Daily persistence state
   const [dailyState, setDailyState] = useState<DailyContentState>(() => loadDailyContentState());
-  // limitHit: only true briefly after a tap, auto-clears after 3s
   const [limitHit, setLimitHit] = useState(false);
   const limitTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -246,7 +276,11 @@ function HeroWidget({
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch with cache to eliminate repeated roundtrips
   useEffect(() => {
+    const cached = getMemCache<Record<string, ContentCardItem[]>>("daily_content_deck");
+    if (cached) return;
+
     async function fetchDynamicContent() {
       try {
         const { data, error } = await supabase.from("daily_content").select("*").eq("is_active", true);
@@ -270,27 +304,23 @@ function HeroWidget({
             if (row.content_type === "meme") rList.push(item);
             else mList.push(item);
           });
-          setDbItems({
+          const deck = {
             motivation: mList.length > 0 ? mList : FALLBACK_MOTIVATION_QUOTES,
             meme: rList.length > 0 ? rList : FALLBACK_MEME_QUOTES,
-          });
-        } else {
-          setDbItems({ motivation: FALLBACK_MOTIVATION_QUOTES, meme: FALLBACK_MEME_QUOTES });
+          };
+          setDbItems(deck);
+          setMemCache("daily_content_deck", deck);
         }
-      } catch {
-        setDbItems({ motivation: FALLBACK_MOTIVATION_QUOTES, meme: FALLBACK_MEME_QUOTES });
-      }
+      } catch (_) {}
     }
     fetchDynamicContent();
   }, []);
 
-  // Restore or seed initial card from localStorage whenever dbItems or mode changes
   useEffect(() => {
     const motDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
     const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
     const saved = loadDailyContentState();
 
-    // Always clear limit warning on mode switch / initial load (only shows after a tap)
     if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
     setLimitHit(false);
 
@@ -317,10 +347,8 @@ function HeroWidget({
       setCurrentItem(item || null);
       setImgKey((k) => k + 1);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbItems, mode]);
 
-  // On tap: enforce daily limit — if already at limit, show warning and do NOT advance
   const handleTapCard = useCallback(() => {
     const motDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
     const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
@@ -333,7 +361,6 @@ function HeroWidget({
     };
 
     if (mode === "motivation") {
-      // Already at limit — freeze, just remind
       if (saved.motivationCount >= QUOTE_LIMIT) {
         showLimit();
         return;
@@ -346,10 +373,8 @@ function HeroWidget({
       saveDailyContentState(next);
       setCurrentItem(nextItem);
       setImgKey((k) => k + 1);
-      // Hit limit exactly now — show warning
       if (newCount >= QUOTE_LIMIT) showLimit();
     } else {
-      // Already at limit — freeze, just remind
       if (saved.memeCount >= MEME_LIMIT) {
         showLimit();
         return;
@@ -362,7 +387,6 @@ function HeroWidget({
       saveDailyContentState(next);
       setCurrentItem(nextItem);
       setImgKey((k) => k + 1);
-      // Hit limit exactly now — show warning
       if (newCount >= MEME_LIMIT) showLimit();
     }
   }, [dbItems, mode]);
@@ -379,10 +403,9 @@ function HeroWidget({
   };
 
   return (
-    <div className="rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-slate-200/80 bg-white">
+    <div className="rounded-2xl overflow-hidden border border-slate-200/90 bg-white shadow-xs">
       <div className={`h-1 w-full bg-gradient-to-r ${currentItem?.color || "from-indigo-500 to-teal-500"}`} />
       <div className="p-3 pb-2.5">
-        {/* Greeting + Streak */}
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex-1 min-w-0">
             <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-0.5">
@@ -390,7 +413,6 @@ function HeroWidget({
             </p>
             <h2 className="text-xs font-black text-slate-900 leading-snug truncate">{greeting}</h2>
           </div>
-          {/* Streak — horizontal compact */}
           <div
             className={`shrink-0 flex items-center gap-1 rounded-xl px-2.5 py-1.5 ${
               streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"
@@ -404,7 +426,6 @@ function HeroWidget({
           </div>
         </div>
 
-        {/* Today + Goal boxes */}
         <div className="flex items-center gap-2 mb-2">
           <div
             className={`flex-1 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 ${
@@ -442,10 +463,9 @@ function HeroWidget({
           </div>
         </div>
 
-        {/* Goal Edit Popup */}
         {showGoalPopup && (
           <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 w-full max-w-xs">
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 w-full max-w-xs shadow-xl">
               <h3 className="text-sm font-black text-slate-900 mb-1">Set Daily Study Goal</h3>
               <p className="text-[10px] text-slate-500 font-semibold mb-3">Choose your target study hours per day</p>
               <div className="grid grid-cols-4 gap-2 mb-4">
@@ -484,12 +504,12 @@ function HeroWidget({
           </div>
         )}
 
-        <div className="w-full p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-black flex items-center mb-2.5 shadow-inner">
+        <div className="w-full p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-black flex items-center mb-2.5">
           <button
             type="button"
             onClick={() => { setMode("motivation"); try { localStorage.setItem("pw_content_mode", "motivation"); } catch (_) {} }}
             className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${
-              mode === "motivation" ? "bg-white text-slate-900 shadow-sm font-black" : "text-slate-500 hover:text-slate-900"
+              mode === "motivation" ? "bg-white text-slate-900 shadow-2xs font-black" : "text-slate-500 hover:text-slate-900"
             }`}
           >
             <span>🔥</span> Motivation
@@ -498,7 +518,7 @@ function HeroWidget({
             type="button"
             onClick={() => { setMode("meme"); try { localStorage.setItem("pw_content_mode", "meme"); } catch (_) {} }}
             className={`flex-1 py-2 rounded-xl transition-all text-center flex items-center justify-center gap-1.5 ${
-              mode === "meme" ? "bg-white text-slate-900 shadow-sm font-black" : "text-slate-500 hover:text-slate-900"
+              mode === "meme" ? "bg-white text-slate-900 shadow-2xs font-black" : "text-slate-500 hover:text-slate-900"
             }`}
           >
             <span>😂</span> Memes
@@ -509,11 +529,11 @@ function HeroWidget({
           <button
             type="button"
             onClick={handleTapCard}
-            className={`w-full text-left rounded-2xl border ${currentItem.border} ${currentItem.bg} p-3 active:scale-[0.98] transition-all relative overflow-hidden group shadow-2xs`}
+            className={`w-full text-left rounded-2xl border ${currentItem.border} ${currentItem.bg} p-3 active:scale-[0.98] transition-all relative overflow-hidden group`}
           >
             <div className="flex items-center gap-3">
               <div
-                className={`w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center ${currentItem.badge} shadow-xs overflow-hidden`}
+                className={`w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center ${currentItem.badge} overflow-hidden`}
               >
                 {currentItem.icon_or_sticker &&
                 (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
@@ -534,7 +554,7 @@ function HeroWidget({
                 <p className={`text-xs font-bold ${currentItem.text} leading-snug`}>"{currentItem.quote}"</p>
                 <div className="flex items-center justify-between mt-2 pt-1 border-t border-black/5">
                   <p className="text-[10px] font-black text-slate-600 truncate">— {currentItem.character}</p>
-                  <span className="text-[9.5px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-1.5 py-0.5 rounded-full shrink-0 shadow-2xs">
+                  <span className="text-[9.5px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-1.5 py-0.5 rounded-full shrink-0">
                     Tap ↻
                   </span>
                 </div>
@@ -543,7 +563,6 @@ function HeroWidget({
           </button>
         )}
 
-        {/* Daily limit warning */}
         {limitHit && (
           <p className="mt-1.5 text-center text-[10px] font-bold text-red-500">
             {mode === "motivation"
@@ -558,7 +577,7 @@ function HeroWidget({
   );
 }
 
-// ─── 6. SYLLABUS COMPLETION WIDGET (GROUPED BY DISTINCT SUBJECTS) ─────────────
+// ─── SYLLABUS COMPLETION WIDGET ───────────────────────────────────────────────
 function SyllabusCompletionWidget({
   subjects,
   chapters,
@@ -633,7 +652,7 @@ function SyllabusCompletionWidget({
   let accumulatedOffset = 0;
 
   return (
-    <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] space-y-3">
+    <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
           <span>📚</span> Syllabus Completion
@@ -665,7 +684,6 @@ function SyllabusCompletionWidget({
                   strokeDasharray={dasharray}
                   strokeDashoffset={dashoffset}
                   strokeLinecap="round"
-                  className="transition-all duration-500"
                 />
               );
             })}
@@ -689,7 +707,7 @@ function SyllabusCompletionWidget({
                 </span>
               </div>
               <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                <div style={{ width: `${s.pct}%`, backgroundColor: s.color }} className="h-full rounded-full transition-all" />
+                <div style={{ width: `${s.pct}%`, backgroundColor: s.color }} className="h-full rounded-full" />
               </div>
             </div>
           ))}
@@ -708,7 +726,7 @@ function SyllabusCompletionWidget({
   );
 }
 
-// ─── 7. COMBINED ACTION ITEMS WIDGET ─────────────────────────────────────────
+// ─── ACTION ITEMS WIDGET ─────────────────────────────────────────────────────
 function ActionItemsWidget({
   tasks,
   scheduledTests,
@@ -756,7 +774,7 @@ function ActionItemsWidget({
   }, [tasks, scheduledTests, filter]);
 
   return (
-    <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] space-y-3">
+    <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
           <span>📋</span> Action Items
@@ -842,7 +860,7 @@ function ActionItemsWidget({
   );
 }
 
-// ─── MAIN DASHBOARD PAGE ─────────────────────────────────────────────────────
+// ─── MAIN DASHBOARD COMPONENT ────────────────────────────────────────────────
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -860,7 +878,6 @@ export default function DashboardPage() {
   const [avgQPerHr, setAvgQPerHr] = useState(0);
   const [streak, setStreak] = useState(0);
 
-  const [allPastLogs, setAllPastLogs] = useState<DailyLogItem[]>([]);
   const [allTasks, setAllTasks] = useState<TaskItem[]>([]);
   const [scheduledTests, setScheduledTests] = useState<ScheduledTest[]>([]);
   const [recentTests, setRecentTests] = useState<TestLog[]>([]);
@@ -891,57 +908,149 @@ export default function DashboardPage() {
   const [qEndOn, setQEndOn] = useState("30");
   const [savingQuestion, setSavingQuestion] = useState(false);
 
+  // ─── HIGH-SPEED SWR DATA LOADER ───
   useEffect(() => {
-    async function loadData() {
+    let isCancelled = false;
+
+    async function loadDashboardData() {
+      // Step 1: Instant render from SWR cache if present (0ms latency!)
+      const cachedDashboard = getMemCache<any>("full_dashboard_state");
+      if (cachedDashboard && !isCancelled) {
+        setProfile(cachedDashboard.profile);
+        setUser(cachedDashboard.user);
+        setSelectedShiftId(cachedDashboard.selectedShiftId);
+        setDailyGoalMins(cachedDashboard.dailyGoalMins);
+        setSubjects(cachedDashboard.subjects || []);
+        setChapters(cachedDashboard.chapters || []);
+        if (cachedDashboard.distinctSub) setSelectedDistinctSubject(cachedDashboard.distinctSub);
+        if (cachedDashboard.initChap) setQChapterId(cachedDashboard.initChap);
+        setExamSchedules(cachedDashboard.examSchedules || []);
+        setShiftsMap(cachedDashboard.shiftsMap || {});
+        setTodayStudyMins(cachedDashboard.todayStudyMins || 0);
+        setSplitRatio(cachedDashboard.splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 });
+        setTotalQuestionsAllTime(cachedDashboard.totalQuestionsAllTime || 0);
+        setTodayQuestions(cachedDashboard.todayQuestions || 0);
+        setTodayQuestionEntries(cachedDashboard.todayQuestionEntries || []);
+        setAvgQPerHr(cachedDashboard.avgQPerHr || 0);
+        setStreak(cachedDashboard.streak || 0);
+        setChapterProgress(cachedDashboard.chapterProgress || []);
+        setAllTasks(cachedDashboard.allTasks || []);
+        setScheduledTests(cachedDashboard.scheduledTests || []);
+        setRecentTests(cachedDashboard.recentTests || []);
+        setLoading(false); // UI is now visible immediately!
+      }
+
+      // Step 2: Auth check
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
       if (!session) {
-        router.push("/");
+        if (!cachedDashboard) router.push("/");
         return;
       }
-      setUser(session.user);
-      const uid = session.user.id;
 
+      const currentUser = session.user;
+      const uid = currentUser.id;
+      if (!isCancelled) setUser(currentUser);
+
+      // Step 3: Fetch User Profile
       const { data: uProf } = await supabase.from("users").select("*").eq("uid", uid).maybeSingle();
-      if (uProf) {
-        setProfile(uProf);
-        setSelectedShiftId(uProf.selected_shift_id || null);
-        setDailyGoalMins(uProf.daily_goal_minutes || 480);
+      if (!uProf || isCancelled) return;
 
-        const targetExam = uProf.target_exam || "JEE";
-        const allowedClasses = classLevelsForContent(uProf.class_level);
+      setProfile(uProf);
+      setSelectedShiftId(uProf.selected_shift_id || null);
+      setDailyGoalMins(uProf.daily_goal_minutes || 480);
 
-        // Fetch subjects
-        const { data: rawSubs } = await supabase
+      const targetExam = uProf.target_exam || "JEE";
+      const allowedClasses = classLevelsForContent(uProf.class_level);
+      const targetYear = Number(uProf.target_year) || 2027;
+      const wantsBoards = uProf.class_level !== "Dropper" && Boolean(uProf.wants_boards);
+      const isDropper = uProf?.class_level === "Dropper";
+      const todayStr = new Date().toISOString().split("T")[0];
+
+      // Step 4: Run ALL independent queries in PARALLEL via Promise.all (Eliminates Waterfall)
+      const [
+        subjectsRes,
+        schedulesRes,
+        pastLogsRes,
+        qLogsRes,
+        progRes,
+        tasksRes,
+        schedTestsRes,
+        recentTestsRes,
+      ] = await Promise.all([
+        supabase
           .from("subjects")
           .select("id, name, class_level, target_exam")
-          .in("class_level", allowedClasses.length ? allowedClasses : ["11", "12"]);
+          .in("class_level", allowedClasses.length ? allowedClasses : ["11", "12"]),
+        supabase
+          .from("exam_schedule")
+          .select("*")
+          .eq("year", targetYear)
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("daily_logs")
+          .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, verified_minutes, streak_count, log_date")
+          .eq("user_id", uid)
+          .order("log_date", { ascending: false })
+          .limit(84),
+        supabase
+          .from("question_logs")
+          .select("id, question_count, log_date, topic_name, start_from, end_on, subject_id, chapter_id")
+          .eq("user_id", uid),
+        supabase
+          .from("chapter_progress")
+          .select("chapter_id, status")
+          .eq("user_id", uid),
+        supabase
+          .from("tasks")
+          .select("id, title, priority, status, task_type, due_date")
+          .eq("user_id", uid)
+          .neq("status", "completed")
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("test_schedule")
+          .select("id, test_name, scheduled_date, subject, status")
+          .eq("user_id", uid)
+          .eq("status", "upcoming")
+          .order("scheduled_date", { ascending: true })
+          .limit(5),
+        supabase
+          .from("test_logs")
+          .select("id, test_name, total_marks, max_marks, accuracy, test_date")
+          .eq("user_id", uid)
+          .order("test_date", { ascending: false })
+          .limit(2),
+      ]);
 
-        if (rawSubs) {
-          // Strict Personalisation Filter
-          const cleanedSubs = rawSubs.filter((s) => {
-            if (!s.name || !s.name.trim()) return false;
-            const norm = s.name.trim().toLowerCase();
-            if (targetExam === "JEE") {
-              if (norm.includes("bio") || s.target_exam === "NEET") return false;
-            } else if (targetExam === "NEET") {
-              if (norm.includes("math") || s.target_exam === "JEE") return false;
-            }
-            return true;
-          });
+      if (isCancelled) return;
 
-          setSubjects(cleanedSubs);
+      // Process Subjects & Chapters
+      let cleanedSubs: SubjectItem[] = [];
+      let chapsData: ChapterItem[] = [];
+      let distinctSub = "";
+      let initChap = "";
 
-          // Get unique distinct names for modal buttons
-          const distinctNames = Array.from(new Set(cleanedSubs.map((s) => s.name.trim())));
-          if (distinctNames[0]) {
-            setSelectedDistinctSubject(distinctNames[0]);
+      if (subjectsRes.data) {
+        cleanedSubs = subjectsRes.data.filter((s) => {
+          if (!s.name || !s.name.trim()) return false;
+          const norm = s.name.trim().toLowerCase();
+          if (targetExam === "JEE") {
+            if (norm.includes("bio") || s.target_exam === "NEET") return false;
+          } else if (targetExam === "NEET") {
+            if (norm.includes("math") || s.target_exam === "JEE") return false;
           }
+          return true;
+        });
 
-          const subIds = cleanedSubs.map((s) => s.id);
-          const isDropper = uProf?.class_level === "Dropper";
+        setSubjects(cleanedSubs);
+        const distinctNames = Array.from(new Set(cleanedSubs.map((s) => s.name.trim())));
+        distinctSub = distinctNames[0] || "";
+        if (distinctSub) setSelectedDistinctSubject(distinctSub);
+
+        const subIds = cleanedSubs.map((s) => s.id);
+        if (subIds.length > 0) {
           let chapQuery = supabase
             .from("chapters")
             .select("id, title, subject_id, in_competitive_syllabus")
@@ -951,137 +1060,138 @@ export default function DashboardPage() {
             chapQuery = chapQuery.neq("in_competitive_syllabus", false);
           }
           const { data: chaps } = await chapQuery;
-
           if (chaps) {
+            chapsData = chaps;
             setChapters(chaps);
             const firstActiveSubIds = cleanedSubs
-              .filter((s) => s.name.trim().toLowerCase() === distinctNames[0]?.toLowerCase())
+              .filter((s) => s.name.trim().toLowerCase() === distinctSub.toLowerCase())
               .map((s) => s.id);
             const initialChaps = chaps.filter((c) => firstActiveSubIds.includes(c.subject_id));
-            if (initialChaps[0]) setQChapterId(initialChaps[0].id);
+            if (initialChaps[0]) {
+              initChap = initialChaps[0].id;
+              setQChapterId(initChap);
+            }
           }
         }
       }
 
-      // Exam schedules
-      const targetExam = uProf?.target_exam || "JEE";
-      const targetYear = Number(uProf?.target_year) || 2027;
-      const wantsBoards = uProf?.class_level !== "Dropper" && Boolean(uProf?.wants_boards);
-
-      const { data: schedules } = await supabase
-        .from("exam_schedule")
-        .select("*")
-        .eq("year", targetYear)
-        .order("display_order", { ascending: true });
-
+      // Process Exam Schedules & Shifts
       let studentSchedules: ExamScheduleItem[] = [];
-      if (schedules && schedules.length > 0) {
-        studentSchedules = schedules.filter((s) =>
+      let sMap: Record<string, ExamShift[]> = {};
+      if (schedulesRes.data && schedulesRes.data.length > 0) {
+        studentSchedules = schedulesRes.data.filter((s) =>
           s.target_exam === "Boards" ? wantsBoards : s.target_exam === targetExam || s.target_exam === "ALL"
         );
         const scheduleIds = studentSchedules.map((s) => s.id);
-        const { data: shifts } = await supabase.from("exam_shifts").select("*").in("exam_schedule_id", scheduleIds);
-        if (shifts) {
-          const sMap: Record<string, ExamShift[]> = {};
-          shifts.forEach((sh) => {
-            if (!sMap[sh.exam_schedule_id]) sMap[sh.exam_schedule_id] = [];
-            sMap[sh.exam_schedule_id].push(sh);
-          });
-          setShiftsMap(sMap);
+        if (scheduleIds.length > 0) {
+          const { data: shifts } = await supabase.from("exam_shifts").select("*").in("exam_schedule_id", scheduleIds);
+          if (shifts) {
+            shifts.forEach((sh) => {
+              if (!sMap[sh.exam_schedule_id]) sMap[sh.exam_schedule_id] = [];
+              sMap[sh.exam_schedule_id].push(sh);
+            });
+            setShiftsMap(sMap);
+          }
         }
       }
       setExamSchedules(studentSchedules);
 
-      const todayStr = new Date().toISOString().split("T")[0];
+      // Process Daily Logs & Questions
+      let calculatedTodayMins = 0;
+      let calculatedSplit = { theory: 0, practice: 0, revision: 0, verified: 0 };
+      let calculatedTotalQ = 0;
+      let calculatedTodayQ = 0;
+      let calculatedTodayEntries: QuestionLogEntry[] = [];
+      let calculatedAvgQ = 0;
 
-      // Daily logs & streak
-      const { data: pastLogs } = await supabase
-        .from("daily_logs")
-        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, verified_minutes, streak_count, log_date")
-        .eq("user_id", uid)
-        .order("log_date", { ascending: false })
-        .limit(84);
-
-      if (pastLogs) {
-        setAllPastLogs(pastLogs);
-        const todayLog = pastLogs.find((l) => l.log_date === todayStr);
-        setTodayStudyMins(todayLog?.study_time_minutes || 0);
-        setSplitRatio({
+      if (pastLogsRes.data) {
+        const todayLog = pastLogsRes.data.find((l) => l.log_date === todayStr);
+        calculatedTodayMins = todayLog?.study_time_minutes || 0;
+        calculatedSplit = {
           theory: todayLog?.theory_minutes || 0,
           practice: todayLog?.practice_minutes || 0,
           revision: todayLog?.revision_minutes || 0,
           verified: todayLog?.verified_minutes || 0,
-        });
+        };
+        setTodayStudyMins(calculatedTodayMins);
+        setSplitRatio(calculatedSplit);
 
-        const totalHoursAllTime = pastLogs.reduce((acc, l) => acc + (l.study_time_minutes || 0), 0) / 60;
-        const { data: qLogs } = await supabase
-          .from("question_logs")
-          .select("id, question_count, log_date, topic_name, start_from, end_on, subject_id, chapter_id")
-          .eq("user_id", uid);
-        const totalQ = (qLogs || []).reduce((acc, q) => acc + (q.question_count || 0), 0);
-        setTotalQuestionsAllTime(totalQ);
-        const tQ = (qLogs || []).filter((q) => q.log_date === todayStr);
-        setTodayQuestions(tQ.reduce((acc, q) => acc + (q.question_count || 0), 0));
-        setTodayQuestionEntries(tQ as any);
+        const totalHours = pastLogsRes.data.reduce((acc, l) => acc + (l.study_time_minutes || 0), 0) / 60;
+        if (qLogsRes.data) {
+          calculatedTotalQ = qLogsRes.data.reduce((acc, q) => acc + (q.question_count || 0), 0);
+          setTotalQuestionsAllTime(calculatedTotalQ);
+          const tQ = qLogsRes.data.filter((q) => q.log_date === todayStr);
+          calculatedTodayQ = tQ.reduce((acc, q) => acc + (q.question_count || 0), 0);
+          calculatedTodayEntries = tQ as any;
+          setTodayQuestions(calculatedTodayQ);
+          setTodayQuestionEntries(calculatedTodayEntries);
 
-        if (totalHoursAllTime > 0) {
-          setAvgQPerHr(Math.round(totalQ / totalHoursAllTime));
+          if (totalHours > 0) {
+            calculatedAvgQ = Math.round(calculatedTotalQ / totalHours);
+            setAvgQPerHr(calculatedAvgQ);
+          }
         }
       }
 
+      // Reconcile Streak
+      let reconciledStreak = uProf?.current_streak || 0;
       try {
-        const streakInfo = await loadAndReconcileStreak(uid);
-        setStreak(streakInfo.currentStreak);
-      } catch {
-        setStreak(uProf?.current_streak || 0);
-      }
-
-      // Chapter progress
-      const { data: prog } = await supabase.from("chapter_progress").select("chapter_id, status").eq("user_id", uid);
-      if (prog) setChapterProgress(prog);
-
-      // Tasks
-      const { data: userTasks } = await supabase
-        .from("tasks")
-        .select("id, title, priority, status, task_type, due_date")
-        .eq("user_id", uid)
-        .neq("status", "completed")
-        .order("created_at", { ascending: false });
-      if (userTasks) setAllTasks(userTasks);
-
-      // Scheduled Tests
-      try {
-        const { data: schedTests } = await supabase
-          .from("test_schedule")
-          .select("id, test_name, scheduled_date, subject, status")
-          .eq("user_id", uid)
-          .eq("status", "upcoming")
-          .order("scheduled_date", { ascending: true })
-          .limit(5);
-        if (schedTests) setScheduledTests(schedTests);
+        const sInfo = await loadAndReconcileStreak(uid);
+        reconciledStreak = sInfo.currentStreak;
       } catch (_) {}
+      setStreak(reconciledStreak);
 
-      // Recent Tests
-      const { data: testData } = await supabase
-        .from("test_logs")
-        .select("id, test_name, total_marks, max_marks, accuracy, test_date")
-        .eq("user_id", uid)
-        .order("test_date", { ascending: false })
-        .limit(2);
-      if (testData) setRecentTests(testData);
+      // Remaining Data
+      const progressData = progRes.data || [];
+      const tasksData = tasksRes.data || [];
+      const schedTestsData = schedTestsRes.data || [];
+      const recentTestsData = recentTestsRes.data || [];
+
+      setChapterProgress(progressData);
+      setAllTasks(tasksData);
+      setScheduledTests(schedTestsData);
+      setRecentTests(recentTestsData);
+
+      // Step 5: Save Snapshot to SWR Cache for 0ms instant display next time
+      setMemCache("full_dashboard_state", {
+        user: currentUser,
+        profile: uProf,
+        selectedShiftId: uProf.selected_shift_id || null,
+        dailyGoalMins: uProf.daily_goal_minutes || 480,
+        subjects: cleanedSubs,
+        chapters: chapsData,
+        distinctSub,
+        initChap,
+        examSchedules: studentSchedules,
+        shiftsMap: sMap,
+        todayStudyMins: calculatedTodayMins,
+        splitRatio: calculatedSplit,
+        totalQuestionsAllTime: calculatedTotalQ,
+        todayQuestions: calculatedTodayQ,
+        todayQuestionEntries: calculatedTodayEntries,
+        avgQPerHr: calculatedAvgQ,
+        streak: reconciledStreak,
+        chapterProgress: progressData,
+        allTasks: tasksData,
+        scheduledTests: schedTestsData,
+        recentTests: recentTestsData,
+      });
 
       setLoading(false);
     }
 
-    loadData();
+    loadDashboardData();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [router]);
 
-  // Distinct clean subject names for modal buttons
+  // Memoized subject & chapter helpers
   const distinctSubjectNames = useMemo(() => {
     return Array.from(new Set(subjects.map((s) => s.name.trim()))).filter(Boolean);
   }, [subjects]);
 
-  // Filter chapters based on selected distinct subject name
   const filteredChaptersForSelectedSubject = useMemo(() => {
     if (!selectedDistinctSubject) return chapters;
     const matchingSubjectIds = subjects
@@ -1096,11 +1206,7 @@ export default function DashboardPage() {
       .filter((s) => s.name.trim().toLowerCase() === name.toLowerCase())
       .map((s) => s.id);
     const chaps = chapters.filter((c) => matchingSubjectIds.includes(c.subject_id));
-    if (chaps[0]) {
-      setQChapterId(chaps[0].id);
-    } else {
-      setQChapterId("");
-    }
+    setQChapterId(chaps[0] ? chaps[0].id : "");
   };
 
   const handleCompleteTask = async (id: string) => {
@@ -1165,7 +1271,6 @@ export default function DashboardPage() {
   };
 
   const handleOpenMentorshipPopup = () => {
-    // Triggers the exact same popup as the "GET MENTORSHIP" button in AiMentorCard
     const buttons = Array.from(document.querySelectorAll("button"));
     const mentorBtn = buttons.find((b) => {
       const txt = (b.textContent || b.innerText || "").toUpperCase();
@@ -1190,7 +1295,7 @@ export default function DashboardPage() {
           ⚡
         </div>
         <h2 className="text-base font-black">PrepWise Cockpit</h2>
-        <p className="text-xs text-slate-400 mt-1">Loading dashboard telemetry…</p>
+        <p className="text-xs text-slate-400 mt-1">Starting engine…</p>
       </div>
     );
   }
@@ -1206,7 +1311,7 @@ export default function DashboardPage() {
   const revisionPct = Math.round((splitRatio.revision / totalSplitMins) * 100);
 
   return (
-    <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased">
+    <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased smooth-scroll">
       <AppHeader />
 
       <main className="max-w-md mx-auto px-4 pt-3.5 space-y-3">
@@ -1219,7 +1324,7 @@ export default function DashboardPage() {
           onGoalSaved={handleGoalSaved}
         />
 
-        {/* 2. EXAM COUNTDOWN (ORGANIZED, CLEAN CARDS) */}
+        {/* 2. EXAM COUNTDOWN */}
         <div
           className={`grid gap-2 ${
             examSchedules.length === 1
@@ -1252,9 +1357,8 @@ export default function DashboardPage() {
             return (
               <div
                 key={exam.id}
-                className="rounded-2xl p-2.5 bg-gradient-to-b from-[#0B132B] to-[#162238] text-white shadow-md border border-slate-800 flex flex-col justify-between"
+                className="rounded-2xl p-2.5 bg-gradient-to-b from-[#0B132B] to-[#162238] text-white border border-slate-800 flex flex-col justify-between"
               >
-                {/* Header Tag + Official/Proj Badge */}
                 <div className="flex items-center justify-between gap-1 mb-1.5">
                   <span className="text-[9px] font-black uppercase tracking-wide text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded-md border border-amber-400/30 truncate max-w-[70%]">
                     {cleanLabel}
@@ -1264,7 +1368,6 @@ export default function DashboardPage() {
                   </span>
                 </div>
 
-                {/* Recessed Center Countdown */}
                 <div className="flex flex-col items-center justify-center my-1 bg-black/30 rounded-xl py-2 border border-white/5">
                   <div className="text-2xl font-black text-amber-400 leading-none tracking-tight">
                     {days}
@@ -1274,7 +1377,6 @@ export default function DashboardPage() {
                   </span>
                 </div>
 
-                {/* Clean Bottom Target Date */}
                 <div className="mt-1 pt-1.5 border-t border-white/10 flex flex-col items-center">
                   <span className="text-[10px] font-bold text-slate-300 tracking-wide">
                     📅 {formattedDate}
@@ -1316,7 +1418,7 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={handleOpenMentorshipPopup}
-              className="flex items-center gap-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all"
+              className="flex items-center gap-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-3 py-2.5 active:scale-[0.98] transition-all"
             >
               <span className="text-lg">🧠</span>
               <div className="text-left">
@@ -1327,7 +1429,7 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => setDoubtOpen(true)}
-              className="flex items-center gap-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all"
+              className="flex items-center gap-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl px-3 py-2.5 active:scale-[0.98] transition-all"
             >
               <span className="text-lg">✨</span>
               <div className="text-left">
@@ -1343,7 +1445,7 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => router.push("/focus")}
-            className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] text-left active:scale-[0.98] transition-all hover:border-teal-500"
+            className="bg-white p-3 rounded-2xl border border-slate-200/90 text-left active:scale-[0.98] transition-all hover:border-teal-500 shadow-2xs"
           >
             <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Today Study</span>
             <div className="text-lg font-black text-slate-900 tracking-tight">
@@ -1353,7 +1455,7 @@ export default function DashboardPage() {
             <span className="text-[10px] font-bold text-teal-700 block mt-0.5">Study Timer →</span>
           </button>
 
-          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] flex flex-col justify-between">
+          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 flex flex-col justify-between shadow-2xs">
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold text-slate-600 block">Questions Today</span>
@@ -1373,7 +1475,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Tasks</span>
             <div className="text-lg font-black text-slate-900 tracking-tight">
               {allTasks.length}
@@ -1388,18 +1490,18 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 5. TODAY'S STUDY DISTRIBUTION RATIO (TARGET REMOVED) */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+        {/* 5. TODAY'S STUDY DISTRIBUTION RATIO */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
               <span>⚖️</span> Today's Study Split
             </span>
           </div>
 
-          <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex mb-2.5 shadow-inner">
-            <div style={{ width: `${sumSplit > 0 ? theoryPct : 33}%` }} className="bg-amber-500 transition-all" />
-            <div style={{ width: `${sumSplit > 0 ? practicePct : 50}%` }} className="bg-teal-600 transition-all" />
-            <div style={{ width: `${sumSplit > 0 ? revisionPct : 17}%` }} className="bg-indigo-600 transition-all" />
+          <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex mb-2.5">
+            <div style={{ width: `${sumSplit > 0 ? theoryPct : 33}%` }} className="bg-amber-500" />
+            <div style={{ width: `${sumSplit > 0 ? practicePct : 50}%` }} className="bg-teal-600" />
+            <div style={{ width: `${sumSplit > 0 ? revisionPct : 17}%` }} className="bg-indigo-600" />
           </div>
 
           <div className="flex items-center justify-between text-[11px] font-bold px-0.5">
@@ -1449,7 +1551,7 @@ export default function DashboardPage() {
         />
 
         {/* 8. RECENT MOCK TESTS (LIMIT 2) */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
               <span>📈</span> Recent Mock Performance
@@ -1507,7 +1609,7 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => router.push("/library")}
-            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-[0_2px_8px_rgba(0,0,0,0.04)] active:scale-[0.98] transition-all flex flex-col justify-between"
+            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left active:scale-[0.98] transition-all flex flex-col justify-between shadow-2xs"
           >
             <div className="text-xl mb-1">📚</div>
             <div>
@@ -1518,7 +1620,7 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => router.push("/tests")}
-            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-[0_2px_8px_rgba(0,0,0,0.04)] active:scale-[0.98] transition-all flex flex-col justify-between"
+            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left active:scale-[0.98] transition-all flex flex-col justify-between shadow-2xs"
           >
             <div className="text-xl mb-1">📊</div>
             <div>
@@ -1529,7 +1631,7 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => router.push("/analytics")}
-            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-[0_2px_8px_rgba(0,0,0,0.04)] active:scale-[0.98] transition-all flex flex-col justify-between"
+            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left active:scale-[0.98] transition-all flex flex-col justify-between shadow-2xs"
           >
             <div className="text-xl mb-1">📈</div>
             <div>
@@ -1542,8 +1644,8 @@ export default function DashboardPage() {
 
       {/* QUESTION LOGGING MODAL */}
       {showAddQuestionModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full shadow-2xl border border-slate-300 overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full border border-slate-300 overflow-hidden flex flex-col max-h-[90vh] shadow-xl">
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center text-sm font-bold shadow-xs">
@@ -1682,7 +1784,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* AI Doubt Solver Sheet */}
       <AiChatSheet open={doubtOpen} onClose={() => setDoubtOpen(false)} />
 
       <BottomNav />
