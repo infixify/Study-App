@@ -25,6 +25,23 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable}`} suppressHydrationWarning>
       <head>
+        <style>{`
+          /* 60 FPS Kinetic Scrolling & Hardware Acceleration for Android WebView */
+          html, body {
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-y: contain;
+            text-rendering: optimizeSpeed;
+          }
+          * {
+            -webkit-tap-highlight-color: transparent;
+          }
+          /* Eliminate GPU stalls on scroll */
+          .smooth-scroll {
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            will-change: scroll-position;
+          }
+        `}</style>
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -41,7 +58,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="font-body bg-paper text-ink antialiased">
+      <body className="font-body bg-paper text-ink antialiased selection:bg-teal-500/20">
         <PostHogInit />
         <FcmSync />
         {children}
