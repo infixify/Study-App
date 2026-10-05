@@ -23,21 +23,21 @@ interface FocusSessionItem {
   started_at: string;
 }
 
-const SUBJECT_COLORS: Record<string, { bar: string; hex: string; text: string }> = {
-  physics: { bar: "bg-blue-500", hex: "#3b82f6", text: "text-blue-700" },
-  chemistry: { bar: "bg-emerald-500", hex: "#10b981", text: "text-emerald-700" },
-  mathematics: { bar: "bg-purple-500", hex: "#a855f7", text: "text-purple-700" },
-  maths: { bar: "bg-purple-500", hex: "#a855f7", text: "text-purple-700" },
-  biology: { bar: "bg-teal-500", hex: "#14b8a6", text: "text-teal-700" },
-  english: { bar: "bg-orange-500", hex: "#f97316", text: "text-orange-700" },
-  sst: { bar: "bg-rose-500", hex: "#f43f5e", text: "text-rose-700" },
+const SUBJECT_COLORS: Record<string, { bar: string; hex: string; text: string; bg: string }> = {
+  physics: { bar: "bg-blue-500", hex: "#3b82f6", text: "text-blue-700", bg: "bg-blue-50" },
+  chemistry: { bar: "bg-emerald-500", hex: "#10b981", text: "text-emerald-700", bg: "bg-emerald-50" },
+  mathematics: { bar: "bg-purple-500", hex: "#a855f7", text: "text-purple-700", bg: "bg-purple-50" },
+  maths: { bar: "bg-purple-500", hex: "#a855f7", text: "text-purple-700", bg: "bg-purple-50" },
+  biology: { bar: "bg-teal-500", hex: "#14b8a6", text: "text-teal-700", bg: "bg-teal-50" },
+  english: { bar: "bg-orange-500", hex: "#f97316", text: "text-orange-700", bg: "bg-orange-50" },
+  sst: { bar: "bg-rose-500", hex: "#f43f5e", text: "text-rose-700", bg: "bg-rose-50" },
 };
 
 const FALLBACK_PALETTE = [
-  { bar: "bg-sky-500", hex: "#0ea5e9", text: "text-sky-700" },
-  { bar: "bg-amber-500", hex: "#f59e0b", text: "text-amber-700" },
-  { bar: "bg-indigo-500", hex: "#6366f1", text: "text-indigo-700" },
-  { bar: "bg-teal-600", hex: "#0d9488", text: "text-teal-800" },
+  { bar: "bg-sky-500", hex: "#0ea5e9", text: "text-sky-700", bg: "bg-sky-50" },
+  { bar: "bg-amber-500", hex: "#f59e0b", text: "text-amber-700", bg: "bg-amber-50" },
+  { bar: "bg-indigo-500", hex: "#6366f1", text: "text-indigo-700", bg: "bg-indigo-50" },
+  { bar: "bg-teal-600", hex: "#0d9488", text: "text-teal-800", bg: "bg-teal-50" },
 ];
 
 export default function AnalyticsPage() {
@@ -46,7 +46,17 @@ export default function AnalyticsPage() {
   const [logs, setLogs] = useState<DailyLogItem[]>([]);
   const [sessions, setSessions] = useState<FocusSessionItem[]>([]);
 
-  // Split history range
+  // 1. Subject-wise Widget State (Weekly / Monthly / Custom)
+  const [subjectRangeMode, setSubjectRangeMode] = useState<"weekly" | "monthly" | "custom">("weekly");
+  const [subjectCustomStart, setSubjectCustomStart] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().split("T")[0];
+  });
+  const [subjectCustomEnd, setSubjectCustomEnd] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [selectedSubjectDay, setSelectedSubjectDay] = useState<any | null>(null);
+
+  // 2. Study Split (Activity) State
   const [rangeMode, setRangeMode] = useState<"weekly" | "monthly" | "custom">("weekly");
   const [customStart, setCustomStart] = useState<string>(() => {
     const d = new Date();
@@ -55,9 +65,6 @@ export default function AnalyticsPage() {
   });
   const [customEnd, setCustomEnd] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [selectedDay, setSelectedDay] = useState<any | null>(null);
-
-  // Subject split range
-  const [subjectRange, setSubjectRange] = useState<"weekly" | "monthly" | "all">("weekly");
 
   useEffect(() => {
     async function loadAnalytics() {
@@ -83,7 +90,7 @@ export default function AnalyticsPage() {
           .select("id, subject, duration_seconds, started_at")
           .eq("user_id", uid)
           .order("started_at", { ascending: false })
-          .limit(200),
+          .limit(300),
       ]);
 
       if (pastLogs) setLogs(pastLogs);
@@ -94,7 +101,120 @@ export default function AnalyticsPage() {
     loadAnalytics();
   }, [router]);
 
-  // Timeline calculation
+  // ==========================================
+  // 1. SUBJECT-WISE SPLIT BARS CALCULATION
+  // ==========================================
+  const subjectChartData = useMemo(() => {
+    const today = new Date();
+    let numDays = 7;
+    let startDate = new Date();
+
+    if (subjectRangeMode === "weekly") {
+      numDays = 7;
+      startDate.setDate(today.getDate() - 6);
+    } else if (subjectRangeMode === "monthly") {
+      numDays = 30;
+      startDate.setDate(today.getDate() - 29);
+    } else {
+      const s = new Date(subjectCustomStart);
+      const e = new Date(subjectCustomEnd);
+      const diff = Math.max(1, Math.ceil((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+      numDays = Math.min(diff, 60);
+      startDate = s;
+    }
+
+    // Group clean sessions by date and subject (Ignoring 'General')
+    const daySubjectMap = new Map<string, Record<string, number>>();
+
+    sessions.forEach((s) => {
+      if (!s.started_at) return;
+      const rawSub = (s.subject || "").trim();
+      if (!rawSub || rawSub.toLowerCase() === "general") return;
+
+      const norm = rawSub.toLowerCase();
+      const subName = norm.includes("math")
+        ? "Mathematics"
+        : norm.includes("physic")
+        ? "Physics"
+        : norm.includes("chem")
+        ? "Chemistry"
+        : norm.includes("bio")
+        ? "Biology"
+        : rawSub.charAt(0).toUpperCase() + rawSub.slice(1);
+
+      const dKey = new Date(s.started_at).toISOString().split("T")[0];
+      if (!daySubjectMap.has(dKey)) {
+        daySubjectMap.set(dKey, {});
+      }
+      const map = daySubjectMap.get(dKey)!;
+      map[subName] = (map[subName] || 0) + (s.duration_seconds || 0);
+    });
+
+    const result = [];
+    for (let i = 0; i < numDays; i++) {
+      const current = new Date(startDate);
+      current.setDate(startDate.getDate() + i);
+      const dateKey = current.toISOString().split("T")[0];
+      const subMap = daySubjectMap.get(dateKey) || {};
+
+      let dayTotalSecs = 0;
+      Object.values(subMap).forEach((secs) => {
+        dayTotalSecs += secs;
+      });
+      const dayTotalHours = dayTotalSecs / 3600;
+      const dayTotalMins = Math.round(dayTotalSecs / 60);
+
+      result.push({
+        dateKey,
+        label: current.toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: numDays > 14 ? "numeric" : "short",
+          weekday: numDays <= 7 ? "narrow" : undefined,
+        }),
+        fullDate: current.toLocaleDateString("en-IN", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        }),
+        totalMins: dayTotalMins,
+        totalHours: dayTotalHours,
+        subjects: subMap,
+      });
+    }
+    return result;
+  }, [sessions, subjectRangeMode, subjectCustomStart, subjectCustomEnd]);
+
+  const subjectTotalMins = subjectChartData.reduce((acc, d) => acc + d.totalMins, 0);
+  const subjectAvgMins = subjectChartData.length > 0 ? subjectTotalMins / subjectChartData.length : 0;
+  const subjectMaxHours = Math.max(4, ...subjectChartData.map((d) => d.totalHours));
+  const activeSubjectDetail = selectedSubjectDay || subjectChartData[subjectChartData.length - 1];
+
+  // Overall totals per subject in selected range
+  const overallSubjectTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    let allSecs = 0;
+    subjectChartData.forEach((d) => {
+      Object.entries(d.subjects).forEach(([sub, secs]) => {
+        totals[sub] = (totals[sub] || 0) + (secs as number);
+        allSecs += secs as number;
+      });
+    });
+
+    const list = Object.entries(totals).map(([subject, secs], idx) => {
+      const norm = subject.toLowerCase();
+      const colorConf = SUBJECT_COLORS[norm] || FALLBACK_PALETTE[idx % FALLBACK_PALETTE.length];
+      const hours = secs / 3600;
+      const pct = allSecs > 0 ? Math.round((secs / allSecs) * 100) : 0;
+      return { subject, hours, pct, colorConf };
+    });
+
+    list.sort((a, b) => b.hours - a.hours);
+    return { list, totalHours: allSecs / 3600 };
+  }, [subjectChartData]);
+
+  // ==========================================
+  // 2. ACTIVITY SPLIT (THEORY/PRACTICE/REV)
+  // ==========================================
   const chartData = useMemo(() => {
     const today = new Date();
     let numDays = 7;
@@ -156,50 +276,6 @@ export default function AnalyticsPage() {
   const maxHours = Math.max(8, ...chartData.map((d) => d.totalHours));
   const activeDetail = selectedDay || chartData[chartData.length - 1];
 
-  // Subject-wise split calculation — GENERAL IS COMPLETELY EXCLUDED
-  const subjectBreakdown = useMemo(() => {
-    const now = new Date();
-    let cutoff = new Date(0);
-
-    if (subjectRange === "weekly") {
-      cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    } else if (subjectRange === "monthly") {
-      cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    }
-
-    // Filter out null, empty, or 'General' test data completely
-    const filtered = sessions.filter((s) => {
-      if (!s.started_at) return false;
-      const sub = (s.subject || "").trim().toLowerCase();
-      if (!sub || sub === "general") return false;
-      return new Date(s.started_at) >= cutoff;
-    });
-
-    const sumMap: Record<string, number> = {};
-    let totalSecs = 0;
-
-    filtered.forEach((s) => {
-      const subj = (s.subject || "").trim();
-      if (!subj || subj.toLowerCase() === "general") return;
-      const capitalSubj = subj.charAt(0).toUpperCase() + subj.slice(1);
-      const secs = s.duration_seconds || 0;
-      sumMap[capitalSubj] = (sumMap[capitalSubj] || 0) + secs;
-      totalSecs += secs;
-    });
-
-    const list = Object.entries(sumMap).map(([subject, secs], idx) => {
-      const norm = subject.toLowerCase();
-      const colorConf =
-        SUBJECT_COLORS[norm] || FALLBACK_PALETTE[idx % FALLBACK_PALETTE.length];
-      const hours = secs / 3600;
-      const pct = totalSecs > 0 ? Math.round((secs / totalSecs) * 100) : 0;
-      return { subject, hours, pct, colorConf };
-    });
-
-    list.sort((a, b) => b.hours - a.hours);
-    return { list, totalHours: totalSecs / 3600 };
-  }, [sessions, subjectRange]);
-
   // 12-Week Consistency matrix
   const heatGrid = useMemo(() => {
     const grid = new Array(84).fill(0);
@@ -252,25 +328,26 @@ export default function AnalyticsPage() {
           </button>
         </div>
 
-        {/* 1. SUBJECT-WISE STUDY SPLIT */}
+        {/* 1. SUBJECT-WISE STUDY SPLIT BARS (NEW DESIGN MATCHING STUDY SPLIT) */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
               <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
                 <span>📚</span> Subject-Wise Study Distribution
               </h3>
               <p className="text-[10px] font-semibold text-slate-500">
-                Total: {subjectBreakdown.totalHours.toFixed(1)}h
+                Daily duration & subject activity breakdown
               </p>
             </div>
-            <div className="flex p-0.5 bg-slate-100 rounded-xl border border-slate-200 text-[10px] font-black">
-              {(["weekly", "monthly", "all"] as const).map((m) => (
+
+            <div className="flex p-0.5 bg-slate-100 rounded-xl border border-slate-200 text-[10px] font-black self-start sm:self-auto">
+              {(["weekly", "monthly", "custom"] as const).map((m) => (
                 <button
                   key={m}
                   type="button"
-                  onClick={() => setSubjectRange(m)}
+                  onClick={() => setSubjectRangeMode(m)}
                   className={`px-2.5 py-1 rounded-lg transition-all capitalize ${
-                    subjectRange === m
+                    subjectRangeMode === m
                       ? "bg-white text-slate-900 shadow-2xs font-black"
                       : "text-slate-600 hover:text-slate-900"
                   }`}
@@ -281,11 +358,147 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {subjectBreakdown.list.length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-6">No subject study sessions logged for this range.</p>
-          ) : (
-            <div className="space-y-2.5 pt-1">
-              {subjectBreakdown.list.map((item) => (
+          {subjectRangeMode === "custom" && (
+            <div className="flex items-center gap-2 p-2 bg-slate-50 rounded-xl border border-slate-200 text-[10px] font-bold">
+              <div className="flex-1">
+                <span className="text-slate-500 block mb-0.5">From</span>
+                <input
+                  type="date"
+                  value={subjectCustomStart}
+                  onChange={(e) => setSubjectCustomStart(e.target.value)}
+                  className="w-full bg-white p-1 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800"
+                />
+              </div>
+              <div className="flex-1">
+                <span className="text-slate-500 block mb-0.5">To</span>
+                <input
+                  type="date"
+                  value={subjectCustomEnd}
+                  onChange={(e) => setSubjectCustomEnd(e.target.value)}
+                  className="w-full bg-white p-1 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Metric Summary Cards */}
+          <div className="grid grid-cols-2 gap-2 text-center text-xs">
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2">
+              <span className="text-[9px] font-bold text-slate-500 uppercase block">Total Focused</span>
+              <span className="text-sm font-black text-slate-900">
+                {(subjectTotalMins / 60).toFixed(1)}h
+              </span>
+            </div>
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2">
+              <span className="text-[9px] font-bold text-slate-500 uppercase block">Daily Average</span>
+              <span className="text-sm font-black text-teal-700">
+                {(subjectAvgMins / 60).toFixed(1)}h / day
+              </span>
+            </div>
+          </div>
+
+          {/* Subject Vertical Stacked Bars */}
+          <div className="pt-2">
+            <div className="h-36 flex items-end gap-1.5 sm:gap-2 px-1 border-b border-slate-200 pb-1.5 overflow-x-auto no-scrollbar">
+              {subjectChartData.map((d, idx) => {
+                const isSelected = activeSubjectDetail?.dateKey === d.dateKey;
+                const totalPct = Math.min(100, Math.round((d.totalHours / subjectMaxHours) * 100));
+
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => setSelectedSubjectDay(d)}
+                    className="flex-1 min-w-[20px] max-w-[48px] h-full flex flex-col justify-end items-center cursor-pointer group transition-all"
+                  >
+                    {d.totalMins > 0 ? (
+                      <div
+                        style={{ height: `${Math.max(totalPct, 8)}%` }}
+                        className={`w-full rounded-t-md overflow-hidden flex flex-col-reverse shadow-xs transition-transform ${
+                          isSelected ? "ring-2 ring-slate-900 scale-105" : "hover:opacity-90"
+                        }`}
+                      >
+                        {Object.entries(d.subjects).map(([sub, secs]) => {
+                          const frac = d.totalHours > 0 ? (secs as number) / 3600 / d.totalHours : 0;
+                          const norm = sub.toLowerCase();
+                          const color = SUBJECT_COLORS[norm]?.bar || "bg-teal-500";
+                          return (
+                            <div
+                              key={sub}
+                              style={{ height: `${Math.round(frac * 100)}%` }}
+                              className={`w-full ${color}`}
+                              title={`${sub}: ${((secs as number) / 3600).toFixed(1)}h`}
+                            />
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mb-1" />
+                    )}
+
+                    <span
+                      className={`text-[9px] mt-1 font-bold truncate ${
+                        isSelected ? "text-slate-900 font-black" : "text-slate-400"
+                      }`}
+                    >
+                      {d.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Active Selected Day Subject Details */}
+          {activeSubjectDetail && (
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div>
+                <span className="text-[10px] font-bold text-slate-500 block">
+                  {activeSubjectDetail.fullDate}
+                </span>
+                <span className="text-sm font-black text-slate-900">
+                  {activeSubjectDetail.totalHours.toFixed(1)}h Total
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+                {Object.keys(activeSubjectDetail.subjects).length === 0 ? (
+                  <span className="text-slate-400">No session on this day</span>
+                ) : (
+                  Object.entries(activeSubjectDetail.subjects).map(([sub, secs]) => {
+                    const norm = sub.toLowerCase();
+                    const color = SUBJECT_COLORS[norm] || FALLBACK_PALETTE[0];
+                    return (
+                      <span key={sub} className={`flex items-center gap-1 ${color.text}`}>
+                        <span className={`w-2 h-2 rounded-full ${color.bar}`} />
+                        {((secs as number) / 3600).toFixed(1)}h {sub}
+                      </span>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Subject Color Legend */}
+          <div className="flex flex-wrap items-center justify-center gap-3.5 text-[10px] font-bold text-slate-500 pt-1">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-blue-500" /> Physics
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Chemistry
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-purple-500" /> Mathematics
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-teal-500" /> Biology
+            </span>
+          </div>
+
+          {/* Compact Overall Percentage Breakdown */}
+          {overallSubjectTotals.list.length > 0 && (
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              {overallSubjectTotals.list.map((item) => (
                 <div key={item.subject} className="space-y-1">
                   <div className="flex items-center justify-between text-xs font-bold">
                     <span className="text-slate-900">{item.subject}</span>
@@ -294,7 +507,7 @@ export default function AnalyticsPage() {
                       <span className="text-[10px] text-slate-400 font-semibold">({item.pct}%)</span>
                     </span>
                   </div>
-                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                     <div
                       style={{ width: `${Math.max(item.pct, 3)}%` }}
                       className={`h-full rounded-full transition-all ${item.colorConf.bar}`}
@@ -306,7 +519,7 @@ export default function AnalyticsPage() {
           )}
         </div>
 
-        {/* 2. STUDY SPLIT TIMELINE */}
+        {/* 2. STUDY SPLIT TIMELINE (THEORY / PRACTICE / REVISION) */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
