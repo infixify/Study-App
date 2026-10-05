@@ -1,4 +1,5 @@
 // app/api/ai-doubt/route.ts
+export const runtime = 'edge';
 import { NextResponse } from "next/server";
 
 const apiKey =
