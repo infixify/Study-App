@@ -1,7 +1,7 @@
 // components/dashboard/AppHeader.tsx
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, createContext, useContext } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -23,7 +23,28 @@ interface AppNotification {
   created_at: string;
 }
 
+// ─── SINGLETON CONTEXT: Guarantees Only ONE AppHeader Renders Anywhere ───
+export const HeaderContext = createContext<boolean>(false);
+
+export function HeaderProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <HeaderContext.Provider value={true}>
+      <AppHeaderContent isRootLayout={true} />
+      {children}
+    </HeaderContext.Provider>
+  );
+}
+
 export default function AppHeader() {
+  const isInsideProvider = useContext(HeaderContext);
+  // Agar layout se already header ban chuka hai, toh duplicate header render mat karo!
+  if (isInsideProvider) {
+    return null;
+  }
+  return <AppHeaderContent isRootLayout={false} />;
+}
+
+function AppHeaderContent({ isRootLayout }: { isRootLayout: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
 
