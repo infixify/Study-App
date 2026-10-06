@@ -19,13 +19,9 @@ export async function POST(req: NextRequest) {
     const allKeys = getAllAvailableGeminiKeys();
     const { groq, openRouter } = getBackupProviders();
 
-    // 1. Agar koi key nahi mili
     if (allKeys.length === 0 && !groq && !openRouter) {
       return NextResponse.json(
-        {
-          reply:
-            "⚠️ Cloudflare Environment Variables mein koi API key nahi mili! Settings -> Environment variables mein LIVE_GEMINI_API_KEYS check karein aur Redeploy karein.",
-        },
+        { reply: "⚠️ Cloudflare Environment Variables mein koi API key nahi mili!" },
         { status: 500 }
       );
     }
@@ -42,9 +38,14 @@ BEHAVIOR RULES:
     const hasImage = Boolean(image);
 
     // ─────────────────────────────────────────────────────────────
-    // 1. GEMINI PROVIDER (2.0-flash & 1.5-flash)
+    // 1. GEMINI PROVIDER (v1 gemini-1.5-flash & v1beta gemini-2.0-flash-exp)
     // ─────────────────────────────────────────────────────────────
-    const geminiModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
+    const geminiEndpoints = [
+      { ver: "v1", model: "gemini-1.5-flash" },
+      { ver: "v1beta", model: "gemini-2.0-flash-exp" },
+      { ver: "v1beta", model: "gemini-1.5-flash-latest" },
+    ];
+
     const maxAttempts = Math.min(allKeys.length || 1, 4);
     let attempts = 0;
 
@@ -53,9 +54,9 @@ BEHAVIOR RULES:
       const apiKey = isLive ? getActiveLiveKey() : getActiveChatKey();
       if (!apiKey) break;
 
-      for (const modelName of geminiModels) {
+      for (const { ver, model } of geminiEndpoints) {
         try {
-          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+          const geminiUrl = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${apiKey}`;
 
           const parts: any[] = [];
           if (query) parts.push({ text: query });
@@ -91,145 +92,149 @@ BEHAVIOR RULES:
 
           if (res.status === 429 || res.status === 403) {
             markKeyRateLimited(apiKey, 60);
-            errors.push(`Gemini ${modelName} 429/403: Rate limited on key ...${apiKey.slice(-5)}`);
+            errors.push(`Gemini ${model} 429: Rate limited`);
             break;
           }
 
           if (!res.ok) {
             const errText = await res.text();
-            errors.push(`Gemini ${modelName} ${res.status}: ${errText.slice(0, 150)}`);
+            errors.push(`Gemini ${model} ${res.status}: ${errText.slice(0, 100)}`);
             continue;
           }
 
           const data = await res.json();
           const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
           if (reply) {
-            return NextResponse.json({ reply, provider: `gemini-${modelName}`, success: true });
+            return NextResponse.json({ reply, provider: `gemini-${model}`, success: true });
           }
         } catch (err: any) {
-          errors.push(`Gemini ${modelName} exception: ${err.message}`);
+          errors.push(`Gemini ${model} err: ${err.message}`);
         }
       }
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 2. GROQ PROVIDER FALLBACK
+    // 2. GROQ PROVIDER (llama-3.1-8b-instant & llama-3.2-11b-vision-preview)
     // ─────────────────────────────────────────────────────────────
     if (groq) {
-      const groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
-      try {
-        let groqMessages: any[] = [];
+      const groqModels = hasImage
+        ? ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]
+        : ["llama-3.1-8b-instant", "llama3-70b-8192"];
 
-        if (hasImage) {
-          groqMessages = [
-            { role: "system", content: systemPrompt },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: query || "Solve this question step-by-step" },
-                { type: "image_url", image_url: { url: image } },
-              ],
-            },
-          ];
-        } else {
-          groqMessages = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: query || "Hello" },
-          ];
-        }
-
-        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${groq}`,
-          },
-          body: JSON.stringify({
-            model: groqModel,
-            messages: groqMessages,
-            temperature: 0.3,
-            max_tokens: 1000,
-          }),
-        });
-
-        if (groqRes.ok) {
-          const gData = await groqRes.json();
-          const gReply = gData.choices?.[0]?.message?.content;
-          if (gReply) {
-            return NextResponse.json({ reply: gReply, provider: `groq-${groqModel}`, success: true });
+      for (const groqModel of groqModels) {
+        try {
+          let groqMessages: any[] = [];
+          if (hasImage) {
+            groqMessages = [
+              { role: "system", content: systemPrompt },
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: query || "Solve this question step-by-step" },
+                  { type: "image_url", image_url: { url: image } },
+                ],
+              },
+            ];
+          } else {
+            groqMessages = [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: query || "Hello" },
+            ];
           }
-        } else {
-          const gErr = await groqRes.text();
-          errors.push(`Groq ${groqRes.status}: ${gErr.slice(0, 120)}`);
+
+          const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${groq}`,
+            },
+            body: JSON.stringify({
+              model: groqModel,
+              messages: groqMessages,
+              temperature: 0.3,
+              max_tokens: 1000,
+            }),
+          });
+
+          if (groqRes.ok) {
+            const gData = await groqRes.json();
+            const gReply = gData.choices?.[0]?.message?.content;
+            if (gReply) {
+              return NextResponse.json({ reply: gReply, provider: `groq-${groqModel}`, success: true });
+            }
+          } else {
+            const gErr = await groqRes.text();
+            errors.push(`Groq ${groqModel} ${groqRes.status}: ${gErr.slice(0, 100)}`);
+          }
+        } catch (gErr: any) {
+          errors.push(`Groq ${groqModel} err: ${gErr.message}`);
         }
-      } catch (gErr: any) {
-        errors.push(`Groq exception: ${gErr.message}`);
       }
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 3. OPENROUTER PROVIDER FALLBACK
+    // 3. OPENROUTER PROVIDER (google/gemini-2.0-flash-exp:free)
     // ─────────────────────────────────────────────────────────────
     if (openRouter) {
-      const orModel = hasImage
-        ? "meta-llama/llama-3.2-11b-vision-instruct:free"
-        : "deepseek/deepseek-chat:free";
-      try {
-        let orMessages: any[] = [];
-        if (hasImage) {
-          orMessages = [
-            { role: "system", content: systemPrompt },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: query || "Solve this question step-by-step" },
-                { type: "image_url", image_url: { url: image } },
-              ],
-            },
-          ];
-        } else {
-          orMessages = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: query || "Hello" },
-          ];
-        }
+      const orModels = hasImage
+        ? ["google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.2-11b-vision-instruct:free"]
+        : ["google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.2-3b-instruct:free"];
 
-        const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openRouter}`,
-            "HTTP-Referer": "https://eterprep.pages.dev",
-            "X-Title": "PrepWise AI Faculty",
-          },
-          body: JSON.stringify({
-            model: orModel,
-            messages: orMessages,
-            temperature: 0.3,
-            max_tokens: 1000,
-          }),
-        });
-
-        if (orRes.ok) {
-          const orData = await orRes.json();
-          const orReply = orData.choices?.[0]?.message?.content;
-          if (orReply) {
-            return NextResponse.json({ reply: orReply, provider: `openrouter-${orModel}`, success: true });
+      for (const orModel of orModels) {
+        try {
+          let orMessages: any[] = [];
+          if (hasImage) {
+            orMessages = [
+              { role: "system", content: systemPrompt },
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: query || "Solve this question step-by-step" },
+                  { type: "image_url", image_url: { url: image } },
+                ],
+              },
+            ];
+          } else {
+            orMessages = [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: query || "Hello" },
+            ];
           }
-        } else {
-          const orErr = await orRes.text();
-          errors.push(`OpenRouter ${orRes.status}: ${orErr.slice(0, 120)}`);
+
+          const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${openRouter}`,
+              "HTTP-Referer": "https://eterprep.pages.dev",
+              "X-Title": "PrepWise AI Faculty",
+            },
+            body: JSON.stringify({
+              model: orModel,
+              messages: orMessages,
+              temperature: 0.3,
+              max_tokens: 1000,
+            }),
+          });
+
+          if (orRes.ok) {
+            const orData = await orRes.json();
+            const orReply = orData.choices?.[0]?.message?.content;
+            if (orReply) {
+              return NextResponse.json({ reply: orReply, provider: `openrouter-${orModel}`, success: true });
+            }
+          } else {
+            const orErr = await orRes.text();
+            errors.push(`OpenRouter ${orModel} ${orRes.status}: ${orErr.slice(0, 100)}`);
+          }
+        } catch (orErr: any) {
+          errors.push(`OpenRouter ${orModel} err: ${orErr.message}`);
         }
-      } catch (orErr: any) {
-        errors.push(`OpenRouter exception: ${orErr.message}`);
       }
     }
 
-    // AGAR SABHI FAIL HUYE, TOH SCREEN PAR EXACT DIAGNOSTIC ERROR DIKHEGA:
     return NextResponse.json(
-      {
-        reply: `⚠️ AI Connection Error:\n${errors.join("\n")}`,
-      },
+      { reply: `⚠️ AI Connection Error:\n${errors.join("\n")}` },
       { status: 500 }
     );
   } catch (error: any) {
