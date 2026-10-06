@@ -7,7 +7,7 @@ interface Message {
   role: "assistant" | "user";
   content: string;
   image?: string;
-  isVoiceSpoken?: boolean;
+  isLiveSession?: boolean;
 }
 
 interface StudentContext {
@@ -28,7 +28,7 @@ interface AiChatSheetProps {
 }
 
 const SESSION_KEY = "pw_doubt_chat_session";
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const DAILY_LIMIT = 10;
 
 function getTodayLimitKey(): string {
@@ -58,6 +58,91 @@ function decrementQuota(): number {
   }
 }
 
+// ─── 1. SMART SPEECH FILTER (Removes emojis, symbols & makes formulas natural) ───
+function cleanTextForSpeech(raw: string): string {
+  if (!raw) return "";
+  let s = raw;
+
+  // 1. Remove all emojis
+  s = s.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "");
+
+  // 2. Pronounce math symbols naturally
+  s = s.replace(/\\phi/gi, " Phi ")
+       .replace(/\\theta/gi, " Theta ")
+       .replace(/\\vec\{([^}]+)\}/gi, " vector $1 ")
+       .replace(/\\cdot/gi, " dot ")
+       .replace(/\\times/gi, " multiplied by ")
+       .replace(/\\cos/gi, " cos ")
+       .replace(/\\sin/gi, " sin ")
+       .replace(/\\tan/gi, " tan ")
+       .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, " $1 divided by $2 ")
+       .replace(/\\Delta/gi, " Delta ");
+
+  // 3. Remove Markdown & LaTeX syntax markers
+  s = s.replace(/\$\$/g, " ")
+       .replace(/\$/g, " ")
+       .replace(/[*_#`~=\-]/g, " ")
+       .replace(/\\/g, " ")
+       .replace(/\s+/g, " ")
+       .trim();
+
+  return s.slice(0, 480);
+}
+
+// ─── 2. MATH & MARKDOWN VISUAL FORMATTER ───
+function FormattedSolution({ text }: { text: string }) {
+  const lines = text.split("\n");
+
+  return (
+    <div className="space-y-1.5 text-xs leading-relaxed text-ink/90 font-sans">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={idx} className="h-1" />;
+
+        // Display Equation Block $$ ... $$
+        if (trimmed.startsWith("$$") && trimmed.endsWith("$$")) {
+          const eq = trimmed.slice(2, -2).trim();
+          return (
+            <div key={idx} className="my-2 p-2.5 bg-teal/5 border border-teal/20 rounded-xl text-center font-mono font-bold text-teal text-sm tracking-wide overflow-x-auto">
+              {eq.replace(/\\vec\{([^}]+)\}/g, "$1⃗")
+                 .replace(/\\cdot/g, " • ")
+                 .replace(/\\phi/g, "Φ")
+                 .replace(/\\theta/g, "θ")
+                 .replace(/\\cos/g, "cos")
+                 .replace(/\\sin/g, "sin")
+                 .replace(/\\times/g, "×")}
+            </div>
+          );
+        }
+
+        // Section Heading ###
+        if (trimmed.startsWith("###")) {
+          return (
+            <h4 key={idx} className="font-black text-ink text-[12.5px] mt-2 mb-0.5 border-b border-ink/8 pb-0.5">
+              {trimmed.replace(/^###\s*/, "")}
+            </h4>
+          );
+        }
+
+        // Clean inline math & bold
+        const cleanLine = trimmed
+          .replace(/\$\$(.*?)\$\$/g, " $1 ")
+          .replace(/\$(.*?)\$/g, " $1 ")
+          .replace(/\\phi/g, "Φ")
+          .replace(/\\vec\{([^}]+)\}/g, "$1⃗")
+          .replace(/\\cdot/g, "•")
+          .replace(/\\theta/g, "θ");
+
+        return (
+          <p key={idx} className={trimmed.startsWith("**") ? "font-bold text-ink" : "text-ink/80"}>
+            {cleanLine}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function AiChatSheet({ open, onClose, studentContext }: AiChatSheetProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -69,11 +154,16 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
 
-  // Live Camera Scan state (Tarika B)
-  const [liveCamOpen, setLiveCamOpen] = useState(false);
-  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
-  const [isChatVoiceRecording, setIsChatVoiceRecording] = useState(false);
+  // ── TRUE CONTINUOUS LIVE VIDEO CALL STATE ──
+  const [liveCallOpen, setLiveCallOpen] = useState(false);
+  const [isLiveListening, setIsLiveListening] = useState(false);
+  const [liveSolution, setLiveSolution] = useState<string | null>(null);
+  const [isSolutionExpanded, setIsSolutionExpanded] = useState(true);
+  const [liveSessionItems, setLiveSessionItems] = useState<{ query: string; reply: string }[]>([]);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
+
+  // Pure Voice in Chat
+  const [isChatVoiceRecording, setIsChatVoiceRecording] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -84,7 +174,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
 
   useEffect(() => {
     if (!open) {
-      stopCamera();
+      stopLiveCall();
       stopSpeaking();
       return;
     }
@@ -103,15 +193,13 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
 
     const name = studentContext?.name || "Champion";
     const exam = studentContext?.targetExam || "JEE/NEET";
-    const days = studentContext?.daysToExam;
-    const weak = studentContext?.weakSubjects?.join(", ");
 
-    let welcome = `Namaste ${name}! Main aapka AI Doubt Faculty hoon. `;
-    if (days && days > 0) welcome += `${exam} mein sirf **${days} din** bache hain — `;
-    if (weak) welcome += `${weak} pe focus bana ke rakho. `;
-    welcome += `Koi bhi sawaal bole kar puchein (🎙️), photo attach karein ya **Live Cam (🎥)** se direct book dikhayein! ✍️`;
-
-    setMessages([{ role: "assistant", content: welcome }]);
+    setMessages([
+      {
+        role: "assistant",
+        content: `Namaste ${name}! Main aapka AI Doubt Faculty hoon. Koi bhi sawaal bol kar puchein (🎙️), photo attach karein ya **Start Live Call (🎥)** se direct uninterrupted video call karein! ✍️`,
+      },
+    ]);
   }, [open]);
 
   useEffect(() => {
@@ -127,22 +215,30 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   }, [messages]);
 
-  // ─── TEXT-TO-SPEECH (AI BOLEGA BHI) ───
-  const speakSolution = useCallback(
+  // ─── NATURAL GOOGLE VOICE (Web Speech API with neural accent) ───
+  const speakNaturalVoice = useCallback(
     (text: string) => {
       if (audioMuted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
       try {
         window.speechSynthesis.cancel();
-        const cleanText = text
-          .replace(/[*_#`~]/g, "")
-          .replace(/⚡/g, "Exam Shortcut: ")
-          .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1 divided by $2")
-          .slice(0, 450);
+        const cleanSpokenText = cleanTextForSpeech(text);
+        if (!cleanSpokenText) return;
 
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.rate = 1.05;
+        const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
+        utterance.rate = 1.0;
         utterance.pitch = 1.0;
-        utterance.lang = "en-IN";
+
+        // Find Natural Google Indian English / Hindi voice
+        const voices = window.speechSynthesis.getVoices();
+        const bestVoice = voices.find(
+          (v) =>
+            v.lang.includes("hi-IN") ||
+            v.lang.includes("en-IN") ||
+            v.name.includes("Google हिन्दी") ||
+            v.name.includes("India")
+        );
+        if (bestVoice) utterance.voice = bestVoice;
+        else utterance.lang = "en-IN";
 
         utterance.onstart = () => setIsSpeaking(true);
         utterance.onend = () => setIsSpeaking(false);
@@ -163,12 +259,17 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     setIsSpeaking(false);
   };
 
-  // ─── LIVE CAMERA & TARIKA B (SPEAK & AUTO-SNAP) ───
-  const startCamera = async (mode: "environment" | "user" = facingMode) => {
-    setLiveCamOpen(true);
+  // ─── TRUE CONTINUOUS LIVE VIDEO CALL CONTROLS ───
+  const startLiveCall = async (mode: "environment" | "user" = facingMode) => {
+    setLiveCallOpen(true);
+    setLiveSolution(null);
+    setIsSolutionExpanded(true);
+    setLiveSessionItems([]);
+
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
     }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -185,18 +286,19 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         videoRef.current.play().catch(() => {});
       }
     } catch (e) {
-      alert("Camera permission allow karein taaki aap live sawal dikha sakein.");
-      setLiveCamOpen(false);
+      alert("Camera permission allow karein live video call ke liye.");
+      setLiveCallOpen(false);
     }
   };
 
-  const toggleCameraFacing = () => {
-    const nextMode = facingMode === "environment" ? "user" : "environment";
-    setFacingMode(nextMode);
-    startCamera(nextMode);
+  const flipLiveCamera = () => {
+    const next = facingMode === "environment" ? "user" : "environment";
+    setFacingMode(next);
+    startLiveCall(next);
   };
 
-  const stopCamera = () => {
+  // END LIVE CALL: Camera closes & all live doubts are dumped into Chat!
+  const stopLiveCall = () => {
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
       mediaStreamRef.current = null;
@@ -204,11 +306,23 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setLiveCamOpen(false);
-    setIsRecordingVoice(false);
+    stopSpeaking();
+
+    // Append all resolved doubts from this live call to the main Chat!
+    if (liveSessionItems.length > 0) {
+      const newChatMessages: Message[] = [];
+      liveSessionItems.forEach((item) => {
+        newChatMessages.push({ role: "user", content: `🎥 [Live Call Doubt]: ${item.query}` });
+        newChatMessages.push({ role: "assistant", content: item.reply, isLiveSession: true });
+      });
+      setMessages((prev) => [...prev, ...newChatMessages]);
+    }
+
+    setLiveCallOpen(false);
+    setIsLiveListening(false);
   };
 
-  const captureFrameFromVideo = (): string | null => {
+  const captureLiveVideoFrame = (): string | null => {
     if (!videoRef.current) return null;
     const v = videoRef.current;
     const canvas = document.createElement("canvas");
@@ -220,21 +334,18 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     return canvas.toDataURL("image/jpeg", 0.75);
   };
 
-  // TARIKA B: Start voice recording inside camera, snap frame when voice finishes
-  const startVoiceCaptureAndSnap = () => {
+  // Speak inside Live Video Call (Camera stays open!)
+  const triggerLiveSpeechQuery = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
     if (!SpeechRecognition) {
-      const snap = captureFrameFromVideo();
-      if (snap) {
-        stopCamera();
-        handleExecuteDoubt(snap, "Solve this question step-by-step.");
-      }
+      const snap = captureLiveVideoFrame();
+      handleLiveExecution(snap, "Explain the question shown in the camera step-by-step.");
       return;
     }
 
-    setIsRecordingVoice(true);
-
+    setIsLiveListening(true);
     try {
       const recognition = new SpeechRecognition();
       recognition.lang = "en-IN";
@@ -243,107 +354,31 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
 
       recognition.onresult = (event: any) => {
         const spoken = event.results[0][0]?.transcript || "";
-        const snap = captureFrameFromVideo();
-        stopCamera();
-        handleExecuteDoubt(snap, spoken || "Explain this question step-by-step.");
+        setIsLiveListening(false);
+        const snap = captureLiveVideoFrame();
+        handleLiveExecution(snap, spoken || "Explain this question");
       };
 
       recognition.onerror = () => {
-        setIsRecordingVoice(false);
-        const snap = captureFrameFromVideo();
-        stopCamera();
-        handleExecuteDoubt(snap, "Explain this question step-by-step.");
+        setIsLiveListening(false);
+        const snap = captureLiveVideoFrame();
+        handleLiveExecution(snap, "Explain this question");
       };
 
-      recognition.onend = () => {
-        setIsRecordingVoice(false);
-      };
-
+      recognition.onend = () => setIsLiveListening(false);
       recognitionRef.current = recognition;
       recognition.start();
     } catch (_) {
-      setIsRecordingVoice(false);
-      const snap = captureFrameFromVideo();
-      stopCamera();
-      handleExecuteDoubt(snap, "Explain this question step-by-step.");
+      setIsLiveListening(false);
     }
   };
 
-  const stopVoiceCaptureNow = () => {
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (_) {}
-    }
-  };
-
-  // PURE VOICE DOUBT (No Camera Needed)
-  const startPureVoiceDoubt = () => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Aapke browser mein voice recognition supported nahi hai. Kripya type karein!");
-      return;
-    }
-
-    if (isChatVoiceRecording) {
-      recognitionRef.current?.stop();
-      setIsChatVoiceRecording(false);
-      return;
-    }
-
-    setIsChatVoiceRecording(true);
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.lang = "en-IN";
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
-
-      recognition.onresult = (event: any) => {
-        const spoken = event.results[0][0]?.transcript || "";
-        setIsChatVoiceRecording(false);
-        if (spoken.trim()) {
-          handleExecuteDoubt(selectedImage, spoken.trim());
-          setSelectedImage(null);
-        }
-      };
-
-      recognition.onerror = () => {
-        setIsChatVoiceRecording(false);
-      };
-
-      recognition.onend = () => {
-        setIsChatVoiceRecording(false);
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (_) {
-      setIsChatVoiceRecording(false);
-    }
-  };
-
-  const handleExecuteDoubt = async (imgData: string | null, promptText: string) => {
+  const handleLiveExecution = async (imgData: string | null, promptText: string) => {
     if (remainingQuota <= 0) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `⚠️ Aaj ke **${DAILY_LIMIT} free doubts** khatam ho chuke hain! Yeh quota raat 12:00 baje automatically 10 par reset ho jayega. Tab tak pichle notes aur tests revise karein! 📚`,
-        },
-      ]);
+      setLiveSolution("⚠️ Aaj ka free doubt quota khatam ho chuka hai! Kal naya quota milega.");
       return;
     }
 
-    const userMsg: Message = {
-      role: "user",
-      content: promptText,
-      image: imgData || undefined,
-    };
-
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
     setLoading(true);
     const updatedQuota = decrementQuota();
     setRemainingQuota(updatedQuota);
@@ -353,9 +388,58 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: newMessages,
           query: promptText,
           image: imgData,
+          isLive: true,
+          targetExam: studentContext?.targetExam || "JEE",
+          studentContext,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const replyText = data.reply || "Solution complete.";
+        setLiveSolution(replyText);
+        setIsSolutionExpanded(true);
+        setLiveSessionItems((prev) => [...prev, { query: promptText, reply: replyText }]);
+        speakNaturalVoice(replyText); // 🔊 Speaks in clean natural voice!
+      } else {
+        setLiveSolution("Sawal samajhne mein dikkat aayi. Kripya dobara mic daba kar puchein!");
+      }
+    } catch {
+      setLiveSolution("Network error. Internet check karein!");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── CHAT MODE EXECUTION ───
+  const handleExecuteDoubt = async (imgData: string | null, promptText: string) => {
+    if (remainingQuota <= 0) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `⚠️ Aaj ke **${DAILY_LIMIT} free doubts** khatam ho chuke hain! Raat 12 baje reset ho jayega.`,
+        },
+      ]);
+      return;
+    }
+
+    const userMsg: Message = { role: "user", content: promptText, image: imgData || undefined };
+    setMessages((prev) => [...prev, userMsg]);
+    setLoading(true);
+    const updatedQuota = decrementQuota();
+    setRemainingQuota(updatedQuota);
+
+    try {
+      const res = await fetch("/api/ai-doubt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: promptText,
+          image: imgData,
+          isLive: false,
           targetExam: studentContext?.targetExam || "JEE",
           studentContext,
         }),
@@ -365,15 +449,11 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         const data = await res.json();
         const replyText = data.reply || "Solution complete.";
         setMessages((prev) => [...prev, { role: "assistant", content: replyText }]);
-        speakSolution(replyText); // 🔊 AI Speaks out loud!
+        speakNaturalVoice(replyText);
       } else {
         setMessages((prev) => [
           ...prev,
-          {
-            role: "assistant",
-            content:
-              "Sawal samajhne mein thodi dikkat aayi. Kripya dubara photo lein ya sawal type karein!",
-          },
+          { role: "assistant", content: "Sawal samajhne mein dikkat aayi. Dobara try karein!" },
         ]);
       }
     } catch {
@@ -396,19 +476,12 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
       img.onload = () => {
         const canvas = document.createElement("canvas");
         const maxDim = 1000;
-        let w = img.width,
-          h = img.height;
+        let w = img.width, h = img.height;
         if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
-          }
+          if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+          else { w = Math.round((w * maxDim) / h); h = maxDim; }
         }
-        canvas.width = w;
-        canvas.height = h;
+        canvas.width = w; canvas.height = h;
         const ctx = canvas.getContext("2d");
         ctx?.drawImage(img, 0, 0, w, h);
         setSelectedImage(canvas.toDataURL("image/jpeg", 0.75));
@@ -422,36 +495,41 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end animate-in fade-in">
       <div className="w-full max-w-md mx-auto bg-white rounded-t-3xl shadow-2xl flex flex-col h-[85vh] border-t border-ink/10 relative overflow-hidden">
-        {/* ── LIVE CAMERA SCANNER OVERLAY (TARIKA B) ── */}
-        {liveCamOpen && (
-          <div className="absolute inset-0 z-50 bg-black flex flex-col justify-between p-4 animate-in fade-in">
-            {/* Top controls */}
-            <div className="flex items-center justify-between text-white z-10">
-              <span className="text-xs font-bold bg-white/20 px-3 py-1 rounded-full backdrop-blur-md flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                Live Camera
-              </span>
+
+        {/* ═════════════════════════════════════════════════════════════ */}
+        {/* ── 1. TRUE FULLSCREEN CONTINUOUS LIVE VIDEO CALL OVERLAY ── */}
+        {/* ═════════════════════════════════════════════════════════════ */}
+        {liveCallOpen && (
+          <div className="absolute inset-0 z-50 bg-black flex flex-col justify-between animate-in fade-in">
+            {/* Top Bar */}
+            <div className="p-3.5 flex items-center justify-between text-white z-20 bg-gradient-to-b from-black/80 to-transparent">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                <span className="text-xs font-black tracking-wide bg-white/20 px-2.5 py-1 rounded-full backdrop-blur-md">
+                  Gemini Live Call
+                </span>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={toggleCameraFacing}
-                  className="w-8 h-8 rounded-full bg-white/20 text-white flex items-center justify-center font-bold text-xs"
+                  onClick={flipLiveCamera}
+                  className="w-8 h-8 rounded-full bg-white/20 text-white flex items-center justify-center font-bold text-xs backdrop-blur-md active:scale-95"
                   title="Flip Camera"
                 >
                   🔄
                 </button>
                 <button
                   type="button"
-                  onClick={stopCamera}
-                  className="w-8 h-8 rounded-full bg-white/20 text-white flex items-center justify-center font-bold"
+                  onClick={stopLiveCall}
+                  className="px-3 py-1.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-black text-xs flex items-center gap-1 shadow-lg active:scale-95"
                 >
-                  ✕
+                  <span>End Call</span> ✕
                 </button>
               </div>
             </div>
 
-            {/* Video Viewfinder */}
-            <div className="relative flex-1 flex items-center justify-center my-2 overflow-hidden rounded-2xl border border-white/20 bg-black">
+            {/* Continuous Video Feed (Camera NEVER closes) */}
+            <div className="absolute inset-0 z-0 bg-black flex items-center justify-center">
               <video
                 ref={(el) => {
                   videoRef.current = el;
@@ -463,50 +541,76 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
                 autoPlay
                 playsInline
                 muted
-                onLoadedMetadata={(e) => {
-                  (e.target as HTMLVideoElement).play().catch(() => {});
-                }}
                 className="w-full h-full object-cover"
               />
-
-              {/* Question Focus Target Box */}
-              <div className="absolute inset-6 border-2 border-teal rounded-2xl pointer-events-none flex flex-col justify-between p-3">
-                <span className="text-[10px] font-bold text-teal bg-black/60 px-2 py-0.5 rounded-md w-fit">
-                  Align Question inside box
-                </span>
-                <span className="text-[10px] font-semibold text-white/80 bg-black/60 px-2 py-0.5 rounded-md self-center text-center">
-                  {isRecordingVoice ? "🎙️ Sun raha hoon... bolo!" : "Neeche mic daba kar sawal pucho"}
-                </span>
-              </div>
             </div>
 
-            {/* Bottom: TARIKA B Big Speak & Snap Button */}
-            <div className="flex flex-col items-center gap-2 pb-2 z-10">
-              {isRecordingVoice ? (
-                <button
-                  type="button"
-                  onClick={stopVoiceCaptureNow}
-                  className="w-full py-3.5 bg-rose-600 text-white font-black text-sm rounded-2xl flex items-center justify-center gap-2 shadow-lg animate-pulse"
-                >
-                  <span>⏹</span> Click to Snap Now!
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={startVoiceCaptureAndSnap}
-                  className="w-full py-3.5 bg-gradient-to-r from-teal to-emerald-500 text-white font-black text-sm rounded-2xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
-                >
-                  <span className="text-lg">🎙️</span> Hold/Tap to Speak & Auto-Snap
-                </button>
-              )}
-              <p className="text-[10.5px] text-white/70">
-                Bolte hi camera automatic us second ki photo lekar AI ko bhej dega!
-              </p>
+            {/* ── FLOATING EXPANDABLE / COLLAPSIBLE SOLUTION CARD ── */}
+            {liveSolution && (
+              <div className="mx-3.5 z-20 transition-all duration-300">
+                <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/40 overflow-hidden flex flex-col">
+                  {/* Floating Header with Toggle */}
+                  <div
+                    onClick={() => setIsSolutionExpanded(!isSolutionExpanded)}
+                    className="p-2.5 px-3.5 bg-ink text-white flex items-center justify-between cursor-pointer select-none"
+                  >
+                    <span className="text-xs font-black flex items-center gap-1.5 text-teal">
+                      <span>✨</span> Solution Step-by-Step
+                    </span>
+                    <button type="button" className="text-xs font-bold text-white/80 hover:text-white">
+                      {isSolutionExpanded ? "Collapse ▾" : "Expand ▴"}
+                    </button>
+                  </div>
+
+                  {/* Expandable Body */}
+                  {isSolutionExpanded && (
+                    <div className="p-3 max-h-48 overflow-y-auto">
+                      <FormattedSolution text={liveSolution} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Bottom Call Controls & Glowing AI Orb */}
+            <div className="p-4 pb-6 flex flex-col items-center gap-3 z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
+              {/* Glowing Pulse Ring during Voice */}
+              <div className="flex items-center gap-2">
+                <div className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
+                  isSpeaking ? "bg-teal animate-ping scale-125" : isLiveListening ? "bg-rose-500 animate-pulse" : "bg-white/40"
+                }`} />
+                <span className="text-[11px] font-semibold text-white/90">
+                  {loading
+                    ? "Thinking & Solving…"
+                    : isSpeaking
+                    ? "AI is Speaking Solution (🔊)"
+                    : isLiveListening
+                    ? "Listening to your doubt…"
+                    : "Tap mic & ask question from book"}
+                </span>
+              </div>
+
+              {/* Tap to Speak in Live Call */}
+              <button
+                type="button"
+                onClick={triggerLiveSpeechQuery}
+                disabled={loading}
+                className={`w-full py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 ${
+                  isLiveListening
+                    ? "bg-rose-600 text-white animate-pulse"
+                    : "bg-gradient-to-r from-teal to-emerald-500 text-white"
+                }`}
+              >
+                <span className="text-lg">🎙️</span>
+                <span>{isLiveListening ? "Listening... Speak now!" : "Tap to Speak Doubt (Live Video)"}</span>
+              </button>
             </div>
           </div>
         )}
 
-        {/* ── REGULAR CHAT HEADER ── */}
+        {/* ═════════════════════════════════════════════════════════════ */}
+        {/* ── 2. NORMAL CHAT MODE HEADER ── */}
+        {/* ═════════════════════════════════════════════════════════════ */}
         <div className="p-3.5 border-b border-ink/8 flex items-center justify-between bg-paper/50 rounded-t-3xl">
           <div className="flex items-center gap-2">
             <span className="w-8 h-8 rounded-xl bg-teal text-white flex items-center justify-center text-sm font-bold shadow-xs">
@@ -521,18 +625,12 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Daily Quota Badge */}
-            <span
-              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                remainingQuota > 2
-                  ? "bg-teal/10 border-teal/20 text-teal"
-                  : "bg-rose-50 border-rose-200 text-rose-600"
-              }`}
-            >
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+              remainingQuota > 2 ? "bg-teal/10 border-teal/20 text-teal" : "bg-rose-50 border-rose-200 text-rose-600"
+            }`}>
               {remainingQuota} / {DAILY_LIMIT} Doubts
             </span>
 
-            {/* Mute/Unmute Speech Toggle */}
             <button
               type="button"
               onClick={() => {
@@ -541,9 +639,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               }}
               title={audioMuted ? "Unmute Voice" : "Mute Voice"}
               className={`p-1.5 rounded-lg border text-xs font-bold transition-all ${
-                audioMuted
-                  ? "bg-slate-100 text-slate-400 border-slate-200"
-                  : "bg-teal/15 text-teal border-teal/30"
+                audioMuted ? "bg-slate-100 text-slate-400 border-slate-200" : "bg-teal/15 text-teal border-teal/30"
               }`}
             >
               {audioMuted ? "🔇" : isSpeaking ? "🔊" : "🔈"}
@@ -559,62 +655,54 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
         </div>
 
-        {/* ── CHAT MESSAGES ── */}
+        {/* ── CHAT MESSAGES WITH BEAUTIFUL MATH FORMATTER ── */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((m, idx) => (
-            <div
-              key={idx}
-              className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
-            >
-              <div
-                className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed whitespace-pre-wrap ${
-                  m.role === "user"
-                    ? "bg-ink text-paper rounded-br-xs"
-                    : "bg-paper/80 border border-ink/8 text-ink rounded-bl-xs"
-                }`}
-              >
+            <div key={idx} className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
+              <div className={`max-w-[88%] rounded-2xl p-3.5 text-xs leading-relaxed ${
+                m.role === "user"
+                  ? "bg-ink text-paper rounded-br-xs"
+                  : "bg-paper/80 border border-ink/8 text-ink rounded-bl-xs shadow-xs"
+              }`}>
                 {m.image && (
-                  <img
-                    src={m.image}
-                    alt="Question"
-                    className="max-h-48 rounded-lg mb-2 object-contain bg-black/5"
-                  />
+                  <img src={m.image} alt="Question" className="max-h-48 rounded-lg mb-2 object-contain bg-black/5" />
                 )}
-                {m.content}
+                {m.isLiveSession && (
+                  <span className="block text-[9.5px] font-bold text-teal mb-1">
+                    🎥 Resolved during Live Call:
+                  </span>
+                )}
+                {m.role === "assistant" ? (
+                  <FormattedSolution text={m.content} />
+                ) : (
+                  <span className="whitespace-pre-wrap">{m.content}</span>
+                )}
               </div>
             </div>
           ))}
 
           {loading && (
             <div className="flex items-center gap-2 text-xs text-slate bg-paper/60 p-2.5 rounded-xl w-fit">
-              <span className="animate-spin">⏳</span> Solving & explaining step-by-step…
+              <span className="animate-spin">⏳</span> Solving step-by-step…
             </div>
           )}
           <div ref={chatEndRef} />
         </div>
 
-        {/* Image Preview if chosen from Gallery */}
+        {/* Image Preview if Gallery Chosen */}
         {selectedImage && (
           <div className="px-4 py-2 bg-paper/60 border-t border-ink/5 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <img
-                src={selectedImage}
-                alt="Preview"
-                className="w-10 h-10 object-cover rounded-lg"
-              />
+              <img src={selectedImage} alt="Preview" className="w-10 h-10 object-cover rounded-lg" />
               <span className="text-[11px] font-bold text-ink">Photo attached</span>
             </div>
-            <button
-              type="button"
-              onClick={() => setSelectedImage(null)}
-              className="text-xs text-rose-500 font-bold hover:underline"
-            >
+            <button type="button" onClick={() => setSelectedImage(null)} className="text-xs text-rose-500 font-bold hover:underline">
               Remove
             </button>
           </div>
         )}
 
-        {/* ── INPUT BAR WITH LIVE SCAN & PURE VOICE BUTTON ── */}
+        {/* ── INPUT BAR WITH START LIVE CALL & PURE VOICE ── */}
         <div className="p-3 border-t border-ink/10 bg-white">
           <form
             onSubmit={(e) => {
@@ -627,44 +715,24 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
             }}
             className="flex items-center gap-2"
           >
-            {/* Live Camera Scanner Trigger */}
+            {/* START TRUE LIVE VIDEO CALL */}
             <button
               type="button"
-              onClick={() => startCamera()}
-              className="p-2.5 rounded-xl bg-teal/10 hover:bg-teal/20 border border-teal/25 text-teal active:scale-95 transition-all text-xs font-bold flex items-center gap-1 shrink-0"
-              title="Open Live Camera & Point Question"
+              onClick={() => startLiveCall()}
+              className="px-2.5 py-2.5 rounded-xl bg-gradient-to-r from-teal to-emerald-500 text-white active:scale-95 transition-all text-xs font-black flex items-center gap-1 shrink-0 shadow-xs"
+              title="Start Live Video Call"
             >
               <span>🎥</span>
-              <span className="text-[10px] font-bold hidden sm:inline">Cam</span>
-            </button>
-
-            {/* Direct Mic Button (Pure Voice Question) */}
-            <button
-              type="button"
-              onClick={startPureVoiceDoubt}
-              className={`p-2.5 rounded-xl border transition-all text-xs font-bold flex items-center gap-1 shrink-0 active:scale-95 ${
-                isChatVoiceRecording
-                  ? "bg-rose-500 text-white border-rose-600 animate-pulse"
-                  : "bg-paper hover:bg-ink/5 text-ink border-ink/12"
-              }`}
-              title={isChatVoiceRecording ? "Listening... Tap to Stop" : "Speak Voice Doubt"}
-            >
-              <span>🎙️</span>
+              <span className="text-[11px]">Live Call</span>
             </button>
 
             {/* Gallery Upload */}
-            <input
-              type="file"
-              accept="image/*"
-              ref={fileInputRef}
-              onChange={handleImageSelect}
-              className="hidden"
-            />
+            <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageSelect} className="hidden" />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="p-2.5 rounded-xl border border-ink/12 text-slate hover:text-ink active:scale-95 transition-all text-sm shrink-0"
-              title="Choose from Gallery"
+              title="Attach Photo"
             >
               📷
             </button>
@@ -673,7 +741,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={isChatVoiceRecording ? "Bolo, main sun raha hoon..." : "Type or speak doubt…"}
+              placeholder="Ask doubt, formula or concept…"
               className="flex-1 text-xs font-semibold p-2.5 rounded-xl border border-ink/15 bg-white focus:outline-none focus:border-teal"
             />
 
@@ -686,6 +754,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
             </button>
           </form>
         </div>
+
       </div>
     </div>
   );
