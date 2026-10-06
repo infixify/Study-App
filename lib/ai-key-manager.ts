@@ -8,7 +8,16 @@ interface KeyStatus {
 const keyPool: Map<string, KeyStatus> = new Map();
 
 /**
- * Cloudflare environment se saari Gemini keys nikalta hai
+ * Strips quotes, spaces, newlines from API keys
+ */
+function cleanKey(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/["'\r\n]/g, "").trim();
+  return cleaned.length > 10 ? cleaned : null;
+}
+
+/**
+ * Cloudflare environment se saari Gemini keys nikalta hai aur clean karta hai
  */
 export function getAllAvailableGeminiKeys(): string[] {
   const keys: string[] = [];
@@ -20,7 +29,9 @@ export function getAllAvailableGeminiKeys(): string[] {
 
   for (const raw of commaSeparated) {
     if (raw) {
-      keys.push(...raw.split(",").map((k) => k.trim()).filter(Boolean));
+      // Split by comma and strip quotes from each key
+      const parts = raw.split(",").map((k) => cleanKey(k)).filter(Boolean) as string[];
+      keys.push(...parts);
     }
   }
 
@@ -36,18 +47,16 @@ export function getAllAvailableGeminiKeys(): string[] {
     individualVars.push(process.env[`GEMINI_API_KEY_${i}`]);
   }
 
-  for (const k of individualVars) {
-    if (k && k.trim() && !keys.includes(k.trim())) {
-      keys.push(k.trim());
+  for (const raw of individualVars) {
+    const k = cleanKey(raw);
+    if (k && !keys.includes(k)) {
+      keys.push(k);
     }
   }
 
   return keys;
 }
 
-/**
- * Live Doubt ke liye active key uthata hai
- */
 export function getActiveLiveKey(): string | null {
   const allKeys = getAllAvailableGeminiKeys();
   const now = Date.now();
@@ -61,11 +70,8 @@ export function getActiveLiveKey(): string | null {
   return allKeys.length > 0 ? allKeys[0] : null;
 }
 
-/**
- * Normal Chat/Photo Doubt ke liye active key uthata hai
- */
 export function getActiveChatKey(): string | null {
-  const doubtKey = process.env.GEMINI_API_KEY_DOUBT;
+  const doubtKey = cleanKey(process.env.GEMINI_API_KEY_DOUBT);
   const now = Date.now();
   if (doubtKey) {
     const st = keyPool.get(doubtKey);
@@ -74,20 +80,6 @@ export function getActiveChatKey(): string | null {
   return getActiveLiveKey();
 }
 
-/**
- * General purpose key finder
- */
-export function getActiveGeminiKeyForDoubt(): string | null {
-  return getActiveLiveKey();
-}
-
-export function getActiveGeminiKey(): string | null {
-  return getActiveLiveKey();
-}
-
-/**
- * Rate-limited (429) key ko cooldown mein daalna
- */
 export function markKeyRateLimited(key: string, cooldownMinutes = 60) {
   keyPool.set(key, {
     key,
@@ -95,17 +87,9 @@ export function markKeyRateLimited(key: string, cooldownMinutes = 60) {
   });
 }
 
-/**
- * Backup External Providers
- */
 export function getBackupProviders() {
   return {
-    groq: process.env.GROQ_API_KEY?.trim() || null,
-    openRouter: process.env.OPENROUTER_API_KEY?.trim() || null,
+    groq: cleanKey(process.env.GROQ_API_KEY),
+    openRouter: cleanKey(process.env.OPENROUTER_API_KEY),
   };
-}
-
-export function getBackupApiKey() {
-  const groq = process.env.GROQ_API_KEY?.trim() || null;
-  return { provider: groq ? ("groq" as const) : ("none" as const), key: groq };
 }
