@@ -52,6 +52,7 @@ type AdminNotification = {
 type DailyContentItem = {
   id: string;
   content_type: "motivation" | "meme";
+  quote_source: "human" | "anime";
   quote: string;
   character: string;
   show: string;
@@ -112,6 +113,7 @@ export default function AdminPage() {
   // --- Daily Content (Quotes & Memes) State ---
   const [dailyContents, setDailyContents] = useState<DailyContentItem[]>([]);
   const [contentType, setContentType] = useState<"motivation" | "meme">("motivation");
+  const [quoteSource, setQuoteSource] = useState<"human" | "anime">("human");
   const [contentQuote, setContentQuote] = useState("");
   const [contentCharacter, setContentCharacter] = useState("");
   const [contentShow, setContentShow] = useState("");
@@ -376,6 +378,7 @@ export default function AdminPage() {
         .from("daily_content")
         .insert({
           content_type: contentType,
+          quote_source: contentType === "motivation" ? quoteSource : "human",
           quote: contentQuote.trim(),
           character: contentCharacter.trim(),
           show: contentShow.trim() || (contentType === "motivation" ? "Inspiration" : "PrepWise Roast"),
@@ -398,7 +401,8 @@ export default function AdminPage() {
         setContentCharacter("");
         setContentShow("");
         setContentMediaUrl("");
-        setContentSuccess(`${contentType === "motivation" ? "Quote" : "Meme"} added successfully!`);
+        setQuoteSource("human");
+        setContentSuccess(`${contentType === "motivation" ? (quoteSource === "anime" ? "Anime Quote" : "Human Quote") : "Meme"} added successfully!`);
       }
     } catch (err: any) {
       alert("Failed to save content: " + err.message);
@@ -664,6 +668,41 @@ export default function AdminPage() {
               </button>
             </div>
 
+            {contentType === "motivation" && (
+              <div>
+                <label className="text-[10px] font-bold text-slate block mb-1">
+                  Quote Source
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setQuoteSource("human")}
+                    className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all ${
+                      quoteSource === "human"
+                        ? "bg-sky-500 text-white border-sky-500 shadow-xs"
+                        : "bg-white text-slate-700 border-ink/15"
+                    }`}
+                  >
+                    🧑 Human / Real Person
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuoteSource("anime")}
+                    className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all ${
+                      quoteSource === "anime"
+                        ? "bg-rose-500 text-white border-rose-500 shadow-xs"
+                        : "bg-white text-slate-700 border-ink/15"
+                    }`}
+                  >
+                    ⚔️ Anime / Fictional
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate mt-1">
+                  Dashboard alternates Human → Anime each day. Add equal count of both for best variety.
+                </p>
+              </div>
+            )}
+
             <div>
               <label className="text-[10px] font-bold text-slate block mb-0.5">
                 {contentType === "motivation" ? "Inspiring Quote" : "Meme / Roast Text"}
@@ -756,7 +795,7 @@ export default function AdminPage() {
                           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
                             item.content_type === "motivation" ? "bg-amber-100 text-amber-800" : "bg-purple-100 text-purple-800"
                           }`}>
-                            {item.content_type}
+                            {item.content_type === "motivation" ? (item.quote_source === "anime" ? "⚔️ anime" : "🧑 human") : "meme"}
                           </span>
                           <span className="font-bold text-ink truncate">— {item.character}</span>
                         </div>
