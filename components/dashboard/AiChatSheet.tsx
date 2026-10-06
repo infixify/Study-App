@@ -43,7 +43,7 @@ function getTodayLimitKey(): string {
   return `pw_doubt_daily_quota_${today}`;
 }
 
-// ─── 1. UNIVERSAL TEXTBOOK MATH NORMALIZER (Clean NCERT Symbols) ───
+// ─── 1. UNIVERSAL TEXTBOOK MATH NORMALIZER ───
 function normalizeMathToTextbook(raw: string): string {
   if (!raw) return "";
   let s = raw;
@@ -92,7 +92,7 @@ function normalizeMathToTextbook(raw: string): string {
   return s;
 }
 
-// ─── 2. SMART SPEECH FILTER (Speaks Naturally Without Emojis / Math Code) ───
+// ─── 2. SMART SPEECH FILTER ───
 function cleanTextForSpeech(raw: string): string {
   if (!raw) return "";
   let s = raw;
@@ -193,6 +193,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   // ── TRUE CONTINUOUS LIVE VIDEO CALL STATE ──
   const [liveCallOpen, setLiveCallOpen] = useState(false);
   const [liveMicMuted, setLiveMicMuted] = useState(false);
+  const [isLiveListening, setIsLiveListening] = useState(false);
   const [liveSolution, setLiveSolution] = useState<string | null>(null);
   const [isSolutionExpanded, setIsSolutionExpanded] = useState(true);
   const [liveExchanges, setLiveExchanges] = useState<LiveExchange[]>([]);
@@ -200,7 +201,8 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const liveRecognitionRef = useRef<any>(null);
+  const recognitionInstanceRef = useRef<any>(null);
+  const isListeningLoopActiveRef = useRef<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -269,7 +271,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   }, [messages]);
 
-  // Preload voices
   useEffect(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.getVoices();
@@ -279,17 +280,23 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   }, []);
 
-  // ─── NATURAL HD VOICE ENGINE (With 15-second Anti-Freeze Heartbeat) ───
+  // ─── 4. NATURAL HD VOICE ENGINE (Anti-Freeze Heartbeat) ───
   const speakNaturalVoice = useCallback(
-    (text: string) => {
-      if (audioMuted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    (text: string, onFinish?: () => void) => {
+      if (audioMuted || typeof window === "undefined" || !("speechSynthesis" in window)) {
+        if (onFinish) onFinish();
+        return;
+      }
 
       try {
         window.speechSynthesis.cancel();
         if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
 
         const cleanSpokenText = cleanTextForSpeech(text);
-        if (!cleanSpokenText) return;
+        if (!cleanSpokenText) {
+          if (onFinish) onFinish();
+          return;
+        }
 
         const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
         utterance.rate = 0.95;
@@ -326,16 +333,19 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         utterance.onend = () => {
           setIsSpeaking(false);
           if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+          if (onFinish) onFinish();
         };
 
         utterance.onerror = () => {
           setIsSpeaking(false);
           if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+          if (onFinish) onFinish();
         };
 
         window.speechSynthesis.speak(utterance);
       } catch (_) {
         setIsSpeaking(false);
+        if (onFinish) onFinish();
       }
     },
     [audioMuted]
@@ -349,13 +359,14 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     setIsSpeaking(false);
   };
 
-  // ─── 4. TRUE CONTINUOUS LIVE VIDEO CALL CONTROLS ───
+  // ─── 5. TRUE CONTINUOUS LIVE VIDEO CALL (Autonomous Turn-Loop) ───
   const startLiveCall = async (mode: "environment" | "user" = facingMode) => {
     setLiveCallOpen(true);
     setLiveMicMuted(false);
     setLiveSolution(null);
     setIsSolutionExpanded(true);
     setLiveExchanges([]);
+    isListeningLoopActiveRef.current = true;
 
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -365,7 +376,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: mode },
-          width: { ideal: 640 }, // Optimized for ultra-fast 0.8s upload
+          width: { ideal: 640 },
           height: { ideal: 480 },
         },
         audio: false,
@@ -377,8 +388,8 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         videoRef.current.play().catch(() => {});
       }
 
-      // Start Hands-Free Continuous Speech Listener
-      initContinuousLiveListener();
+      // Start Android Turn-Loop listener
+      startAndroidTurnListener();
     } catch (e) {
       alert("Camera permission allow karein live video call ke liye.");
       setLiveCallOpen(false);
@@ -391,8 +402,8 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     startLiveCall(next);
   };
 
-  // 🛑 END LIVE CALL: Appends Threaded Card into Normal Chat
   const stopLiveCall = () => {
+    isListeningLoopActiveRef.current = false;
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
       mediaStreamRef.current = null;
@@ -400,12 +411,11 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    if (liveRecognitionRef.current) {
-      try { liveRecognitionRef.current.abort(); } catch (_) {}
+    if (recognitionInstanceRef.current) {
+      try { recognitionInstanceRef.current.abort(); } catch (_) {}
     }
     stopSpeaking();
 
-    // Append Threaded Live Session Card into Chat!
     if (liveExchanges.length > 0) {
       setMessages((prev) => [
         ...prev,
@@ -429,56 +439,58 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.65); // Ultra-lightweight ~25KB
+    return canvas.toDataURL("image/jpeg", 0.65);
   };
 
-  // 🎙️ CONTINUOUS HANDS-FREE LISTENER (With Instant Barge-in Interruption)
-  const initContinuousLiveListener = () => {
+  // 🤖 AUTONOMOUS ANDROID TURN-LOOP (No more Mute/Unmute glitch)
+  const startAndroidTurnListener = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
+    if (!SpeechRecognition || !isListeningLoopActiveRef.current) return;
 
     try {
       const recognition = new SpeechRecognition();
       recognition.lang = "en-IN";
-      recognition.continuous = true;
+      recognition.continuous = false; // Native Android Chrome mode (fires immediately on pause!)
       recognition.interimResults = false;
 
+      recognition.onstart = () => {
+        setIsLiveListening(true);
+      };
+
       recognition.onresult = (event: any) => {
-        if (liveMicMuted) return; // Ignore if user muted mic
+        const spoken = event.results[0]?.[0]?.transcript?.trim() || "";
+        if (spoken.length > 2 && !liveMicMuted) {
+          stopSpeaking(); // Immediate Barge-in
+          const snap = captureFastFrame();
+          const isFollowUp = liveExchanges.length > 0;
 
-        const latestResult = event.results[event.results.length - 1];
-        if (latestResult.isFinal) {
-          const spoken = latestResult[0]?.transcript?.trim() || "";
-          if (spoken.length > 2) {
-            // 🛑 BARGE-IN: If AI was speaking, interrupt immediately!
-            stopSpeaking();
-
-            const snap = captureFastFrame();
-            const isFollowUp = liveExchanges.length > 0;
-            handleLiveExecution(snap, spoken, isFollowUp);
-          }
+          handleLiveExecution(snap, spoken, isFollowUp, () => {
+            // When AI finishes speaking, seamlessly restart listening!
+            if (isListeningLoopActiveRef.current && !liveMicMuted) {
+              startAndroidTurnListener();
+            }
+          });
         }
       };
 
       recognition.onerror = () => {
-        // Restart listener if dropped
-        if (liveCallOpen && !liveMicMuted) {
-          setTimeout(() => {
-            try { recognition.start(); } catch (_) {}
-          }, 1000);
-        }
+        setIsLiveListening(false);
       };
 
       recognition.onend = () => {
-        if (liveCallOpen && !liveMicMuted) {
+        setIsLiveListening(false);
+        // If user didn't speak or pause happened, auto-loop
+        if (isListeningLoopActiveRef.current && !liveMicMuted && !isSpeaking && !loading) {
           setTimeout(() => {
-            try { recognition.start(); } catch (_) {}
-          }, 500);
+            if (isListeningLoopActiveRef.current && !liveMicMuted && !isSpeaking && !loading) {
+              startAndroidTurnListener();
+            }
+          }, 400);
         }
       };
 
-      liveRecognitionRef.current = recognition;
+      recognitionInstanceRef.current = recognition;
       recognition.start();
     } catch (_) {}
   };
@@ -487,16 +499,23 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     const nextState = !liveMicMuted;
     setLiveMicMuted(nextState);
     if (nextState) {
-      try { liveRecognitionRef.current?.stop(); } catch (_) {}
+      try { recognitionInstanceRef.current?.abort(); } catch (_) {}
+      setIsLiveListening(false);
     } else {
-      try { liveRecognitionRef.current?.start(); } catch (_) {}
+      startAndroidTurnListener();
     }
   };
 
   // ─── EXECUTE LIVE CALL (Uses 5 LIVE Dedicated Keys) ───
-  const handleLiveExecution = async (imgData: string | null, promptText: string, isFollowUp: boolean) => {
+  const handleLiveExecution = async (
+    imgData: string | null,
+    promptText: string,
+    isFollowUp: boolean,
+    onSpeechComplete?: () => void
+  ) => {
     if (remainingQuota <= 0) {
       setLiveSolution("⚠️ Aaj ka free doubt quota complete ho chuka hai.");
+      if (onSpeechComplete) onSpeechComplete();
       return;
     }
 
@@ -511,7 +530,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         body: JSON.stringify({
           query: promptText,
           image: imgData,
-          isLive: true, // 👈 Routes to 5 Dedicated Live Keys
+          isLive: true,
           targetExam: studentContext?.targetExam || "JEE",
           studentContext,
         }),
@@ -529,12 +548,14 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           { query: promptText, reply: replyText, isFollowUp },
         ]);
 
-        speakNaturalVoice(speakText);
+        speakNaturalVoice(speakText, onSpeechComplete);
       } else {
         setLiveSolution("Sawal samajhne mein dikkat aayi. Kripya dobara bolein!");
+        if (onSpeechComplete) onSpeechComplete();
       }
     } catch {
       setLiveSolution("Network error. Kripya internet connection check karein!");
+      if (onSpeechComplete) onSpeechComplete();
     } finally {
       setLoading(false);
     }
@@ -566,7 +587,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         body: JSON.stringify({
           query: promptText,
           image: imgData,
-          isLive: false, // 👈 Routes to Dedicated Chat Key
+          isLive: false,
           targetExam: studentContext?.targetExam || "JEE",
           studentContext,
         }),
@@ -624,9 +645,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end animate-in fade-in">
       <div className="w-full max-w-md mx-auto bg-white rounded-t-3xl shadow-2xl flex flex-col h-[85vh] border-t border-ink/10 relative overflow-hidden">
 
-        {/* ═════════════════════════════════════════════════════════════ */}
         {/* ── 1. TRUE HANDS-FREE LIVE VIDEO CALL OVERLAY ── */}
-        {/* ═════════════════════════════════════════════════════════════ */}
         {liveCallOpen && (
           <div className="absolute inset-0 z-50 bg-black flex flex-col justify-between animate-in fade-in">
             {/* Top Bar */}
@@ -656,7 +675,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               </div>
             </div>
 
-            {/* Continuous Video Feed (Camera ALWAYS active) */}
+            {/* Continuous Video Feed */}
             <div className="absolute inset-0 z-0 bg-black flex items-center justify-center">
               <video
                 ref={(el) => {
@@ -698,16 +717,18 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               </div>
             )}
 
-            {/* Bottom Controls: Floating Mic Toggle & Live Voice Indicator */}
+            {/* Bottom Controls */}
             <div className="p-4 pb-6 flex flex-col items-center gap-3 z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
               <div className="flex items-center gap-2">
                 <div
                   className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
                     isSpeaking
                       ? "bg-teal animate-ping scale-125"
+                      : isLiveListening
+                      ? "bg-emerald-400 animate-pulse scale-110"
                       : liveMicMuted
                       ? "bg-slate-500"
-                      : "bg-emerald-400 animate-pulse"
+                      : "bg-white/40"
                   }`}
                 />
                 <span className="text-[11.5px] font-semibold text-white/95">
@@ -715,13 +736,15 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
                     ? "Thinking & Solving…"
                     : isSpeaking
                     ? "AI is Speaking Solution (Tokne ke liye bolo 🗣️)"
+                    : isLiveListening
+                    ? "Sun raha hoon... bolo!"
                     : liveMicMuted
-                    ? "Mic Muted (Unmute to ask)"
-                    : "Mic Live: Kitaab dikhayein aur bole"}
+                    ? "Mic Muted (Unmute to talk)"
+                    : "Live Call Active"}
                 </span>
               </div>
 
-              {/* Floating Mic Mute / Unmute Toggle Button */}
+              {/* Mic Toggle Button */}
               <button
                 type="button"
                 onClick={toggleLiveMic}
@@ -738,9 +761,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
         )}
 
-        {/* ═════════════════════════════════════════════════════════════ */}
         {/* ── 2. NORMAL CHAT HEADER (Dedicated Chat Key) ── */}
-        {/* ═════════════════════════════════════════════════════════════ */}
         <div className="p-3.5 border-b border-ink/8 flex items-center justify-between bg-paper/50 rounded-t-3xl">
           <div className="flex items-center gap-2">
             <span className="w-8 h-8 rounded-xl bg-teal text-white flex items-center justify-center text-sm font-bold shadow-xs">
@@ -791,14 +812,13 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
         </div>
 
-        {/* ── CHAT MESSAGES (With Threaded Live Call Cards) ── */}
+        {/* ── CHAT MESSAGES ── */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((m, idx) => (
             <div
               key={idx}
               className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
             >
-              {/* Threaded Live Session Card */}
               {m.liveSessionGroup ? (
                 <div className="w-full bg-teal/5 border border-teal/20 rounded-2xl p-3.5 space-y-3 shadow-xs">
                   <div className="flex items-center gap-2 text-teal font-black text-xs border-b border-teal/15 pb-2">
