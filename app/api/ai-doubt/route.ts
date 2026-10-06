@@ -26,11 +26,11 @@ FORMATTING RULES:
    - 📐 **Formula Used** (state the standard formula clearly)
    - 📝 **Step-by-Step Solution** (numbered steps, clean arithmetic)
    - 🎯 **Final Answer** (highlight the final value, unit, or option)
-4. TONE: Encouraging, precise, crystal clear. If the user asks a non-academic question or greeting (like 'Hello', 'Hi'), reply warmly and politely in 1-2 lines inviting them to ask any study doubt.`;
+4. TONE: Encouraging, precise, crystal clear. If the user asks a greeting (like 'Hello', 'Hi'), reply warmly and politely in 1-2 lines inviting them to ask any study doubt.`;
 
 interface ImageAttachment {
   mimeType: string;
-  data: string; // pure base64 without data: prefix
+  data: string; // pure base64 without prefix
 }
 
 function extractImages(body: any): ImageAttachment[] {
@@ -122,12 +122,12 @@ async function tryGemini(
 
 async function tryGroq(
   groqKey: string,
+  model: string,
   userText: string,
   images: ImageAttachment[]
 ): Promise<string> {
   const url = "https://api.groq.com/openai/v1/chat/completions";
   const hasImages = images.length > 0;
-  const model = hasImages ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
 
   const contentParts: any[] = [];
   contentParts.push({
@@ -167,23 +167,23 @@ async function tryGroq(
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Groq ${res.status}: ${err.slice(0, 180)}`);
+    throw new Error(`Groq ${model} ${res.status}: ${err.slice(0, 180)}`);
   }
 
   const data = await res.json();
   const text = data?.choices?.[0]?.message?.content;
-  if (!text) throw new Error("Groq returned empty text");
+  if (!text) throw new Error(`Groq ${model} returned empty text`);
   return text;
 }
 
 async function tryOpenRouter(
   orKey: string,
+  model: string,
   userText: string,
   images: ImageAttachment[]
 ): Promise<string> {
   const url = "https://openrouter.ai/api/v1/chat/completions";
   const hasImages = images.length > 0;
-  const model = hasImages ? "google/gemini-2.0-flash-001" : "meta-llama/llama-3.3-70b-instruct:free";
 
   const contentParts: any[] = [];
   contentParts.push({
@@ -225,12 +225,12 @@ async function tryOpenRouter(
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`OpenRouter ${res.status}: ${err.slice(0, 180)}`);
+    throw new Error(`OpenRouter ${model} ${res.status}: ${err.slice(0, 180)}`);
   }
 
   const data = await res.json();
   const text = data?.choices?.[0]?.message?.content;
-  if (!text) throw new Error("OpenRouter returned empty text");
+  if (!text) throw new Error(`OpenRouter ${model} returned empty text`);
   return text;
 }
 
@@ -250,8 +250,9 @@ export async function POST(req: NextRequest) {
 
     const mode = body.mode || "chat";
     const images = extractImages(body);
+    const hasImages = images.length > 0;
 
-    if (!userText && images.length === 0) {
+    if (!userText && !hasImages) {
       return NextResponse.json(
         { reply: "Kripya koi sawal likhein ya photo attach karein." },
         { status: 200 }
@@ -259,16 +260,30 @@ export async function POST(req: NextRequest) {
     }
 
     const geminiKeys = mode === "live" ? getLiveGeminiKeys() : getChatGeminiKeys();
-    const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
+    
+    // 1. Exact model requested by Google in the error message!
+    const geminiModels = ["gemini-3.8-flash", "gemini-2.0-flash-exp", "gemini-1.5-flash"];
+
+    // 2. Exact universal models supported on Groq
+    const groqModels = hasImages
+      ? ["llama-3.2-11b-vision-preview"]
+      : ["llama-3.1-8b-instant", "llama3-8b-8192"];
+
+    // 3. Exact slug recommended by OpenRouter in the error message!
+    const orModels = [
+      "meta-llama/llama-3.3-70b-instruct",
+      "meta-llama/llama-3.1-8b-instruct:free",
+      "google/gemini-2.0-flash-exp:free",
+    ];
 
     const errorLogs: string[] = [];
 
-    // TIER 1 & 2: Chat-designated Gemini Keys
+    // TIER 1 & 2: Chat Gemini Keys with Google's updated gemini-3.8-flash
     if (geminiKeys.length === 0) {
-      errorLogs.push("No Gemini Chat Keys detected in environment variables");
+      errorLogs.push("No Gemini Chat Keys found in environment");
     } else {
       for (const key of geminiKeys) {
-        for (const model of candidateModels) {
+        for (const model of geminiModels) {
           try {
             const reply = await tryGemini(key, model, userText, images);
             reportKeySuccess(key);
@@ -282,36 +297,40 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // TIER 3: Groq Fallback
+    // TIER 3: Groq Fallback with working llama-3.1-8b-instant
     const groqKey = getGroqKey();
     if (!groqKey) {
-      errorLogs.push("No Groq key detected in environment variables");
+      errorLogs.push("No Groq key configured");
     } else {
-      try {
-        const reply = await tryGroq(groqKey, userText, images);
-        return NextResponse.json({ reply, provider: "groq-fallback" });
-      } catch (err: any) {
-        errorLogs.push(`Groq: ${err?.message || String(err)}`);
+      for (const model of groqModels) {
+        try {
+          const reply = await tryGroq(groqKey, model, userText, images);
+          return NextResponse.json({ reply, provider: `groq-${model}` });
+        } catch (err: any) {
+          errorLogs.push(err?.message || String(err));
+        }
       }
     }
 
-    // TIER 4: OpenRouter Fallback
+    // TIER 4: OpenRouter Fallback with recommended slug
     const orKey = getOpenRouterKey();
     if (!orKey) {
-      errorLogs.push("No OpenRouter key detected in environment variables");
+      errorLogs.push("No OpenRouter key configured");
     } else {
-      try {
-        const reply = await tryOpenRouter(orKey, userText, images);
-        return NextResponse.json({ reply, provider: "openrouter-fallback" });
-      } catch (err: any) {
-        errorLogs.push(`OpenRouter: ${err?.message || String(err)}`);
+      for (const model of orModels) {
+        try {
+          const reply = await tryOpenRouter(orKey, model, userText, images);
+          return NextResponse.json({ reply, provider: `openrouter-${model}` });
+        } catch (err: any) {
+          errorLogs.push(err?.message || String(err));
+        }
       }
     }
 
-    // Live transparent diagnostic — student & developer can see exact reason
+    // If still fails, show exact reasons
     const diagnosticText = errorLogs.length > 0
-      ? errorLogs.join(" \n• ")
-      : "No API keys configured.";
+      ? errorLogs.slice(0, 3).join("\n• ")
+      : "All AI providers temporarily busy.";
 
     return NextResponse.json(
       {
