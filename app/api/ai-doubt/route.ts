@@ -71,7 +71,58 @@ function extractImages(body: any): ImageAttachment[] {
   return images.slice(0, 2);
 }
 
-// 1. Groq Caller (Ultra-Fast 0.4s for Text)
+// 1. Gemini Caller
+async function tryGemini(
+  key: string,
+  modelName: string,
+  userText: string,
+  images: ImageAttachment[]
+): Promise<string> {
+  const cleanModel = modelName.replace(/^models\//, "");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${key}`;
+
+  const parts: any[] = [];
+  for (const img of images) {
+    parts.push({
+      inlineData: {
+        mimeType: img.mimeType,
+        data: img.data,
+      },
+    });
+  }
+  parts.push({
+    text: `${SYSTEM_PROMPT}\n\nStudent Query: ${userText || "Please solve and explain this question step-by-step."}`,
+  });
+
+  const payload = {
+    contents: [{ parts }],
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: 2048,
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(20000),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Gemini ${cleanModel} ${res.status}: ${errText.slice(0, 160)}`);
+  }
+
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error(`Gemini ${cleanModel} returned empty response`);
+  }
+  return text;
+}
+
+// 2. Groq Caller (Ultra-Fast for Pure Text)
 async function tryGroq(
   groqKey: string,
   model: string,
@@ -117,58 +168,7 @@ async function tryGroq(
   return text;
 }
 
-// 2. Gemini Caller (Multimodal: Text + Image)
-async function tryGemini(
-  key: string,
-  modelName: string,
-  userText: string,
-  images: ImageAttachment[]
-): Promise<string> {
-  const cleanModel = modelName.replace(/^models\//, "");
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${key}`;
-
-  const parts: any[] = [];
-  for (const img of images) {
-    parts.push({
-      inlineData: {
-        mimeType: img.mimeType,
-        data: img.data,
-      },
-    });
-  }
-  parts.push({
-    text: `${SYSTEM_PROMPT}\n\nStudent Query: ${userText || "Please solve and explain the question in this image step-by-step."}`,
-  });
-
-  const payload = {
-    contents: [{ parts }],
-    generationConfig: {
-      temperature: 0.3,
-      maxOutputTokens: 2048,
-    },
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(22000),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Gemini ${cleanModel} ${res.status}: ${errText.slice(0, 160)}`);
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error(`Gemini ${cleanModel} returned empty response`);
-  }
-  return text;
-}
-
-// 3. OpenRouter Caller (Universal Backup)
+// 3. OpenRouter Caller (Free Models)
 async function tryOpenRouter(
   orKey: string,
   model: string,
@@ -215,7 +215,7 @@ async function tryOpenRouter(
       "X-Title": "PrepWise JEE NEET",
     },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(24000),
+    signal: AbortSignal.timeout(22000),
   });
 
   if (!res.ok) {
@@ -258,31 +258,27 @@ export async function POST(req: NextRequest) {
     const groqKey = getGroqKey();
     const orKey = getOpenRouterKey();
 
-    // Validated Multi-Model Cascades
-    const geminiModels = ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.8-flash"];
-    const groqModels = ["llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it"];
-    const orTextModels = ["google/gemma-4-26b-a4b-it:free", "deepseek/deepseek-chat:free", "nvidia/nemotron-3.5-lightning:free"];
+    // 1. Google Gemini Live Validated Models
+    const geminiModels = ["gemini-3.8-flash", "gemini-3.5-flash"];
+
+    // 2. Groq Currently Active Free Models
+    const groqModels = ["llama-3.2-3b-preview", "llama-3.2-1b-preview", "deepseek-r1-distill-llama-70b"];
+
+    // 3. OpenRouter Currently Active Free Models
+    const orTextModels = [
+      "nvidia/nemotron-3.5-lightning:free",
+      "google/gemma-4-31b-it:free",
+      "google/gemma-4-26b-a4b-it:free",
+    ];
     const orVisionModels = ["google/gemini-2.0-flash-exp:free"];
 
     const errorLogs: string[] = [];
 
     // ========================================================
-    // PATH A: PURE TEXT DOUBT (Groq First ➔ Gemini ➔ OpenRouter)
+    // PATH A: PURE TEXT DOUBT (Gemini ➔ Groq ➔ OpenRouter)
     // ========================================================
     if (!hasImages) {
-      // 1. Primary: Groq (0.4s Fastest)
-      if (groqKey) {
-        for (const model of groqModels) {
-          try {
-            const reply = await tryGroq(groqKey, model, userText);
-            return NextResponse.json({ reply, provider: `groq-${model}` });
-          } catch (err: any) {
-            errorLogs.push(err?.message || String(err));
-          }
-        }
-      }
-
-      // 2. Fallback: Google Gemini
+      // 1. Google Gemini (3.8 ➔ 3.5 Backup)
       if (geminiKeys.length > 0) {
         for (const key of geminiKeys) {
           for (const model of geminiModels) {
@@ -299,7 +295,19 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 3. Emergency: OpenRouter Free Models
+      // 2. Groq Active Free Models (Superfast)
+      if (groqKey) {
+        for (const model of groqModels) {
+          try {
+            const reply = await tryGroq(groqKey, model, userText);
+            return NextResponse.json({ reply, provider: `groq-${model}` });
+          } catch (err: any) {
+            errorLogs.push(err?.message || String(err));
+          }
+        }
+      }
+
+      // 3. OpenRouter Active Free Models
       if (orKey) {
         for (const model of orTextModels) {
           try {
@@ -313,10 +321,9 @@ export async function POST(req: NextRequest) {
     }
 
     // ========================================================
-    // PATH B: IMAGE + TEXT DOUBT (Gemini Vision First ➔ OpenRouter)
+    // PATH B: IMAGE + TEXT DOUBT (Preserved Intact)
     // ========================================================
     if (hasImages) {
-      // 1. Primary: Google Gemini Vision
       if (geminiKeys.length > 0) {
         for (const key of geminiKeys) {
           for (const model of geminiModels) {
@@ -333,7 +340,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 2. Fallback: OpenRouter Vision
       if (orKey) {
         for (const model of orVisionModels) {
           try {
