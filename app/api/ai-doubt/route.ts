@@ -17,12 +17,17 @@ export async function POST(req: NextRequest) {
 
     const systemPrompt = `You are the Master AI Doubt Faculty for PrepWise (${examName}).
 BEHAVIOR RULES:
-1. GREETINGS & SHORT TALK: If student greets ("Hello", "Hi", "Namaste") without a question, reply warmly in 1 short sentence in Hinglish and encourage them to show/ask their doubt.
+1. GREETINGS & SHORT TALK: If student greets ("Hello", "Hi", "Namaste") without asking a question, reply warmly in 1 short sentence in Hinglish and encourage them to show/ask their doubt.
 2. CONCEPTUAL/VOICE DOUBTS: If student asks verbally without showing a book/page, solve and explain it directly! DO NOT force them to show a page.
 3. UNCLEAR VISUAL: If student says "solve this" but the image is completely blurry or blank, politely ask them to focus camera on the question.
 4. ACADEMIC SOLUTION: Provide clear step-by-step solution, highlight final answer, and add an "⚡ Exam Shortcut:". Keep explanation encouraging and crisp.`;
 
-    // ── TIER 1 & TIER 2: GEMINI PRIMARY POOL & COMMON BACKUP ──
+    const hasImage = Boolean(image);
+
+    // ─────────────────────────────────────────────────────────────
+    // 1. PROVIDER 1: GOOGLE GEMINI (With Model Fallback: 2.0 -> 1.5)
+    // ─────────────────────────────────────────────────────────────
+    const geminiModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
     const maxGeminiAttempts = isLive ? 4 : 2;
     let attempts = 0;
 
@@ -31,155 +36,196 @@ BEHAVIOR RULES:
       const apiKey = isLive ? getActiveLiveKey() : getActiveChatKey();
       if (!apiKey) break;
 
-      try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      // Gemini Model Cascade Loop (2.0-flash -> 1.5-flash)
+      for (const modelName of geminiModels) {
+        try {
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
-        const parts: any[] = [];
-        if (query) parts.push({ text: query });
-        if (image) {
-          const match = image.match(/^data:image\/(\w+);base64,(.+)$/);
-          if (match) {
-            parts.push({
-              inline_data: {
-                mime_type: `image/${match[1]}`,
-                data: match[2],
-              },
-            });
+          const parts: any[] = [];
+          if (query) parts.push({ text: query });
+          if (image) {
+            const match = image.match(/^data:image\/(\w+);base64,(.+)$/);
+            if (match) {
+              parts.push({
+                inline_data: {
+                  mime_type: `image/${match[1]}`,
+                  data: match[2],
+                },
+              });
+            }
           }
+
+          const payload = {
+            contents: [
+              {
+                role: "user",
+                parts: parts.length > 0 ? parts : [{ text: "Hello" }],
+              },
+            ],
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            generationConfig: { temperature: 0.35, maxOutputTokens: 1000 },
+          };
+
+          const res = await fetch(geminiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          if (res.status === 429 || res.status === 403) {
+            console.warn(`[AI-Doubt] Gemini 429 on key. Excluding key...`);
+            markKeyRateLimited(apiKey, 60);
+            break; // Break inner model loop to rotate to another key
+          }
+
+          if (res.status === 503 || res.status === 500) {
+            console.warn(`[AI-Doubt] ${modelName} overloaded (503). Cascading to next Gemini model...`);
+            continue; // Try 1.5-flash on same key
+          }
+
+          if (!res.ok) continue;
+
+          const data = await res.json();
+          const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (reply) {
+            return NextResponse.json({ reply, provider: `gemini-${modelName}`, success: true });
+          }
+        } catch (err) {
+          console.error(`[AI-Doubt] Gemini ${modelName} error:`, err);
         }
-
-        const payload = {
-          contents: [
-            {
-              role: "user",
-              parts: parts.length > 0 ? parts : [{ text: "Hello" }],
-            },
-          ],
-          systemInstruction: {
-            parts: [{ text: systemPrompt }],
-          },
-          generationConfig: {
-            temperature: 0.35,
-            maxOutputTokens: 1000,
-          },
-        };
-
-        const res = await fetch(geminiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        if (res.status === 429 || res.status === 403) {
-          console.warn(`[AI-Doubt] Gemini 429 hit. Auto-excluding key...`);
-          markKeyRateLimited(apiKey, 60);
-          continue; // Instantly retry next key in pool
-        }
-
-        if (!res.ok) continue;
-
-        const data = await res.json();
-        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (reply) {
-          return NextResponse.json({ reply, provider: "gemini", success: true });
-        }
-      } catch (err) {
-        console.error("[AI-Doubt] Gemini attempt failed:", err);
       }
     }
 
     const { groq, openRouter } = getBackupProviders();
 
-    // ── TIER 3: GROQ BACKUP (Llama 3.2 Vision) ──
+    // ─────────────────────────────────────────────────────────────
+    // 2. PROVIDER 2: GROQ (Smart Vision vs Text Model Cascade)
+    // ─────────────────────────────────────────────────────────────
     if (groq) {
-      try {
-        console.log("[AI-Doubt] Falling back to Tier 3: Groq...");
-        const groqContent: any[] = [];
-        if (query) groqContent.push({ type: "text", text: query });
-        if (image) {
-          groqContent.push({
-            type: "image_url",
-            image_url: { url: image },
-          });
-        }
-        if (groqContent.length === 0) groqContent.push({ type: "text", text: "Hello" });
+      const groqModels = hasImage
+        ? ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]
+        : ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
 
-        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${groq}`,
-          },
-          body: JSON.stringify({
-            model: "llama-3.2-11b-vision-preview",
-            messages: [
+      for (const groqModel of groqModels) {
+        try {
+          console.log(`[AI-Doubt] Invoking Groq Fallback Model: ${groqModel}...`);
+          let groqMessages: any[] = [];
+
+          if (hasImage) {
+            groqMessages = [
               { role: "system", content: systemPrompt },
-              { role: "user", content: groqContent },
-            ],
-            temperature: 0.3,
-            max_tokens: 900,
-          }),
-        });
-
-        if (groqRes.ok) {
-          const gData = await groqRes.json();
-          const gReply = gData.choices?.[0]?.message?.content;
-          if (gReply) {
-            return NextResponse.json({ reply: gReply, provider: "groq-backup", success: true });
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: query || "Solve this question step-by-step" },
+                  { type: "image_url", image_url: { url: image } },
+                ],
+              },
+            ];
+          } else {
+            groqMessages = [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: query || "Explain this topic" },
+            ];
           }
+
+          const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${groq}`,
+            },
+            body: JSON.stringify({
+              model: groqModel,
+              messages: groqMessages,
+              temperature: 0.3,
+              max_tokens: 1000,
+            }),
+          });
+
+          if (groqRes.ok) {
+            const gData = await groqRes.json();
+            const gReply = gData.choices?.[0]?.message?.content;
+            if (gReply) {
+              return NextResponse.json({ reply: gReply, provider: `groq-${groqModel}`, success: true });
+            }
+          } else {
+            console.warn(`[AI-Doubt] Groq ${groqModel} returned status ${groqRes.status}. Trying next...`);
+          }
+        } catch (gErr) {
+          console.error(`[AI-Doubt] Groq ${groqModel} error:`, gErr);
         }
-      } catch (gErr) {
-        console.error("[AI-Doubt] Groq backup failed:", gErr);
       }
     }
 
-    // ── TIER 4: OPENROUTER BACKUP ──
+    // ─────────────────────────────────────────────────────────────
+    // 3. PROVIDER 3: OPENROUTER (Deep Multi-Model Cascade)
+    // ─────────────────────────────────────────────────────────────
     if (openRouter) {
-      try {
-        console.log("[AI-Doubt] Falling back to Tier 4: OpenRouter...");
-        const orContent: any[] = [];
-        if (query) orContent.push({ type: "text", text: query });
-        if (image) {
-          orContent.push({
-            type: "image_url",
-            image_url: { url: image },
-          });
-        }
-        if (orContent.length === 0) orContent.push({ type: "text", text: "Hello" });
+      const orModels = hasImage
+        ? [
+            "meta-llama/llama-3.2-11b-vision-instruct:free",
+            "google/gemini-2.0-flash-exp:free",
+          ]
+        : [
+            "deepseek/deepseek-chat:free",
+            "meta-llama/llama-3.3-70b-instruct:free",
+          ];
 
-        const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openRouter}`,
-            "HTTP-Referer": "https://eterprep.pages.dev",
-            "X-Title": "PrepWise AI Doubt Faculty",
-          },
-          body: JSON.stringify({
-            model: "meta-llama/llama-3.2-11b-vision-instruct:free",
-            messages: [
+      for (const orModel of orModels) {
+        try {
+          console.log(`[AI-Doubt] Invoking OpenRouter Fallback Model: ${orModel}...`);
+          let orMessages: any[] = [];
+
+          if (hasImage) {
+            orMessages = [
               { role: "system", content: systemPrompt },
-              { role: "user", content: orContent },
-            ],
-            temperature: 0.3,
-            max_tokens: 900,
-          }),
-        });
-
-        if (orRes.ok) {
-          const orData = await orRes.json();
-          const orReply = orData.choices?.[0]?.message?.content;
-          if (orReply) {
-            return NextResponse.json({ reply: orReply, provider: "openrouter-backup", success: true });
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: query || "Solve this question step-by-step" },
+                  { type: "image_url", image_url: { url: image } },
+                ],
+              },
+            ];
+          } else {
+            orMessages = [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: query || "Explain this concept" },
+            ];
           }
+
+          const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${openRouter}`,
+              "HTTP-Referer": "https://eterprep.pages.dev",
+              "X-Title": "PrepWise AI Faculty",
+            },
+            body: JSON.stringify({
+              model: orModel,
+              messages: orMessages,
+              temperature: 0.3,
+              max_tokens: 1000,
+            }),
+          });
+
+          if (orRes.ok) {
+            const orData = await orRes.json();
+            const orReply = orData.choices?.[0]?.message?.content;
+            if (orReply) {
+              return NextResponse.json({ reply: orReply, provider: `openrouter-${orModel}`, success: true });
+            }
+          }
+        } catch (orErr) {
+          console.error(`[AI-Doubt] OpenRouter ${orModel} error:`, orErr);
         }
-      } catch (orErr) {
-        console.error("[AI-Doubt] OpenRouter backup failed:", orErr);
       }
     }
 
     return NextResponse.json(
-      { reply: "Abhi sabhi AI faculties thode busy hain. Kripya 1 minute baad dobara puchiye!" },
+      { reply: "Abhi sabhi AI faculties busy hain. Kripya 1 minute baad dobara puchiye!" },
       { status: 503 }
     );
   } catch (error: any) {
