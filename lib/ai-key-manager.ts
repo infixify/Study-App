@@ -8,17 +8,15 @@ interface KeyHealth {
 const keyHealthMap = new Map<string, KeyHealth>();
 const COOLDOWN_MS = 60 * 1000;
 
-function cleanKey(raw?: string): string {
+export function cleanKey(raw?: string): string {
   if (!raw) return "";
   return raw.replace(/["'\r\n\s]/g, "").trim();
 }
 
 /**
- * Chat Doubt Gemini Keys:
- * Sabhi keys ko priority order mein collect karta hai:
- * 1. Dedicated Doubt Keys (GEMINI_API_KEY_DOUBT ya GEMINI_API_KEY_DOUT)
- * 2. 5 Fresh Project Keys (GEMINI_API_KEYS)
- * 3. Fallback GEMINI_API_KEY / LIVE_GEMINI_API_KEYS
+ * CHAT DOUBT KEYS (Dedicated):
+ * Strictly checks Chat keys only (GEMINI_API_KEY_DOUBT, GEMINI_API_KEY).
+ * 5 Live Keys (GEMINI_API_KEYS) are strictly EXCLUDED.
  */
 export function getChatGeminiKeys(): string[] {
   const keys: string[] = [];
@@ -30,38 +28,42 @@ export function getChatGeminiKeys(): string[] {
     }
   };
 
-  // 1. Dedicated Doubt key
-  add(process.env.GEMINI_API_KEY_DOUBT || process.env.GEMINI_API_KEY_DOUT);
+  // 1. Dedicated Doubt Keys (all possible naming variations)
+  add(process.env.GEMINI_API_KEY_DOUBT);
+  add(process.env.GEMINI_API_KEY_DOUT);
+  add(process.env.GOOGLE_API_KEY_DOUBT);
+  add(process.env.GOOGLE_API_KEY_DOUT);
 
-  // 2. 5 Fresh project keys pool (Top priority)
-  const poolRaw = process.env.GEMINI_API_KEYS || "";
-  if (poolRaw) {
-    poolRaw.split(",").forEach((k) => add(k));
-  }
-
-  // 3. Main standard key
+  // 2. Standard Gemini / Google Key
   add(process.env.GEMINI_API_KEY);
-
-  // 4. Live keys as emergency reserve
-  const liveRaw = process.env.LIVE_GEMINI_API_KEYS || "";
-  if (liveRaw) {
-    liveRaw.split(",").forEach((k) => add(k));
-  }
+  add(process.env.GOOGLE_API_KEY);
+  add(process.env.GEMINI_KEY);
 
   return keys;
 }
 
+/**
+ * LIVE CAM / VIDEO KEYS (Dedicated 5 keys pool):
+ */
 export function getLiveGeminiKeys(): string[] {
-  const raw = process.env.LIVE_GEMINI_API_KEYS || process.env.GEMINI_API_KEYS || "";
+  const raw = process.env.GEMINI_API_KEYS || process.env.LIVE_GEMINI_API_KEYS || "";
   return raw.split(",").map((k) => cleanKey(k)).filter(Boolean);
 }
 
 export function getGroqKey(): string {
-  return cleanKey(process.env.GROQ_API_KEY || process.env.GROK_API_KEY);
+  return cleanKey(
+    process.env.GROQ_API_KEY ||
+    process.env.GROK_API_KEY ||
+    process.env.GROQ_KEY
+  );
 }
 
 export function getOpenRouterKey(): string {
-  return cleanKey(process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY);
+  return cleanKey(
+    process.env.OPENROUTER_API_KEY ||
+    process.env.OPEN_ROUTER_API_KEY ||
+    process.env.OPENROUTER_KEY
+  );
 }
 
 export function getHealthyKey(keys: string[]): string | null {
