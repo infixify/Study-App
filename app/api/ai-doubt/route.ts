@@ -10,8 +10,12 @@ import {
 
 export const runtime = "edge";
 
+// Cache discovered working model name in memory
+let cachedGeminiModel: string | null = null;
+let cachedGroqModel: string | null = null;
+
 export async function POST(req: NextRequest) {
-  const errors: string[] = [];
+  const debugLogs: string[] = [];
 
   try {
     const { messages, query, image, isLive, targetExam, studentContext } = await req.json();
@@ -38,25 +42,44 @@ BEHAVIOR RULES:
     const hasImage = Boolean(image);
 
     // ─────────────────────────────────────────────────────────────
-    // 1. GEMINI PROVIDER (v1 gemini-1.5-flash & v1beta gemini-2.0-flash-exp)
+    // 1. PROVIDER 1: GEMINI (Auto-Discover Active Models for Key)
     // ─────────────────────────────────────────────────────────────
-    const geminiEndpoints = [
-      { ver: "v1", model: "gemini-1.5-flash" },
-      { ver: "v1beta", model: "gemini-2.0-flash-exp" },
-      { ver: "v1beta", model: "gemini-1.5-flash-latest" },
-    ];
+    const apiKey = isLive ? getActiveLiveKey() : getActiveChatKey();
 
-    const maxAttempts = Math.min(allKeys.length || 1, 4);
-    let attempts = 0;
+    if (apiKey) {
+      // Step A: Find working model from live Google catalog
+      let modelsToTry: string[] = cachedGeminiModel
+        ? [cachedGeminiModel]
+        : ["gemini-1.5-flash-002", "gemini-1.5-flash-001", "gemini-1.5-flash", "gemini-2.0-flash-exp"];
 
-    while (attempts < maxAttempts) {
-      attempts++;
-      const apiKey = isLive ? getActiveLiveKey() : getActiveChatKey();
-      if (!apiKey) break;
+      try {
+        const listRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+        );
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          const liveModels = (listData.models || [])
+            .filter((m: any) => m.supportedGenerationMethods?.includes("generateContent"))
+            .map((m: any) => m.name.replace("models/", ""));
 
-      for (const { ver, model } of geminiEndpoints) {
+          if (liveModels.length > 0) {
+            // Prioritize flash models, then any model
+            const flash = liveModels.filter((m: string) => m.includes("flash"));
+            modelsToTry = flash.length > 0 ? flash : liveModels;
+            debugLogs.push(`Live Gemini models discovered: ${modelsToTry.slice(0, 3).join(", ")}`);
+          }
+        } else {
+          const err = await listRes.text();
+          debugLogs.push(`Gemini /models list error ${listRes.status}: ${err.slice(0, 80)}`);
+        }
+      } catch (e: any) {
+        debugLogs.push(`Gemini discovery error: ${e.message}`);
+      }
+
+      // Step B: Execute generateContent on discovered model
+      for (const model of modelsToTry) {
         try {
-          const geminiUrl = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${apiKey}`;
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
           const parts: any[] = [];
           if (query) parts.push({ text: query });
@@ -92,36 +115,55 @@ BEHAVIOR RULES:
 
           if (res.status === 429 || res.status === 403) {
             markKeyRateLimited(apiKey, 60);
-            errors.push(`Gemini ${model} 429: Rate limited`);
+            debugLogs.push(`Gemini ${model} 429: Rate limited`);
             break;
           }
 
-          if (!res.ok) {
-            const errText = await res.text();
-            errors.push(`Gemini ${model} ${res.status}: ${errText.slice(0, 100)}`);
-            continue;
-          }
-
-          const data = await res.json();
-          const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (reply) {
-            return NextResponse.json({ reply, provider: `gemini-${model}`, success: true });
+          if (res.ok) {
+            const data = await res.json();
+            const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (reply) {
+              cachedGeminiModel = model; // Remember working model
+              return NextResponse.json({ reply, provider: `gemini-${model}`, success: true });
+            }
+          } else {
+            const t = await res.text();
+            debugLogs.push(`Gemini ${model} ${res.status}: ${t.slice(0, 90)}`);
           }
         } catch (err: any) {
-          errors.push(`Gemini ${model} err: ${err.message}`);
+          debugLogs.push(`Gemini ${model} ex: ${err.message}`);
         }
       }
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 2. GROQ PROVIDER (llama-3.1-8b-instant & llama-3.2-11b-vision-preview)
+    // 2. PROVIDER 2: GROQ (Auto-Discover Active Groq Models)
     // ─────────────────────────────────────────────────────────────
     if (groq) {
-      const groqModels = hasImage
-        ? ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]
-        : ["llama-3.1-8b-instant", "llama3-70b-8192"];
+      let groqModelsToTry = cachedGroqModel ? [cachedGroqModel] : [];
 
-      for (const groqModel of groqModels) {
+      if (groqModelsToTry.length === 0) {
+        try {
+          const gListRes = await fetch("https://api.groq.com/openai/v1/models", {
+            headers: { Authorization: `Bearer ${groq}` },
+          });
+          if (gListRes.ok) {
+            const gListData = await gListRes.json();
+            const liveGModels = (gListData.data || []).map((m: any) => m.id);
+            if (hasImage) {
+              groqModelsToTry = liveGModels.filter((id: string) => id.includes("vision"));
+            } else {
+              groqModelsToTry = liveGModels.filter(
+                (id: string) => id.includes("llama") || id.includes("gemma")
+              );
+            }
+            if (groqModelsToTry.length === 0) groqModelsToTry = liveGModels;
+            debugLogs.push(`Live Groq models discovered: ${groqModelsToTry.slice(0, 3).join(", ")}`);
+          }
+        } catch (_) {}
+      }
+
+      for (const groqModel of groqModelsToTry.slice(0, 3)) {
         try {
           let groqMessages: any[] = [];
           if (hasImage) {
@@ -130,7 +172,7 @@ BEHAVIOR RULES:
               {
                 role: "user",
                 content: [
-                  { type: "text", text: query || "Solve this question step-by-step" },
+                  { type: "text", text: query || "Solve this question" },
                   { type: "image_url", image_url: { url: image } },
                 ],
               },
@@ -160,81 +202,21 @@ BEHAVIOR RULES:
             const gData = await groqRes.json();
             const gReply = gData.choices?.[0]?.message?.content;
             if (gReply) {
+              cachedGroqModel = groqModel;
               return NextResponse.json({ reply: gReply, provider: `groq-${groqModel}`, success: true });
             }
           } else {
-            const gErr = await groqRes.text();
-            errors.push(`Groq ${groqModel} ${groqRes.status}: ${gErr.slice(0, 100)}`);
+            const gt = await groqRes.text();
+            debugLogs.push(`Groq ${groqModel} ${groqRes.status}: ${gt.slice(0, 90)}`);
           }
         } catch (gErr: any) {
-          errors.push(`Groq ${groqModel} err: ${gErr.message}`);
-        }
-      }
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // 3. OPENROUTER PROVIDER (google/gemini-2.0-flash-exp:free)
-    // ─────────────────────────────────────────────────────────────
-    if (openRouter) {
-      const orModels = hasImage
-        ? ["google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.2-11b-vision-instruct:free"]
-        : ["google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.2-3b-instruct:free"];
-
-      for (const orModel of orModels) {
-        try {
-          let orMessages: any[] = [];
-          if (hasImage) {
-            orMessages = [
-              { role: "system", content: systemPrompt },
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: query || "Solve this question step-by-step" },
-                  { type: "image_url", image_url: { url: image } },
-                ],
-              },
-            ];
-          } else {
-            orMessages = [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: query || "Hello" },
-            ];
-          }
-
-          const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${openRouter}`,
-              "HTTP-Referer": "https://eterprep.pages.dev",
-              "X-Title": "PrepWise AI Faculty",
-            },
-            body: JSON.stringify({
-              model: orModel,
-              messages: orMessages,
-              temperature: 0.3,
-              max_tokens: 1000,
-            }),
-          });
-
-          if (orRes.ok) {
-            const orData = await orRes.json();
-            const orReply = orData.choices?.[0]?.message?.content;
-            if (orReply) {
-              return NextResponse.json({ reply: orReply, provider: `openrouter-${orModel}`, success: true });
-            }
-          } else {
-            const orErr = await orRes.text();
-            errors.push(`OpenRouter ${orModel} ${orRes.status}: ${orErr.slice(0, 100)}`);
-          }
-        } catch (orErr: any) {
-          errors.push(`OpenRouter ${orModel} err: ${orErr.message}`);
+          debugLogs.push(`Groq ${groqModel} ex: ${gErr.message}`);
         }
       }
     }
 
     return NextResponse.json(
-      { reply: `⚠️ AI Connection Error:\n${errors.join("\n")}` },
+      { reply: `⚠️ AI Auto-Discovery Report:\n${debugLogs.join("\n")}` },
       { status: 500 }
     );
   } catch (error: any) {
