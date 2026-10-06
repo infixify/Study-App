@@ -2,86 +2,86 @@
 
 interface KeyStatus {
   key: string;
-  cooldownUntil: number; // timestamp
-  failureCount: number;
+  cooldownUntil: number;
 }
 
-function loadGeminiKeys(): string[] {
+const keyPool: Map<string, KeyStatus> = new Map();
+
+function getLiveKeys(): string[] {
   const keys: string[] = [];
-
-  // Comma separated list
-  if (process.env.GEMINI_API_KEYS) {
-    const split = process.env.GEMINI_API_KEYS.split(",")
-      .map((k) => k.trim())
-      .filter(Boolean);
-    keys.push(...split);
+  if (process.env.LIVE_GEMINI_API_KEYS) {
+    keys.push(
+      ...process.env.LIVE_GEMINI_API_KEYS.split(",")
+        .map((k) => k.trim())
+        .filter(Boolean)
+    );
   }
-
-  // Individual numbered keys: GEMINI_API_KEY_1 to 10
-  for (let i = 1; i <= 10; i++) {
-    const k = process.env[`GEMINI_API_KEY_${i}`];
+  for (let i = 1; i <= 5; i++) {
+    const k = process.env[`LIVE_GEMINI_API_KEY_${i}`];
     if (k && !keys.includes(k.trim())) keys.push(k.trim());
   }
-
-  // Fallback single key
-  const fallback = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-  if (fallback && !keys.includes(fallback.trim())) {
-    keys.unshift(fallback.trim());
-  }
-
   return keys;
 }
 
-// In-Memory Key State Pool
-const keyPool: Map<string, KeyStatus> = new Map();
-
-function initPool() {
-  const allKeys = loadGeminiKeys();
-  allKeys.forEach((key) => {
-    if (!keyPool.has(key)) {
-      keyPool.set(key, { key, cooldownUntil: 0, failureCount: 0 });
-    }
-  });
-}
-
 /**
- * Returns an active, healthy key that is not in cooldown
+ * Live Doubt Solver ke liye 5 keys ke pool se active key uthata hai
  */
-export function getActiveGeminiKey(): string | null {
-  initPool();
+export function getActiveLiveKey(): string | null {
+  const all = getLiveKeys();
   const now = Date.now();
-  const available: string[] = [];
+  const available = all.filter((k) => {
+    const st = keyPool.get(k);
+    return !st || st.cooldownUntil <= now;
+  });
 
-  for (const [key, status] of keyPool.entries()) {
-    if (status.cooldownUntil <= now) {
-      available.push(key);
-    }
+  if (available.length > 0) {
+    return available[Math.floor(Math.random() * available.length)];
   }
 
-  if (available.length === 0) {
-    // If all keys are in cooldown, reset the oldest one to prevent complete outage
-    let oldestKey: string | null = null;
-    let minCooldown = Infinity;
-    for (const [key, status] of keyPool.entries()) {
-      if (status.cooldownUntil < minCooldown) {
-        minCooldown = status.cooldownUntil;
-        oldestKey = key;
-      }
-    }
-    return oldestKey;
-  }
-
-  // Pick random from healthy keys for even load balancing
-  return available[Math.floor(Math.random() * available.length)];
+  // Fallback to common backup
+  return process.env.GEMINI_API_KEY || null;
 }
 
 /**
- * Excludes a key on Rate Limit (429) for specified minutes (default 60 mins)
+ * Normal Chat/Photo Doubt ke liye key nikalta hai
  */
-export function markKeyRateLimited(key: string, cooldownMinutes: number = 60) {
-  const status = keyPool.get(key) || { key, cooldownUntil: 0, failureCount: 0 };
-  status.cooldownUntil = Date.now() + cooldownMinutes * 60 * 1000;
-  status.failureCount += 1;
-  keyPool.set(key, status);
-  console.warn(`[AI-Key-Manager] Key ...${key.slice(-5)} rate-limited. Excluded for ${cooldownMinutes}m.`);
+export function getActiveChatKey(): string | null {
+  const doubtKey = process.env.GEMINI_API_KEY_DOUBT;
+  const now = Date.now();
+
+  if (doubtKey) {
+    const st = keyPool.get(doubtKey);
+    if (!st || st.cooldownUntil <= now) return doubtKey;
+  }
+
+  // Fallback to Common Backup
+  const commonKey = process.env.GEMINI_API_KEY;
+  if (commonKey) {
+    const st = keyPool.get(commonKey);
+    if (!st || st.cooldownUntil <= now) return commonKey;
+  }
+
+  // If both rate limited, try any healthy Live key
+  return getActiveLiveKey();
+}
+
+/**
+ * Rate-limited (429) key ko 60 min ke liye blacklist/exclude karta hai
+ */
+export function markKeyRateLimited(key: string, cooldownMinutes = 60) {
+  keyPool.set(key, {
+    key,
+    cooldownUntil: Date.now() + cooldownMinutes * 60 * 1000,
+  });
+  console.warn(`[KeyManager] Key ...${key.slice(-5)} rate-limited. Excluded for ${cooldownMinutes}m.`);
+}
+
+/**
+ * Backup External Providers
+ */
+export function getBackupProviders() {
+  return {
+    groq: process.env.GROQ_API_KEY?.trim() || null,
+    openRouter: process.env.OPENROUTER_API_KEY?.trim() || null,
+  };
 }
