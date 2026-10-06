@@ -1,931 +1,431 @@
 // components/dashboard/AiChatSheet.tsx
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
-
-interface LiveExchange {
-  query: string;
-  reply: string;
-  isFollowUp?: boolean;
-}
+import React, { useState, useRef, useEffect, ChangeEvent } from "react";
+import {
+  X,
+  Send,
+  Camera,
+  Image as ImageIcon,
+  Video,
+  Sparkles,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 
 interface Message {
-  role: "assistant" | "user";
+  id: string;
+  role: "user" | "assistant";
   content: string;
-  image?: string;
-  liveSessionGroup?: LiveExchange[];
-}
-
-interface StudentContext {
-  email?: string;
-  name?: string;
-  targetExam?: string;
-  classLevel?: string;
-  daysToExam?: number | null;
-  examLabel?: string | null;
-  weakSubjects?: string[];
-  weaknesses?: string[];
-  pendingBacklogCount?: number;
-  dailyDoubtLimit?: number;
+  images?: string[];
+  timestamp: string;
 }
 
 interface AiChatSheetProps {
-  open: boolean;
+  isOpen: boolean;
   onClose: () => void;
-  studentContext?: StudentContext;
+  userEmail?: string;
+  studentContext?: any;
 }
 
-const SESSION_KEY = "pw_doubt_chat_session";
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
-
-function getTodayLimitKey(): string {
-  const today = new Date().toISOString().split("T")[0];
-  return `pw_doubt_daily_quota_${today}`;
-}
-
-// ─── 1. UNIVERSAL TEXTBOOK MATH NORMALIZER (Clean NCERT Symbols) ───
-function normalizeMathToTextbook(raw: string): string {
-  if (!raw) return "";
-  let s = raw;
-
-  s = s.replace(/\\left\(/g, "(")
-       .replace(/\\right\)/g, ")")
-       .replace(/\\left\[/g, "[")
-       .replace(/\\right\]/g, "]")
-       .replace(/\\implies/g, " ⇒ ")
-       .replace(/\\iff/g, " ⇔ ")
-       .replace(/\\to/g, " → ");
-
-  s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)");
-
-  s = s.replace(/\\mu/g, "μ")
-       .replace(/\\phi/g, "Φ")
-       .replace(/\\theta/g, "θ")
-       .replace(/\\lambda/g, "λ")
-       .replace(/\\alpha/g, "α")
-       .replace(/\\beta/g, "β")
-       .replace(/\\Delta/g, "Δ")
-       .replace(/\\omega/g, "ω")
-       .replace(/\\pi/g, "π");
-
-  s = s.replace(/_\{1\}|_1/g, "₁")
-       .replace(/_\{2\}|_2/g, "₂")
-       .replace(/_\{3\}|_3/g, "₃")
-       .replace(/_\{0\}|_0/g, "₀")
-       .replace(/\^\{2\}|\^2/g, "²")
-       .replace(/\^\{3\}|\^3/g, "³")
-       .replace(/_\{([^}]+)\}/g, "_$1");
-
-  s = s.replace(/\\cdot/g, " • ")
-       .replace(/\\times/g, " × ")
-       .replace(/\\vec\{([^}]+)\}/g, "$1⃗")
-       .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
-       .replace(/\\approx/g, " ≈ ")
-       .replace(/\\neq/g, " ≠ ")
-       .replace(/\\pm/g, " ± ");
-
-  s = s.replace(/\$\$/g, "")
-       .replace(/\$/g, "")
-       .replace(/\\text\{([^}]+)\}/g, "$1")
-       .replace(/\\/g, "");
-
-  return s;
-}
-
-// ─── 2. SMART SPEECH FILTER (Used ONLY inside Live Video Call) ───
-function cleanTextForSpeech(raw: string): string {
-  if (!raw) return "";
-  let s = raw;
-
-  s = s.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "");
-
-  s = s.replace(/\\phi/gi, " Phi ")
-       .replace(/\\theta/gi, " Theta ")
-       .replace(/\\vec\{([^}]+)\}/gi, " vector $1 ")
-       .replace(/\\cdot/gi, " dot ")
-       .replace(/\\times/gi, " multiplied by ")
-       .replace(/\\cos/gi, " cos ")
-       .replace(/\\sin/gi, " sin ")
-       .replace(/\\tan/gi, " tan ")
-       .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, " $1 divided by $2 ");
-
-  s = s.replace(/\$\$/g, " ")
-       .replace(/\$/g, " ")
-       .replace(/[*_#`~=\-]/g, " ")
-       .replace(/\\/g, " ")
-       .replace(/\s+/g, " ")
-       .trim();
-
-  return s.slice(0, 420);
-}
-
-// ─── 3. TEXTBOOK VISUAL COMPONENT ───
-function FormattedSolution({ text }: { text: string }) {
-  const lines = text.split("\n");
-
-  return (
-    <div className="space-y-1.5 text-xs leading-relaxed text-ink/90 font-sans">
-      {lines.map((line, idx) => {
-        const trimmed = line.trim();
-        if (!trimmed) return <div key={idx} className="h-1" />;
-
-        if (
-          trimmed.startsWith("$$") ||
-          trimmed.includes("\\frac") ||
-          (trimmed.includes("=") && trimmed.includes("\\"))
-        ) {
-          const cleanEq = normalizeMathToTextbook(trimmed);
-          return (
-            <div
-              key={idx}
-              className="my-2 p-2.5 bg-teal/5 border border-teal/20 rounded-xl text-center font-mono font-bold text-teal text-[13px] tracking-wide overflow-x-auto shadow-xs"
-            >
-              {cleanEq}
-            </div>
-          );
-        }
-
-        if (trimmed.startsWith("###")) {
-          return (
-            <h4
-              key={idx}
-              className="font-black text-ink text-[12.5px] mt-2.5 mb-1 border-b border-ink/8 pb-0.5"
-            >
-              {normalizeMathToTextbook(trimmed.replace(/^###\s*/, ""))}
-            </h4>
-          );
-        }
-
-        const cleanLine = normalizeMathToTextbook(trimmed);
-        return (
-          <p
-            key={idx}
-            className={
-              trimmed.startsWith("**") || trimmed.startsWith("* **")
-                ? "font-bold text-ink"
-                : "text-ink/85"
-            }
-          >
-            {cleanLine}
-          </p>
-        );
-      })}
-    </div>
-  );
-}
-
-export default function AiChatSheet({ open, onClose, studentContext }: AiChatSheetProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-
-  // VIP Quota (sarthaksinghyadav1@gmail.com gets 999)
-  const isOwner = studentContext?.email === "sarthaksinghyadav1@gmail.com";
-  const dailyLimit = isOwner ? 999 : (studentContext?.dailyDoubtLimit || 10);
-  const [remainingQuota, setRemainingQuota] = useState(dailyLimit);
-
-  // Audio Speech state (Exclusively for Live Video Call)
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const keepAliveTimerRef = useRef<any>(null);
-
-  // ── TRUE CONTINUOUS LIVE VIDEO CALL STATE (Intact & Undisrupted) ──
-  const [liveCallOpen, setLiveCallOpen] = useState(false);
-  const [liveMicMuted, setLiveMicMuted] = useState(false);
-  const [isLiveListening, setIsLiveListening] = useState(false);
-  const [liveSolution, setLiveSolution] = useState<string | null>(null);
-  const [isSolutionExpanded, setIsSolutionExpanded] = useState(true);
-  const [liveExchanges, setLiveExchanges] = useState<LiveExchange[]>([]);
-  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const recognitionInstanceRef = useRef<any>(null);
-  const isListeningLoopActiveRef = useRef<boolean>(false);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  const getRemainingQuotaVal = useCallback((): number => {
-    try {
-      const raw = localStorage.getItem(getTodayLimitKey());
-      if (raw !== null) {
-        const used = parseInt(raw) || 0;
-        return Math.max(0, dailyLimit - used);
-      }
-    } catch (_) {}
-    return dailyLimit;
-  }, [dailyLimit]);
-
-  const decrementQuotaVal = useCallback((): number => {
-    try {
-      const current = getRemainingQuotaVal();
-      const used = dailyLimit - current + 1;
-      localStorage.setItem(getTodayLimitKey(), used.toString());
-      return Math.max(0, dailyLimit - used);
-    } catch (_) {
-      return dailyLimit - 1;
-    }
-  }, [dailyLimit, getRemainingQuotaVal]);
-
-  useEffect(() => {
-    if (!open) {
-      stopLiveCall();
-      stopSpeaking();
-      return;
-    }
-    setRemainingQuota(getRemainingQuotaVal());
-
-    try {
-      const raw = sessionStorage.getItem(SESSION_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Date.now() - parsed.savedAt < SESSION_TTL_MS && parsed.messages?.length > 1) {
-          setMessages(parsed.messages);
-          return;
-        }
-      }
-    } catch (_) {}
-
-    const name = studentContext?.name || "Champion";
-
-    setMessages([
-      {
-        role: "assistant",
-        content: `Namaste ${name}! Main aapka AI Doubt Faculty hoon. Koi bhi sawaal type karein, photo attach karein ya **Live Call (🎥)** se direct video call karein! ✍️`,
-      },
-    ]);
-  }, [open, getRemainingQuotaVal]);
-
-  useEffect(() => {
-    if (open) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, open]);
-
-  useEffect(() => {
-    if (messages.length > 1) {
-      try {
-        const stripped = messages.map((m) => ({ ...m, image: undefined }));
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ messages: stripped, savedAt: Date.now() }));
-      } catch (_) {}
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.getVoices();
-      window.speechSynthesis.onvoiceschanged = () => {
-        window.speechSynthesis.getVoices();
-      };
-    }
-  }, []);
-
-  // ─── NATURAL HD VOICE (Live Video Exclusive) ───
-  const speakLiveVoice = useCallback((text: string, onFinish?: () => void) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      if (onFinish) onFinish();
-      return;
-    }
-
-    try {
-      window.speechSynthesis.cancel();
-      if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
-
-      const cleanSpokenText = cleanTextForSpeech(text);
-      if (!cleanSpokenText) {
-        if (onFinish) onFinish();
-        return;
-      }
-
-      const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
-      utterance.rate = 0.95;
-      utterance.pitch = 1.0;
-
-      const voices = window.speechSynthesis.getVoices();
-      const hdVoice =
-        voices.find(
-          (v) =>
-            v.name.includes("Google") &&
-            (v.lang.includes("en-IN") || v.lang.includes("hi-IN") || v.lang.includes("hi_IN"))
-        ) ||
-        voices.find((v) => v.lang.includes("en-IN") || v.lang.includes("hi-IN"));
-
-      if (hdVoice) {
-        utterance.voice = hdVoice;
-        utterance.lang = hdVoice.lang;
-      } else {
-        utterance.lang = "en-IN";
-      }
-
-      utterance.onstart = () => {
-        setIsSpeaking(true);
-        keepAliveTimerRef.current = setInterval(() => {
-          if (window.speechSynthesis.speaking) {
-            window.speechSynthesis.pause();
-            window.speechSynthesis.resume();
-          } else {
-            clearInterval(keepAliveTimerRef.current);
-          }
-        }, 8000);
-      };
-
-      utterance.onend = () => {
-        setIsSpeaking(false);
-        if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
-        if (onFinish) onFinish();
-      };
-
-      utterance.onerror = () => {
-        setIsSpeaking(false);
-        if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
-        if (onFinish) onFinish();
-      };
-
-      window.speechSynthesis.speak(utterance);
-    } catch (_) {
-      setIsSpeaking(false);
-      if (onFinish) onFinish();
-    }
-  }, []);
-
-  const stopSpeaking = () => {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-    if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
-    setIsSpeaking(false);
-  };
-
-  // ─── 4. LIVE VIDEO CALL CONTROLS (Intact & Undisrupted) ───
-  const startLiveCall = async (mode: "environment" | "user" = facingMode) => {
-    setLiveCallOpen(true);
-    setLiveMicMuted(false);
-    setLiveSolution(null);
-    setIsSolutionExpanded(true);
-    setLiveExchanges([]);
-    isListeningLoopActiveRef.current = true;
-
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: mode },
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-        },
-        audio: false,
-      });
-      mediaStreamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
-      }
-
-      startAndroidTurnListener();
-    } catch (e) {
-      alert("Camera permission allow karein live video call ke liye.");
-      setLiveCallOpen(false);
-    }
-  };
-
-  const flipLiveCamera = () => {
-    const next = facingMode === "environment" ? "user" : "environment";
-    setFacingMode(next);
-    startLiveCall(next);
-  };
-
-  const stopLiveCall = () => {
-    isListeningLoopActiveRef.current = false;
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-      mediaStreamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    if (recognitionInstanceRef.current) {
-      try { recognitionInstanceRef.current.abort(); } catch (_) {}
-    }
-    stopSpeaking();
-
-    if (liveExchanges.length > 0) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `🎥 Live Call Notes (${liveExchanges.length} doubts resolved)`,
-          liveSessionGroup: [...liveExchanges],
-        },
-      ]);
-    }
-
-    setLiveCallOpen(false);
-  };
-
-  const captureFastFrame = (): string | null => {
-    if (!videoRef.current) return null;
-    const v = videoRef.current;
-    const canvas = document.createElement("canvas");
-    canvas.width = 480;
-    canvas.height = 360;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.65);
-  };
-
-  const startAndroidTurnListener = () => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition || !isListeningLoopActiveRef.current) return;
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.lang = "en-IN";
-      recognition.continuous = false;
-      recognition.interimResults = false;
-
-      recognition.onstart = () => {
-        setIsLiveListening(true);
-      };
-
-      recognition.onresult = (event: any) => {
-        const spoken = event.results[0]?.[0]?.transcript?.trim() || "";
-        if (spoken.length > 2 && !liveMicMuted) {
-          stopSpeaking();
-          const snap = captureFastFrame();
-          const isFollowUp = liveExchanges.length > 0;
-
-          handleLiveExecution(snap, spoken, isFollowUp, () => {
-            if (isListeningLoopActiveRef.current && !liveMicMuted) {
-              startAndroidTurnListener();
-            }
-          });
-        }
-      };
-
-      recognition.onerror = () => {
-        setIsLiveListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsLiveListening(false);
-        if (isListeningLoopActiveRef.current && !liveMicMuted && !isSpeaking && !loading) {
-          setTimeout(() => {
-            if (isListeningLoopActiveRef.current && !liveMicMuted && !isSpeaking && !loading) {
-              startAndroidTurnListener();
-            }
-          }, 400);
-        }
-      };
-
-      recognitionInstanceRef.current = recognition;
-      recognition.start();
-    } catch (_) {}
-  };
-
-  const toggleLiveMic = () => {
-    const nextState = !liveMicMuted;
-    setLiveMicMuted(nextState);
-    if (nextState) {
-      try { recognitionInstanceRef.current?.abort(); } catch (_) {}
-      setIsLiveListening(false);
-    } else {
-      startAndroidTurnListener();
-    }
-  };
-
-  // Live Call Execution (Calls Live Keys)
-  const handleLiveExecution = async (
-    imgData: string | null,
-    promptText: string,
-    isFollowUp: boolean,
-    onSpeechComplete?: () => void
-  ) => {
-    if (remainingQuota <= 0) {
-      setLiveSolution("⚠️ Aaj ka free doubt quota complete ho chuka hai.");
-      if (onSpeechComplete) onSpeechComplete();
-      return;
-    }
-
-    setLoading(true);
-    const updatedQuota = decrementQuotaVal();
-    setRemainingQuota(updatedQuota);
-
-    try {
-      const res = await fetch("/api/ai-doubt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: promptText,
-          image: imgData,
-          isLive: true,
-          targetExam: studentContext?.targetExam || "JEE",
-          studentContext,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const replyText = data.reply || "Solution complete.";
-        const speakText = data.spoken || replyText;
-
-        setLiveSolution(replyText);
-        setIsSolutionExpanded(true);
-        setLiveExchanges((prev) => [
-          ...prev,
-          { query: promptText, reply: replyText, isFollowUp },
-        ]);
-
-        speakLiveVoice(speakText, onSpeechComplete);
-      } else {
-        setLiveSolution("Sawal samajhne mein dikkat aayi. Kripya dobara bolein!");
-        if (onSpeechComplete) onSpeechComplete();
-      }
-    } catch {
-      setLiveSolution("Network error. Kripya internet connection check karein!");
-      if (onSpeechComplete) onSpeechComplete();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ─── 5. CHAT MODE EXECUTION (100% SILENT & TEXTBOOK CLEAN) ───
-  const handleExecuteDoubt = async (imgData: string | null, promptText: string) => {
-    if (remainingQuota <= 0) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `⚠️ Aaj ke **${dailyLimit} free doubts** khatam ho chuke hain! Raat 12 baje reset hoga.`,
-        },
-      ]);
-      return;
-    }
-
-    const userMsg: Message = { role: "user", content: promptText, image: imgData || undefined };
-    setMessages((prev) => [...prev, userMsg]);
-    setLoading(true);
-    const updatedQuota = decrementQuotaVal();
-    setRemainingQuota(updatedQuota);
-
-    try {
-      const res = await fetch("/api/ai-doubt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: promptText,
-          image: imgData,
-          isLive: false, // 👈 Calls Chat Pipeline
-          targetExam: studentContext?.targetExam || "JEE",
-          studentContext,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const replyText = data.reply || "Solution complete.";
-        // 🔇 CHAT IS 100% SILENT - NO AUDIO CALLED HERE!
-        setMessages((prev) => [...prev, { role: "assistant", content: replyText }]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "Sawal samajhne mein dikkat aayi. Dobara try karein!" },
-        ]);
-      }
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Network error. Please check your internet connection." },
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ⚡ AUTO-COMPRESS PHOTO TO ~80KB FOR ZERO-LAG UPLOAD & DATA SAVINGS
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+// Client-side canvas compression: 10MB photo -> 120KB JPEG
+async function compressImage(file: File, maxWidth = 1280, quality = 0.75): Promise<string> {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
+    reader.onload = (e) => {
       const img = new Image();
-      img.src = uploadEvent.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        const maxDim = 800; // Balanced sharp size for math/handwriting
-        let w = img.width, h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-          else { w = Math.round((w * maxDim) / h); h = maxDim; }
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
         }
-        canvas.width = w; canvas.height = h;
+
+        canvas.width = width;
+        canvas.height = height;
         const ctx = canvas.getContext("2d");
-        ctx?.drawImage(img, 0, 0, w, h);
-        // Compressed to ~70-80KB WebP/JPEG
-        setSelectedImage(canvas.toDataURL("image/jpeg", 0.72));
+        if (!ctx) {
+          resolve(e.target?.result as string);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve(dataUrl);
       };
+      img.onerror = () => reject(new Error("Image failed to load"));
+      img.src = e.target?.result as string;
     };
+    reader.onerror = (err) => reject(err);
     reader.readAsDataURL(file);
+  });
+}
+
+// Textbook math normalizer: converts any raw LaTeX leftovers to clean Unicode book text
+function formatTextbookNotes(text: string): string {
+  if (!text) return "";
+  let clean = text;
+
+  // Remove markdown code fence if wrapped
+  clean = clean.replace(/```(?:markdown|latex|text)?\n([\s\S]*?)\n```/g, "$1");
+
+  // Common LaTeX math symbols to Unicode
+  clean = clean
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)")
+    .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
+    .replace(/\\times/g, "×")
+    .replace(/\\div/g, "÷")
+    .replace(/\\pm/g, "±")
+    .replace(/\\approx/g, "≈")
+    .replace(/\\neq/g, "≠")
+    .replace(/\\le/g, "≤")
+    .replace(/\\ge/g, "≥")
+    .replace(/\\to/g, "→")
+    .replace(/\\implies/g, "⇒")
+    .replace(/\\theta/g, "θ")
+    .replace(/\\pi/g, "π")
+    .replace(/\\alpha/g, "α")
+    .replace(/\\beta/g, "β")
+    .replace(/\\lambda/g, "λ")
+    .replace(/\\mu/g, "μ")
+    .replace(/\\omega/g, "ω")
+    .replace(/\\Delta/g, "Δ")
+    .replace(/\\circ/g, "°");
+
+  // Powers
+  clean = clean
+    .replace(/\^2\b/g, "²")
+    .replace(/\^3\b/g, "³")
+    .replace(/\^0\b/g, "⁰")
+    .replace(/\^1\b/g, "¹")
+    .replace(/\^4\b/g, "⁴")
+    .replace(/\^5\b/g, "⁵")
+    .replace(/\^-1\b/g, "⁻¹")
+    .replace(/\^-2\b/g, "⁻²");
+
+  // Subscripts
+  clean = clean
+    .replace(/_0\b/g, "₀")
+    .replace(/_1\b/g, "₁")
+    .replace(/_2\b/g, "₂")
+    .replace(/_3\b/g, "₃")
+    .replace(/_f\b/g, "ᶠ")
+    .replace(/_i\b/g, "ⁱ");
+
+  // Remove raw dollar signs used in LaTeX
+  clean = clean.replace(/\$\$?/g, "");
+
+  return clean;
+}
+
+export default function AiChatSheet({
+  isOpen,
+  onClose,
+  userEmail,
+  studentContext,
+}: AiChatSheetProps) {
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: "welcome-1",
+      role: "assistant",
+      content:
+        "Namaste! Main aapka PrepWise Academic Faculty hoon. Kisi bhi Physics, Chemistry, Maths ya Biology sawal ka text likhiye ya photo upload kijiye — main step-by-step solution deta hoon.",
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    },
+  ]);
+
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [compressing, setCompressing] = useState(false);
+
+  // VIP Limit: Owner gets 999
+  const isOwner = userEmail === "sarthaksinghyadav1@gmail.com";
+  const dailyLimit = isOwner ? 999 : 10;
+  const [usedDoubts, setUsedDoubts] = useState(0);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleImageSelect = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    if (selectedImages.length >= 2) {
+      alert("Aap ek baar mein maximum 2 photos attach kar sakte hain.");
+      return;
+    }
+
+    setCompressing(true);
+    try {
+      const remainingSlots = 2 - selectedImages.length;
+      const filesToProcess = Array.from(files).slice(0, remainingSlots);
+
+      const compressedList: string[] = [];
+      for (const f of filesToProcess) {
+        const compressed = await compressImage(f, 1280, 0.75);
+        compressedList.push(compressed);
+      }
+      setSelectedImages((prev) => [...prev, ...compressedList]);
+    } catch (err) {
+      console.error("Compression error:", err);
+    } finally {
+      setCompressing(false);
+      if (e.target) e.target.value = "";
+    }
   };
 
-  if (!open) return null;
+  const removeImage = (index: number) => {
+    setSelectedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSend = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const text = input.trim();
+    if (!text && selectedImages.length === 0) return;
+    if (loading || compressing) return;
+
+    if (usedDoubts >= dailyLimit) {
+      alert(`Aapka daily quota (${dailyLimit} doubts) poora ho chuka hai.`);
+      return;
+    }
+
+    const userMsg: Message = {
+      id: "u-" + Date.now(),
+      role: "user",
+      content: text || "Please check this question photo",
+      images: selectedImages.length > 0 ? [...selectedImages] : undefined,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    const imagesToSend = [...selectedImages];
+    setSelectedImages([]);
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/ai-doubt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          images: imagesToSend,
+          mode: "chat",
+          studentContext,
+        }),
+      });
+
+      const data = await res.json();
+      const replyText = data?.reply || "Sawal samajhne mein dikkat aayi. Kripya dobara puchiye.";
+
+      const aiMsg: Message = {
+        id: "ai-" + Date.now(),
+        role: "assistant",
+        content: formatTextbookNotes(replyText),
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+
+      setMessages((prev) => [...prev, aiMsg]);
+      setUsedDoubts((prev) => prev + 1);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: "err-" + Date.now(),
+          role: "assistant",
+          content: "Network issue. Kripya apna internet connection check karke dobara try karein.",
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end animate-in fade-in">
-      <div className="w-full max-w-md mx-auto bg-white rounded-t-3xl shadow-2xl flex flex-col h-[85vh] border-t border-ink/10 relative overflow-hidden">
-
-        {/* ── 1. TRUE HANDS-FREE LIVE VIDEO CALL OVERLAY (Intact) ── */}
-        {liveCallOpen && (
-          <div className="absolute inset-0 z-50 bg-black flex flex-col justify-between animate-in fade-in">
-            {/* Top Bar */}
-            <div className="p-3.5 flex items-center justify-between text-white z-20 bg-gradient-to-b from-black/85 to-transparent">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-                <span className="text-xs font-black tracking-wide bg-white/20 px-2.5 py-1 rounded-full backdrop-blur-md">
-                  Gemini Live Video Call
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={flipLiveCamera}
-                  className="w-8 h-8 rounded-full bg-white/20 text-white flex items-center justify-center font-bold text-xs backdrop-blur-md active:scale-95"
-                  title="Flip Camera"
-                >
-                  🔄
-                </button>
-                <button
-                  type="button"
-                  onClick={stopLiveCall}
-                  className="px-3 py-1.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-black text-xs flex items-center gap-1 shadow-lg active:scale-95"
-                >
-                  <span>End Call</span> ✕
-                </button>
-              </div>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4">
+      <div className="relative w-full max-w-2xl h-[92vh] sm:h-[85vh] bg-[#0f172a] text-slate-100 rounded-t-2xl sm:rounded-2xl flex flex-col shadow-2xl border border-slate-800 overflow-hidden">
+        
+        {/* Header */}
+        <div className="px-4 py-3 bg-[#1e293b] border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold">
+              <Sparkles className="w-4 h-4" />
             </div>
-
-            {/* Continuous Video Feed */}
-            <div className="absolute inset-0 z-0 bg-black flex items-center justify-center">
-              <video
-                ref={(el) => {
-                  videoRef.current = el;
-                  if (el && mediaStreamRef.current && el.srcObject !== mediaStreamRef.current) {
-                    el.srcObject = mediaStreamRef.current;
-                    el.play().catch(() => {});
-                  }
-                }}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover"
-              />
-            </div>
-
-            {/* Floating Expandable Solution HUD */}
-            {liveSolution && (
-              <div className="mx-3.5 z-20 transition-all duration-300">
-                <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/40 overflow-hidden flex flex-col">
-                  <div
-                    onClick={() => setIsSolutionExpanded(!isSolutionExpanded)}
-                    className="p-2.5 px-3.5 bg-ink text-white flex items-center justify-between cursor-pointer select-none"
-                  >
-                    <span className="text-xs font-black flex items-center gap-1.5 text-teal">
-                      <span>✨</span> Solution (Live HUD)
-                    </span>
-                    <button type="button" className="text-xs font-bold text-white/80 hover:text-white">
-                      {isSolutionExpanded ? "Collapse ▾" : "Expand ▴"}
-                    </button>
-                  </div>
-
-                  {isSolutionExpanded && (
-                    <div className="p-3 max-h-48 overflow-y-auto">
-                      <FormattedSolution text={liveSolution} />
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Bottom Controls */}
-            <div className="p-4 pb-6 flex flex-col items-center gap-3 z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
-              <div className="flex items-center gap-2">
-                <div
-                  className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
-                    isSpeaking
-                      ? "bg-teal animate-ping scale-125"
-                      : isLiveListening
-                      ? "bg-emerald-400 animate-pulse scale-110"
-                      : liveMicMuted
-                      ? "bg-slate-500"
-                      : "bg-white/40"
-                  }`}
-                />
-                <span className="text-[11.5px] font-semibold text-white/95">
-                  {loading
-                    ? "Thinking & Solving…"
-                    : isSpeaking
-                    ? "AI is Speaking Solution (Tokne ke liye bolo 🗣️)"
-                    : isLiveListening
-                    ? "Sun raha hoon... bolo!"
-                    : liveMicMuted
-                    ? "Mic Muted (Unmute to talk)"
-                    : "Live Call Active"}
-                </span>
-              </div>
-
-              {/* Mic Toggle Button */}
-              <button
-                type="button"
-                onClick={toggleLiveMic}
-                className={`w-full py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 ${
-                  liveMicMuted
-                    ? "bg-slate-700 text-white"
-                    : "bg-gradient-to-r from-teal to-emerald-500 text-white"
-                }`}
-              >
-                <span className="text-lg">{liveMicMuted ? "🔇" : "🎙️"}</span>
-                <span>{liveMicMuted ? "Unmute Mic to Ask" : "Mute Mic (Stop Background Voice)"}</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── 2. NORMAL CHAT HEADER (Quiet & Clean) ── */}
-        <div className="p-3.5 border-b border-ink/8 flex items-center justify-between bg-paper/50 rounded-t-3xl">
-          <div className="flex items-center gap-2">
-            <span className="w-8 h-8 rounded-xl bg-teal text-white flex items-center justify-center text-sm font-bold shadow-xs">
-              ✨
-            </span>
             <div>
-              <h3 className="text-sm font-black text-ink">AI Doubt Faculty</h3>
-              <p className="text-[10px] text-slate font-medium">
-                {studentContext?.targetExam || "JEE/NEET"} 24x7 Mentor
-              </p>
+              <h2 className="text-sm font-semibold tracking-wide">AI Doubt Faculty</h2>
+              <p className="text-[11px] text-slate-400">JEE & NEET 24x7 Academic Mentor</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <span
-              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                remainingQuota > 2
-                  ? "bg-teal/10 border-teal/20 text-teal"
-                  : "bg-rose-50 border-rose-200 text-rose-600"
-              }`}
-            >
-              {remainingQuota} / {dailyLimit} Doubts
+            <span className="text-[11px] px-2.5 py-1 rounded-full bg-slate-800 text-teal-300 font-medium border border-slate-700">
+              {usedDoubts} / {dailyLimit} Doubts
             </span>
-
             <button
-              type="button"
               onClick={onClose}
-              className="w-7 h-7 rounded-full flex items-center justify-center text-slate hover:bg-ink/10"
+              className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
             >
-              ✕
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* ── CHAT MESSAGES (Pure Textbook Reading) ── */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {messages.map((m, idx) => (
+        {/* Chat History */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.map((m) => (
             <div
-              key={idx}
+              key={m.id}
               className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
             >
-              {m.liveSessionGroup ? (
-                <div className="w-full bg-teal/5 border border-teal/20 rounded-2xl p-3.5 space-y-3 shadow-xs">
-                  <div className="flex items-center gap-2 text-teal font-black text-xs border-b border-teal/15 pb-2">
-                    <span>🎥</span>
-                    <span>Live Video Call Session Notes</span>
+              <div
+                className={`max-w-[88%] rounded-2xl p-3.5 text-xs sm:text-sm leading-relaxed ${
+                  m.role === "user"
+                    ? "bg-teal-600 text-white rounded-tr-xs"
+                    : "bg-[#1e293b] text-slate-200 border border-slate-700/80 rounded-tl-xs shadow-md font-sans"
+                }`}
+              >
+                {/* User Images if any */}
+                {m.images && m.images.length > 0 && (
+                  <div className="flex gap-2 mb-2 flex-wrap">
+                    {m.images.map((img, idx) => (
+                      <img
+                        key={idx}
+                        src={img}
+                        alt="Question"
+                        className="max-h-48 max-w-full rounded-lg object-contain border border-slate-700 bg-black/40"
+                      />
+                    ))}
                   </div>
-                  {m.liveSessionGroup.map((item, itemIdx) => (
-                    <div key={itemIdx} className="space-y-1.5 pt-1">
-                      <p className="text-[11px] font-bold text-ink flex items-center gap-1.5">
-                        <span className="text-teal">👤 Student {item.isFollowUp ? "(Follow-up)" : ""}:</span>
-                        <span>"{item.query}"</span>
-                      </p>
-                      <div className="bg-white/80 p-2.5 rounded-xl border border-ink/8">
-                        <FormattedSolution text={item.reply} />
-                      </div>
-                    </div>
-                  ))}
+                )}
+
+                {/* Message Body with Textbook Layout */}
+                <div className="whitespace-pre-wrap font-normal selection:bg-teal-500 selection:text-white">
+                  {m.content}
                 </div>
-              ) : (
-                <div
-                  className={`max-w-[88%] rounded-2xl p-3.5 text-xs leading-relaxed ${
-                    m.role === "user"
-                      ? "bg-ink text-paper rounded-br-xs"
-                      : "bg-paper/80 border border-ink/8 text-ink rounded-bl-xs shadow-xs"
-                  }`}
-                >
-                  {m.image && (
-                    <img
-                      src={m.image}
-                      alt="Question"
-                      className="max-h-48 rounded-lg mb-2 object-contain bg-black/5"
-                    />
-                  )}
-                  {m.role === "assistant" ? (
-                    <FormattedSolution text={m.content} />
-                  ) : (
-                    <span className="whitespace-pre-wrap">{m.content}</span>
-                  )}
-                </div>
-              )}
+              </div>
+
+              <span className="text-[10px] text-slate-500 mt-1 px-1">
+                {m.timestamp}
+              </span>
             </div>
           ))}
 
           {loading && (
-            <div className="flex items-center gap-2 text-xs text-slate bg-paper/60 p-2.5 rounded-xl w-fit">
-              <span className="animate-spin">⏳</span> Solving step-by-step…
+            <div className="flex items-start gap-2">
+              <div className="bg-[#1e293b] border border-slate-700 rounded-2xl rounded-tl-xs p-3 text-xs text-slate-400 flex items-center gap-2">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-400" />
+                <span>Faculty solution calculate kar rahe hain...</span>
+              </div>
             </div>
           )}
-          <div ref={chatEndRef} />
+
+          <div ref={messagesEndRef} />
         </div>
 
-        {/* Gallery Image Preview (Single Image) */}
-        {selectedImage && (
-          <div className="px-4 py-2 bg-paper/60 border-t border-ink/5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <img
-                src={selectedImage}
-                alt="Preview"
-                className="w-10 h-10 object-cover rounded-lg border border-ink/10"
-              />
-              <span className="text-[11px] font-bold text-ink">Photo attached (~80KB)</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSelectedImage(null)}
-              className="text-xs text-rose-500 font-bold hover:underline"
-            >
-              Remove
-            </button>
+        {/* Selected Images Preview Bar */}
+        {selectedImages.length > 0 && (
+          <div className="px-4 py-2 bg-[#1e293b]/80 border-t border-slate-800 flex items-center gap-2">
+            <span className="text-[11px] text-slate-400">Attached ({selectedImages.length}/2):</span>
+            {selectedImages.map((img, idx) => (
+              <div key={idx} className="relative group">
+                <img
+                  src={img}
+                  alt="Thumbnail"
+                  className="w-12 h-12 object-cover rounded-md border border-teal-500/50"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeImage(idx)}
+                  className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-0.5 shadow-md"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* ── NORMAL INPUT BAR ── */}
-        <div className="p-3 border-t border-ink/10 bg-white">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (input.trim() || selectedImage) {
-                handleExecuteDoubt(selectedImage, input.trim());
-                setInput("");
-                setSelectedImage(null);
-              }
-            }}
-            className="flex items-center gap-2"
-          >
-            {/* START LIVE VIDEO CALL */}
-            <button
-              type="button"
-              onClick={() => startLiveCall()}
-              className="px-2.5 py-2.5 rounded-xl bg-gradient-to-r from-teal to-emerald-500 text-white active:scale-95 transition-all text-xs font-black flex items-center gap-1 shrink-0 shadow-xs"
-              title="Start Live Video Call"
-            >
-              <span>🎥</span>
-              <span className="text-[11px]">Live Call</span>
-            </button>
-
-            {/* Gallery Upload */}
+        {/* Input Bar */}
+        <div className="p-3 bg-[#1e293b] border-t border-slate-800">
+          <form onSubmit={handleSend} className="flex items-center gap-2">
+            {/* Hidden File Inputs */}
             <input
               type="file"
-              accept="image/*"
               ref={fileInputRef}
-              onChange={handleImageSelect}
+              accept="image/*"
               className="hidden"
+              onChange={handleImageSelect}
             />
+            <input
+              type="file"
+              ref={cameraInputRef}
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleImageSelect}
+            />
+
+            {/* Camera Button */}
+            <button
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={selectedImages.length >= 2 || compressing}
+              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors disabled:opacity-40"
+              title="Camera Se Photo Lein"
+            >
+              <Camera className="w-4 h-4" />
+            </button>
+
+            {/* Gallery Upload Button */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="p-2.5 rounded-xl border border-ink/12 text-slate hover:text-ink active:scale-95 transition-all text-sm shrink-0"
-              title="Attach Photo"
+              disabled={selectedImages.length >= 2 || compressing}
+              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors disabled:opacity-40"
+              title="Gallery Se Photo Chunein"
             >
-              📷
+              <ImageIcon className="w-4 h-4" />
             </button>
 
+            {/* Text Input */}
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask doubt, formula or concept…"
-              className="flex-1 text-xs font-semibold p-2.5 rounded-xl border border-ink/15 bg-white focus:outline-none focus:border-teal"
+              placeholder={
+                compressing
+                  ? "Photo compress ho rahi hai..."
+                  : "Sawal, concept ya question likhein..."
+              }
+              disabled={loading || compressing}
+              className="flex-1 bg-slate-900 border border-slate-700 text-slate-100 placeholder-slate-500 text-xs sm:text-sm rounded-xl px-3.5 py-2.5 focus:outline-hidden focus:border-teal-500 transition-colors"
             />
 
+            {/* Send Button */}
             <button
               type="submit"
-              disabled={loading || (!input.trim() && !selectedImage)}
-              className="px-4 py-2.5 rounded-xl bg-teal text-white text-xs font-bold shadow-xs hover:bg-teal/90 disabled:opacity-40 transition-all shrink-0"
+              disabled={loading || compressing || (!input.trim() && selectedImages.length === 0)}
+              className="p-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-medium transition-colors disabled:opacity-40 disabled:hover:bg-teal-600"
             >
-              Send
+              <Send className="w-4 h-4" />
             </button>
           </form>
         </div>
+
       </div>
     </div>
   );
