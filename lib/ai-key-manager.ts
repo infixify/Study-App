@@ -1,95 +1,94 @@
 // lib/ai-key-manager.ts
 
-interface KeyStatus {
-  key: string;
+interface KeyHealth {
   cooldownUntil: number;
+  failureCount: number;
 }
 
-const keyPool: Map<string, KeyStatus> = new Map();
+const keyHealthMap = new Map<string, KeyHealth>();
+const COOLDOWN_MS = 60 * 1000; // 1 minute cooldown on 429 / rate-limit
 
-/**
- * Strips quotes, spaces, newlines from API keys
- */
-function cleanKey(raw: string | undefined): string | null {
-  if (!raw) return null;
-  const cleaned = raw.replace(/["'\r\n]/g, "").trim();
-  return cleaned.length > 10 ? cleaned : null;
+function cleanKey(raw?: string): string {
+  if (!raw) return "";
+  return raw.replace(/["'\r\n\s]/g, "").trim();
 }
 
 /**
- * Cloudflare environment se saari Gemini keys nikalta hai aur clean karta hai
+ * Chat Doubt ke liye dedicated keys:
+ * 1. GEMINI_API_KEY_DOUBT ya GEMINI_API_KEY_DOUT
+ * 2. Standard GEMINI_API_KEY
+ * 3. GEMINI_API_KEYS pool (agar pehle wale busy hon)
  */
-export function getAllAvailableGeminiKeys(): string[] {
+export function getChatGeminiKeys(): string[] {
   const keys: string[] = [];
+  
+  // 1. Dedicated Doubt Keys (dono spellings handled)
+  const doubtKey = cleanKey(process.env.GEMINI_API_KEY_DOUBT || process.env.GEMINI_API_KEY_DOUT);
+  if (doubtKey) keys.push(doubtKey);
 
-  const commaSeparated = [
-    process.env.LIVE_GEMINI_API_KEYS,
-    process.env.GEMINI_API_KEYS,
-  ];
+  // 2. Standard Gemini Key
+  const mainKey = cleanKey(process.env.GEMINI_API_KEY);
+  if (mainKey && !keys.includes(mainKey)) keys.push(mainKey);
 
-  for (const raw of commaSeparated) {
-    if (raw) {
-      // Split by comma and strip quotes from each key
-      const parts = raw.split(",").map((k) => cleanKey(k)).filter(Boolean) as string[];
-      keys.push(...parts);
-    }
-  }
-
-  const individualVars = [
-    process.env.GEMINI_API_KEY_DOUBT,
-    process.env.GEMINI_API_KEY,
-    process.env.GEMINI_API_KEY_MENTOR,
-    process.env.NEXT_PUBLIC_GEMINI_API_KEY,
-  ];
-
-  for (let i = 1; i <= 5; i++) {
-    individualVars.push(process.env[`LIVE_GEMINI_API_KEY_${i}`]);
-    individualVars.push(process.env[`GEMINI_API_KEY_${i}`]);
-  }
-
-  for (const raw of individualVars) {
-    const k = cleanKey(raw);
-    if (k && !keys.includes(k)) {
-      keys.push(k);
+  // 3. Pool keys fallback
+  const poolRaw = process.env.GEMINI_API_KEYS || "";
+  if (poolRaw) {
+    const pool = poolRaw.split(",").map(k => cleanKey(k)).filter(Boolean);
+    for (const k of pool) {
+      if (!keys.includes(k)) keys.push(k);
     }
   }
 
   return keys;
 }
 
-export function getActiveLiveKey(): string | null {
-  const allKeys = getAllAvailableGeminiKeys();
+/**
+ * Live Video Call ke liye dedicated keys (chheda nahi gaya)
+ */
+export function getLiveGeminiKeys(): string[] {
+  const raw = process.env.LIVE_GEMINI_API_KEYS || process.env.GEMINI_API_KEYS || "";
+  return raw.split(",").map(k => cleanKey(k)).filter(Boolean);
+}
+
+/**
+ * Groq Backup Key (GROQ_API_KEY ya GROK_API_KEY)
+ */
+export function getGroqKey(): string {
+  return cleanKey(process.env.GROQ_API_KEY || process.env.GROK_API_KEY);
+}
+
+/**
+ * OpenRouter Backup Key
+ */
+export function getOpenRouterKey(): string {
+  return cleanKey(process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY);
+}
+
+/**
+ * Health check filters
+ */
+export function getHealthyKey(keys: string[]): string | null {
   const now = Date.now();
-  const available = allKeys.filter((k) => {
-    const st = keyPool.get(k);
-    return !st || st.cooldownUntil <= now;
-  });
-  if (available.length > 0) {
-    return available[Math.floor(Math.random() * available.length)];
+  for (const k of keys) {
+    const health = keyHealthMap.get(k);
+    if (!health || health.cooldownUntil < now) {
+      return k;
+    }
   }
-  return allKeys.length > 0 ? allKeys[0] : null;
+  return keys[0] || null;
 }
 
-export function getActiveChatKey(): string | null {
-  const doubtKey = cleanKey(process.env.GEMINI_API_KEY_DOUBT);
-  const now = Date.now();
-  if (doubtKey) {
-    const st = keyPool.get(doubtKey);
-    if (!st || st.cooldownUntil <= now) return doubtKey;
+export function reportKeyFailure(key: string, isRateLimit: boolean = false) {
+  if (!key) return;
+  const current = keyHealthMap.get(key) || { cooldownUntil: 0, failureCount: 0 };
+  current.failureCount += 1;
+  if (isRateLimit || current.failureCount >= 2) {
+    current.cooldownUntil = Date.now() + COOLDOWN_MS;
   }
-  return getActiveLiveKey();
+  keyHealthMap.set(key, current);
 }
 
-export function markKeyRateLimited(key: string, cooldownMinutes = 60) {
-  keyPool.set(key, {
-    key,
-    cooldownUntil: Date.now() + cooldownMinutes * 60 * 1000,
-  });
-}
-
-export function getBackupProviders() {
-  return {
-    groq: cleanKey(process.env.GROQ_API_KEY),
-    openRouter: cleanKey(process.env.OPENROUTER_API_KEY),
-  };
+export function reportKeySuccess(key: string) {
+  if (!key) return;
+  keyHealthMap.delete(key);
 }
