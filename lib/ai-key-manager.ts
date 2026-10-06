@@ -12,10 +12,9 @@ function sanitize(val?: string | null): string | null {
   return clean.length > 5 ? clean : null;
 }
 
-// Dedicated Gemini Keys for Image/Vision Doubts
+// Dedicated Image Project Key (with smart fallback so it never fails)
 export function getImageGeminiKeys(): string[] {
   const keys: string[] = [];
-
   const imgKey = sanitize(process.env.GEMINI_API_KEY_IMAGE || process.env.GOOGLE_API_KEY_IMAGE);
   if (imgKey) keys.push(imgKey);
 
@@ -28,10 +27,9 @@ export function getImageGeminiKeys(): string[] {
   return keys;
 }
 
-// Dedicated Gemini Keys for Pure Text Doubts
+// Dedicated Text Project Key
 export function getChatGeminiKeys(): string[] {
   const keys: string[] = [];
-
   const doubtKey = sanitize(process.env.GEMINI_API_KEY_DOUBT || process.env.GOOGLE_API_KEY_DOUBT);
   if (doubtKey) keys.push(doubtKey);
 
@@ -77,7 +75,7 @@ export function getOpenRouterKey(): string | null {
   return sanitize(process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY);
 }
 
-// Live Cam pool strictly isolated
+// Live Cam pool strictly 100% reserved
 export function getLiveGeminiKeys(): string[] {
   const raw = process.env.GEMINI_API_KEYS || "";
   if (!raw) return [];
