@@ -16,7 +16,13 @@ function cleanKey(raw: string | undefined): string | null {
   return cleaned.length > 10 ? cleaned : null;
 }
 
+// Memory caches for working models discovered live
+let cachedWorkingGeminiModel: string | null = null;
+let cachedWorkingGroqModel: string | null = null;
+
 export async function POST(req: NextRequest) {
+  const debugErrors: string[] = [];
+
   try {
     const { query, image, isLive, targetExam, studentContext } = await req.json();
 
@@ -27,13 +33,13 @@ export async function POST(req: NextRequest) {
 
     const systemPrompt = isLive
       ? `You are the personal AI Faculty for ${studentName} (${examName}) on a real-time live video call.
-Be energetic, encouraging, and clear like a top mentor.
-CRITICAL RULES:
+Be energetic, concise, and clear.
+RULES:
 1. FORMULAS: Write formulas in clean textbook notation: 1/f = (μ_rel - 1)(1/R₁ - 1/R₂). Do NOT use \\frac or \\left.
 2. DUAL OUTPUT JSON: Return JSON:
 {
   "written": "Clear step-by-step textbook solution for the screen HUD.",
-  "spoken": "Crisp 2-3 sentence conversational spoken answer without any symbols, formulas, or emojis."
+  "spoken": "Crisp 2-3 sentence conversational spoken answer in everyday teacher language without any formulas, symbols, or emojis."
 }`
       : `You are the Master AI Doubt Faculty for ${studentName} (${examName}).
 Provide a detailed step-by-step written solution for their doubt.
@@ -43,18 +49,39 @@ Use clean textbook formulas like 1/f = (μ - 1)(1/R₁ - 1/R₂). Format with cl
     // 🔑 TIER 1 & TIER 2: GEMINI DEDICATED KEYS ➔ COMMON BACKUP
     // ─────────────────────────────────────────────────────────────
     const primaryKey = isLive ? getActiveLiveKey() : getActiveChatKey();
-    
-    // Key sequence: Primary Dedicated Key ➔ Common Backup Key
     const geminiKeysToTry: string[] = [];
     if (primaryKey) geminiKeysToTry.push(primaryKey);
     if (commonGeminiKey && !geminiKeysToTry.includes(commonGeminiKey)) {
       geminiKeysToTry.push(commonGeminiKey);
     }
 
-    const models = ["gemini-1.5-flash-002", "gemini-1.5-flash", "gemini-2.0-flash-exp"];
-
     for (const apiKey of geminiKeysToTry) {
-      for (const model of models) {
+      // Step A: Auto-Discover active models for this key from Google
+      let modelsToTry: string[] = cachedWorkingGeminiModel ? [cachedWorkingGeminiModel] : [];
+
+      if (modelsToTry.length === 0) {
+        try {
+          const listRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+          );
+          if (listRes.ok) {
+            const listData = await listRes.json();
+            const liveModels = (listData.models || [])
+              .filter((m: any) => m.supportedGenerationMethods?.includes("generateContent"))
+              .map((m: any) => m.name.replace("models/", ""));
+
+            const flash = liveModels.filter((m: string) => m.includes("flash"));
+            modelsToTry = flash.length > 0 ? flash : liveModels;
+          }
+        } catch (_) {}
+      }
+
+      if (modelsToTry.length === 0) {
+        modelsToTry = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash-exp"];
+      }
+
+      // Step B: Call generateContent
+      for (const model of modelsToTry.slice(0, 3)) {
         try {
           const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -89,12 +116,14 @@ Use clean textbook formulas like 1/f = (μ - 1)(1/R₁ - 1/R₂). Format with cl
 
           if (res.status === 429 || res.status === 403) {
             markKeyRateLimited(apiKey, 60);
-            break; // Switch to Common Backup Key or next provider
+            debugErrors.push(`Gemini ${model} 429: Rate limited`);
+            break;
           }
 
           if (res.ok) {
             const data = await res.json();
             const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            cachedWorkingGeminiModel = model;
 
             if (isLive) {
               try {
@@ -117,128 +146,100 @@ Use clean textbook formulas like 1/f = (μ - 1)(1/R₁ - 1/R₂). Format with cl
               provider: `gemini-${model}`,
               success: true,
             });
+          } else {
+            const errT = await res.text();
+            debugErrors.push(`Gemini ${model} ${res.status}: ${errT.slice(0, 90)}`);
+          }
+        } catch (err: any) {
+          debugErrors.push(`Gemini ${model} ex: ${err.message}`);
+        }
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 🌐 TIER 3: GROQ BACKUP (Auto-Discover Active Groq Models)
+    // ─────────────────────────────────────────────────────────────
+    if (groq) {
+      let groqModelsToTry = cachedWorkingGroqModel ? [cachedWorkingGroqModel] : [];
+
+      if (groqModelsToTry.length === 0) {
+        try {
+          const gListRes = await fetch("https://api.groq.com/openai/v1/models", {
+            headers: { Authorization: `Bearer ${groq}` },
+          });
+          if (gListRes.ok) {
+            const gListData = await gListRes.json();
+            const liveGModels = (gListData.data || []).map((m: any) => m.id);
+            if (image) {
+              groqModelsToTry = liveGModels.filter((id: string) => id.includes("vision"));
+            } else {
+              groqModelsToTry = liveGModels.filter(
+                (id: string) => id.includes("llama") || id.includes("gemma")
+              );
+            }
+            if (groqModelsToTry.length === 0) groqModelsToTry = liveGModels;
+          }
+        } catch (_) {}
+      }
+
+      for (const groqModel of groqModelsToTry.slice(0, 2)) {
+        try {
+          let groqMessages: any[] = [];
+          if (image) {
+            groqMessages = [
+              { role: "system", content: systemPrompt },
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: query || "Solve this question" },
+                  { type: "image_url", image_url: { url: image } },
+                ],
+              },
+            ];
+          } else {
+            groqMessages = [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: query || "Explain this" },
+            ];
+          }
+
+          const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${groq}`,
+            },
+            body: JSON.stringify({
+              model: groqModel,
+              messages: groqMessages,
+              temperature: 0.3,
+              max_tokens: isLive ? 400 : 900,
+            }),
+          });
+
+          if (groqRes.ok) {
+            const gData = await groqRes.json();
+            const gReply = gData.choices?.[0]?.message?.content || "";
+            cachedWorkingGroqModel = groqModel;
+            return NextResponse.json({
+              reply: gReply,
+              spoken: gReply.slice(0, 300),
+              provider: `groq-${groqModel}`,
+              success: true,
+            });
           }
         } catch (_) {}
       }
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // 🌐 TIER 3: GROQ BACKUP (GROQ_API_KEY)
-    // ─────────────────────────────────────────────────────────────
-    if (groq) {
-      const groqModel = image ? "llama-3.2-11b-vision-preview" : "llama-3.1-8b-instant";
-      try {
-        let groqMessages: any[] = [];
-        if (image) {
-          groqMessages = [
-            { role: "system", content: systemPrompt },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: query || "Solve this question" },
-                { type: "image_url", image_url: { url: image } },
-              ],
-            },
-          ];
-        } else {
-          groqMessages = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: query || "Explain this" },
-          ];
-        }
-
-        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${groq}`,
-          },
-          body: JSON.stringify({
-            model: groqModel,
-            messages: groqMessages,
-            temperature: 0.3,
-            max_tokens: isLive ? 400 : 900,
-          }),
-        });
-
-        if (groqRes.ok) {
-          const gData = await groqRes.json();
-          const gReply = gData.choices?.[0]?.message?.content || "";
-          return NextResponse.json({
-            reply: gReply,
-            spoken: gReply.slice(0, 300),
-            provider: `groq-${groqModel}`,
-            success: true,
-          });
-        }
-      } catch (_) {}
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // 🌐 TIER 4: OPENROUTER BACKUP (OPENROUTER_API_KEY)
-    // ─────────────────────────────────────────────────────────────
-    if (openRouter) {
-      const orModel = image
-        ? "meta-llama/llama-3.2-11b-vision-instruct:free"
-        : "meta-llama/llama-3.2-3b-instruct:free";
-
-      try {
-        let orMessages: any[] = [];
-        if (image) {
-          orMessages = [
-            { role: "system", content: systemPrompt },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: query || "Solve this question" },
-                { type: "image_url", image_url: { url: image } },
-              ],
-            },
-          ];
-        } else {
-          orMessages = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: query || "Explain this" },
-          ];
-        }
-
-        const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openRouter}`,
-            "HTTP-Referer": "https://eterprep.pages.dev",
-            "X-Title": "PrepWise AI Faculty",
-          },
-          body: JSON.stringify({
-            model: orModel,
-            messages: orMessages,
-            temperature: 0.3,
-            max_tokens: isLive ? 400 : 900,
-          }),
-        });
-
-        if (orRes.ok) {
-          const orData = await orRes.json();
-          const orReply = orData.choices?.[0]?.message?.content || "";
-          return NextResponse.json({
-            reply: orReply,
-            spoken: orReply.slice(0, 300),
-            provider: `openrouter-${orModel}`,
-            success: true,
-          });
-        }
-      } catch (_) {}
-    }
-
     return NextResponse.json(
       {
-        reply: "Abhi sabhi AI faculties busy hain. Kripya 1 minute baad dobara puchiye!",
+        reply: `⚠️ AI Connection Error:\n${debugErrors.join("\n")}`,
         spoken: "Faculty abhi busy hain, kripya 1 minute baad puchiye.",
       },
-      { status: 503 }
+      { status: 500 }
     );
   } catch (err: any) {
-    return NextResponse.json({ reply: `Error: ${err.message}`, spoken: "Error." }, { status: 500 });
+    return NextResponse.json({ reply: `Server Error: ${err.message}`, spoken: "Error." }, { status: 500 });
   }
 }
