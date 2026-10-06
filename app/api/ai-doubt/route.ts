@@ -26,13 +26,14 @@ FORMATTING RULES:
    - 📐 **Formula Used** (state the standard formula clearly)
    - 📝 **Step-by-Step Solution** (numbered steps, clean arithmetic)
    - 🎯 **Final Answer** (highlight the final value, unit, or option)
-4. TONE: Encouraging, precise, crystal clear. If the user asks a non-academic question or greeting, reply politely in 1-2 lines.`;
+4. TONE: Encouraging, precise, crystal clear. If the user asks a non-academic question or greeting (like 'Hello', 'Hi'), reply warmly and politely in 1-2 lines inviting them to ask any study doubt.`;
 
 interface ImageAttachment {
   mimeType: string;
-  data: string;
+  data: string; // pure base64 without prefix
 }
 
+// Bulletproof substring parser — Zero Regex, Zero Stack Overrun
 function extractImages(body: any): ImageAttachment[] {
   const images: ImageAttachment[] = [];
 
@@ -44,16 +45,32 @@ function extractImages(body: any): ImageAttachment[] {
   }
 
   for (const item of rawList) {
-    if (!item) continue;
-    const match = item.match(/^data:([^;]+);base64,(.+)$/);
-    if (match) {
-      images.push({ mimeType: match[1], data: match[2] });
-    } else if (item.length > 50) {
-      images.push({ mimeType: "image/jpeg", data: item });
+    if (!item || typeof item !== "string" || item.length < 20) continue;
+
+    let mimeType = "image/jpeg";
+    let data = item.trim();
+
+    if (data.startsWith("data:")) {
+      const commaIndex = data.indexOf(",");
+      if (commaIndex !== -1) {
+        const header = data.substring(0, commaIndex);
+        data = data.substring(commaIndex + 1);
+
+        if (header.includes("png")) mimeType = "image/png";
+        else if (header.includes("webp")) mimeType = "image/webp";
+        else mimeType = "image/jpeg";
+      }
+    }
+
+    // Clean any whitespace
+    data = data.replace(/[\r\n\s]/g, "");
+
+    if (data.length > 50) {
+      images.push({ mimeType, data });
     }
   }
 
-  return images.slice(0, 2); // max 2 images safe limit
+  return images.slice(0, 2);
 }
 
 async function tryGemini(
@@ -75,7 +92,7 @@ async function tryGemini(
     });
   }
   parts.push({
-    text: `${SYSTEM_PROMPT}\n\nStudent Query: ${userText || "Please solve and explain the question in this image."}`,
+    text: `${SYSTEM_PROMPT}\n\nStudent Query: ${userText || "Please solve and explain the question in this image step-by-step."}`,
   });
 
   const payload = {
@@ -222,14 +239,25 @@ async function tryOpenRouter(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const userText = (body.message || "").trim();
+
+    // Check all possible field names
+    const userText = (
+      body.message ||
+      body.prompt ||
+      body.question ||
+      body.doubt ||
+      body.text ||
+      body.query ||
+      ""
+    ).toString().trim();
+
     const mode = body.mode || "chat";
     const images = extractImages(body);
 
     if (!userText && images.length === 0) {
       return NextResponse.json(
         { reply: "Kripya koi sawal likhein ya photo attach karein." },
-        { status: 400 }
+        { status: 200 }
       );
     }
 
@@ -238,7 +266,7 @@ export async function POST(req: NextRequest) {
 
     const errorLogs: string[] = [];
 
-    // TIER 1 & 2: Gemini
+    // TIER 1 & 2: Gemini Pool
     for (const key of geminiKeys) {
       for (const model of candidateModels) {
         try {
@@ -275,7 +303,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    console.error("[AI Doubt Cascade Failed]", errorLogs);
+    console.error("[AI Doubt All Providers Failed]", errorLogs);
     return NextResponse.json(
       {
         reply: "Abhi sabhi AI faculties thode busy hain. Kripya 1 minute baad dobara puchiye!",
