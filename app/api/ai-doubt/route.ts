@@ -1,8 +1,9 @@
 // app/api/ai-doubt/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import {
+  getActiveLiveKey,
+  getActiveChatKey,
   getAllAvailableGeminiKeys,
-  getActiveGeminiKeyForDoubt,
   markKeyRateLimited,
   getBackupProviders,
 } from "@/lib/ai-key-manager";
@@ -11,14 +12,13 @@ export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, query, image, targetExam, studentContext } = await req.json();
+    const { messages, query, image, isLive, targetExam, studentContext } = await req.json();
 
     const allKeys = getAllAvailableGeminiKeys();
     const { groq, openRouter } = getBackupProviders();
 
-    // DIAGNOSTIC CHECK: Agar Cloudflare mein koi key nahi mili
     if (allKeys.length === 0 && !groq && !openRouter) {
-      console.error("[AI-Doubt] No API keys found in process.env!");
+      console.error("[AI-Doubt] No API keys found in environment!");
       return NextResponse.json(
         {
           reply:
@@ -40,15 +40,15 @@ BEHAVIOR RULES:
     const hasImage = Boolean(image);
 
     // ─────────────────────────────────────────────────────────────
-    // 1. PROVIDER 1: GOOGLE GEMINI (With inlineData fix & 2.0 -> 1.5)
+    // 1. PROVIDER 1: GOOGLE GEMINI (2.0 -> 1.5 Fallback)
     // ─────────────────────────────────────────────────────────────
     const geminiModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
-    const maxAttempts = Math.min(allKeys.length || 1, 4);
+    const maxAttempts = isLive ? 4 : 2;
     let attempts = 0;
 
     while (attempts < maxAttempts) {
       attempts++;
-      const apiKey = getActiveGeminiKeyForDoubt();
+      const apiKey = isLive ? getActiveLiveKey() : getActiveChatKey();
       if (!apiKey) break;
 
       for (const modelName of geminiModels) {
@@ -58,7 +58,6 @@ BEHAVIOR RULES:
           const parts: any[] = [];
           if (query) parts.push({ text: query });
 
-          // CORRECT CAMELCASE FORMAT FOR GEMINI REST API: inlineData & mimeType
           if (image) {
             const match = image.match(/^data:image\/(\w+);base64,(.+)$/);
             if (match) {
@@ -89,20 +88,16 @@ BEHAVIOR RULES:
           });
 
           if (res.status === 429 || res.status === 403) {
-            console.warn(`[AI-Doubt] Key 429. Marking cooldown...`);
+            console.warn(`[AI-Doubt] Key rate limited. Marking cooldown...`);
             markKeyRateLimited(apiKey, 60);
-            break; // Switch to next key in pool
+            break; // Try next key
           }
 
           if (res.status === 503 || res.status === 500) {
-            continue; // Cascade from 2.0 to 1.5
+            continue; // Cascade to 1.5-flash
           }
 
-          if (!res.ok) {
-            const errBody = await res.text();
-            console.error(`[AI-Doubt] Gemini ${modelName} error (${res.status}):`, errBody);
-            continue;
-          }
+          if (!res.ok) continue;
 
           const data = await res.json();
           const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -110,7 +105,7 @@ BEHAVIOR RULES:
             return NextResponse.json({ reply, provider: `gemini-${modelName}`, success: true });
           }
         } catch (err) {
-          console.error(`[AI-Doubt] Gemini ${modelName} exception:`, err);
+          console.error(`[AI-Doubt] Gemini ${modelName} error:`, err);
         }
       }
     }
@@ -167,7 +162,7 @@ BEHAVIOR RULES:
             }
           }
         } catch (gErr) {
-          console.error(`[AI-Doubt] Groq exception:`, gErr);
+          console.error(`[AI-Doubt] Groq error:`, gErr);
         }
       }
     }
@@ -226,7 +221,7 @@ BEHAVIOR RULES:
             }
           }
         } catch (orErr) {
-          console.error(`[AI-Doubt] OpenRouter exception:`, orErr);
+          console.error(`[AI-Doubt] OpenRouter error:`, orErr);
         }
       }
     }
