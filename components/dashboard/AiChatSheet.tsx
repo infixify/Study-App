@@ -1,276 +1,202 @@
-// components/dashboard/AiChatSheet.tsx
 "use client";
 
-import React, { useState, useRef, useEffect, ChangeEvent } from "react";
-
-function IconClose({ className = "w-5 h-5" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  );
-}
-
-function IconSend({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
-    </svg>
-  );
-}
-
-function IconCamera({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  );
-}
-
-function IconImage({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-    </svg>
-  );
-}
-
-function IconSparkles({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-    </svg>
-  );
-}
-
-function IconSpinner({ className = "w-3.5 h-3.5" }: { className?: string }) {
-  return (
-    <svg className={`animate-spin ${className}`} fill="none" viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-    </svg>
-  );
-}
-
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  images?: string[];
-  timestamp: string;
-}
+import React, { useState, useRef, useEffect } from "react";
 
 interface AiChatSheetProps {
   open?: boolean;
   isOpen?: boolean;
   onClose: () => void;
-  userEmail?: string;
   studentContext?: any;
 }
 
-// Client-side canvas compression: 10MB photo -> 120KB JPEG
-async function compressImage(file: File, maxWidth = 1280, quality = 0.75): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          resolve(e.target?.result as string);
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", quality);
-        resolve(dataUrl);
-      };
-      img.onerror = () => reject(new Error("Image failed to load"));
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = (err) => reject(err);
-    reader.readAsDataURL(file);
-  });
+interface Message {
+  id: string;
+  sender: "user" | "ai";
+  text: string;
+  images?: string[];
+  provider?: string;
+  timestamp: Date;
 }
 
-function formatTextbookNotes(text: string): string {
-  if (!text) return "";
-  let clean = text;
-
-  clean = clean.replace(/```(?:markdown|latex|text)?\n([\s\S]*?)\n```/g, "$1");
-
-  clean = clean
-    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)")
-    .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
-    .replace(/\\times/g, "×")
-    .replace(/\\div/g, "÷")
-    .replace(/\\pm/g, "±")
-    .replace(/\\approx/g, "≈")
-    .replace(/\\neq/g, "≠")
-    .replace(/\\le/g, "≤")
-    .replace(/\\ge/g, "≥")
-    .replace(/\\to/g, "→")
-    .replace(/\\implies/g, "⇒")
-    .replace(/\\theta/g, "θ")
-    .replace(/\\pi/g, "π")
-    .replace(/\\alpha/g, "α")
-    .replace(/\\beta/g, "β")
-    .replace(/\\lambda/g, "λ")
-    .replace(/\\mu/g, "μ")
-    .replace(/\\omega/g, "ω")
-    .replace(/\\Delta/g, "Δ")
-    .replace(/\\circ/g, "°");
-
-  // Powers
-  clean = clean
-    .replace(/\^2\b/g, "²")
-    .replace(/\^3\b/g, "³")
-    .replace(/\^0\b/g, "⁰")
-    .replace(/\^1\b/g, "¹")
-    .replace(/\^4\b/g, "⁴")
-    .replace(/\^5\b/g, "⁵")
-    .replace(/\^-1\b/g, "⁻¹")
-    .replace(/\^-2\b/g, "⁻²");
-
-  // Subscripts
-  clean = clean
-    .replace(/_0\b/g, "₀")
-    .replace(/_1\b/g, "₁")
-    .replace(/_2\b/g, "₂")
-    .replace(/_3\b/g, "₃")
-    .replace(/_f\b/g, "ᶠ")
-    .replace(/_i\b/g, "ⁱ");
-
-  clean = clean.replace(/\$\$?/g, "");
-
-  return clean;
+// Inline Pure SVGs (Zero external package dependencies)
+function IconClose({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  );
 }
 
-export default function AiChatSheet({
-  open,
-  isOpen,
-  onClose,
-  userEmail,
-  studentContext,
-}: AiChatSheetProps) {
-  const isSheetOpen = open ?? isOpen ?? false;
+function IconSend({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+    </svg>
+  );
+}
+
+function IconSparkles({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.286L13 21l-2.286-6.857L5 12l5.714-2.286L13 3z" />
+    </svg>
+  );
+}
+
+function IconImage({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+  );
+}
+
+// Rich Text & Color Formatter (Converts ** and bullet points into styled elements)
+function RichMessageContent({ text }: { text: string }) {
+  const lines = text.split("\n");
+
+  const renderInlineStyles = (lineStr: string) => {
+    // Replace **text** with colored bold span
+    const parts = lineStr.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, idx) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        const clean = part.slice(2, -2);
+        return (
+          <span key={idx} className="font-bold text-teal-300 mx-0.5">
+            {clean}
+          </span>
+        );
+      }
+      return part;
+    });
+  };
+
+  return (
+    <div className="space-y-2 text-sm leading-relaxed text-slate-100">
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return <div key={i} className="h-1.5" />;
+        }
+
+        // Headings: **Heading** or ### Heading
+        if (
+          (trimmed.startsWith("**") && trimmed.endsWith("**") && trimmed.length < 60) ||
+          trimmed.startsWith("### ") ||
+          trimmed.startsWith("## ")
+        ) {
+          const headingText = trimmed.replace(/^###\s*|^##\s*|\*\*/g, "");
+          return (
+            <div key={i} className="pt-2 pb-1 border-b border-teal-500/20">
+              <h4 className="text-teal-400 font-bold text-base flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-teal-400 inline-block"></span>
+                {headingText}
+              </h4>
+            </div>
+          );
+        }
+
+        // Step Lines: Step 1:, Step 2:
+        if (/^Step\s*\d+[:.-]/i.test(trimmed)) {
+          return (
+            <div key={i} className="bg-teal-950/40 border-l-2 border-teal-400 px-3 py-1.5 rounded-r-lg my-1">
+              <span className="font-semibold text-emerald-300">
+                {renderInlineStyles(trimmed)}
+              </span>
+            </div>
+          );
+        }
+
+        // Formula / Note lines
+        if (/^(Formula|Important|Note|Sutra)[:.-]/i.test(trimmed)) {
+          return (
+            <div key={i} className="bg-amber-950/30 border-l-2 border-amber-400 px-3 py-1.5 rounded-r-lg text-amber-200 my-1">
+              {renderInlineStyles(trimmed)}
+            </div>
+          );
+        }
+
+        // Bullet points: - or •
+        if (trimmed.startsWith("- ") || trimmed.startsWith("• ") || trimmed.startsWith("* ")) {
+          const bulletContent = trimmed.replace(/^[-•*]\s*/, "");
+          return (
+            <div key={i} className="flex items-start gap-2 pl-2">
+              <span className="text-teal-400 mt-1 font-bold text-xs">◆</span>
+              <span className="text-slate-200 flex-1">
+                {renderInlineStyles(bulletContent)}
+              </span>
+            </div>
+          );
+        }
+
+        // Regular paragraph
+        return (
+          <p key={i} className="text-slate-200">
+            {renderInlineStyles(line)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatSheetProps) {
+  const visible = open !== undefined ? open : !!isOpen;
 
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: "welcome-1",
-      role: "assistant",
-      content:
-        "Namaste! Main aapka PrepWise Academic Faculty hoon. Kisi bhi Physics, Chemistry, Maths ya Biology sawal ka text likhiye ya photo upload kijiye — main step-by-step solution deta hoon.",
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      id: "welcome",
+      sender: "ai",
+      text: "Namaste! Main aapka PrepWise Academic Mentor hoon. Kisi bhi Physics, Chemistry, Maths ya Biology concept ka sawal likhiye ya photo upload kijiye — step-by-step colored notes ke sath solution milega.",
+      timestamp: new Date(),
     },
   ]);
-
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [loadingStep, setLoadingStep] = useState(0);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
-  const [compressing, setCompressing] = useState(false);
-
-  const isOwner = userEmail === "sarthaksinghyadav1@gmail.com";
-  const dailyLimit = isOwner ? 999 : 10;
-  const [usedDoubts, setUsedDoubts] = useState(0);
+  const [doubtCount, setDoubtCount] = useState(1);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Dynamic Animated Step Loading Status
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (loading) {
-      setLoadingStep(0);
-      interval = setInterval(() => {
-        setLoadingStep((prev) => (prev + 1) % 3);
-      }, 1200);
-    }
-    return () => clearInterval(interval);
-  }, [loading]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
 
-  const loadingMessages = [
-    "Faculty sawal samajh rahe hain...",
-    "Formulas aur steps calculate ho rahe hain...",
-    "Textbook solution format ho raha hai...",
-  ];
+  if (!visible) return null;
 
-  useEffect(() => {
-    if (isSheetOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages, isSheetOpen]);
-
-  if (!isSheetOpen) return null;
-
-  const handleImageSelect = async (e: ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0) return;
+    if (!files) return;
 
-    if (selectedImages.length >= 2) {
-      alert("Aap ek baar mein maximum 2 photos attach kar sakte hain.");
-      return;
-    }
-
-    setCompressing(true);
-    try {
-      const remainingSlots = 2 - selectedImages.length;
-      const filesToProcess = Array.from(files).slice(0, remainingSlots);
-
-      const compressedList: string[] = [];
-      for (const f of filesToProcess) {
-        const compressed = await compressImage(f, 1280, 0.75);
-        compressedList.push(compressed);
-      }
-      setSelectedImages((prev) => [...prev, ...compressedList]);
-    } catch (err) {
-      console.error("Compression error:", err);
-    } finally {
-      setCompressing(false);
-      if (e.target) e.target.value = "";
-    }
-  };
-
-  const removeImage = (index: number) => {
-    setSelectedImages((prev) => prev.filter((_, i) => i !== index));
+    Array.from(files).slice(0, 2).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const base64 = ev.target?.result as string;
+        if (base64) {
+          setSelectedImages((prev) => [...prev, base64].slice(0, 2));
+        }
+      };
+      reader.readAsDataURL(file);
+    });
   };
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const text = input.trim();
-    if (!text && selectedImages.length === 0) return;
-    if (loading || compressing) return;
-
-    if (usedDoubts >= dailyLimit) {
-      alert(`Aapka daily quota (${dailyLimit} doubts) poora ho chuka hai.`);
-      return;
-    }
+    if (!input.trim() && selectedImages.length === 0) return;
+    if (loading) return;
 
     const userMsg: Message = {
-      id: "u-" + Date.now(),
-      role: "user",
-      content: text || "Please check this question photo",
+      id: Date.now().toString(),
+      sender: "user",
+      text: input.trim(),
       images: selectedImages.length > 0 ? [...selectedImages] : undefined,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      timestamp: new Date(),
     };
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
-    const imagesToSend = [...selectedImages];
+    const sentImages = [...selectedImages];
     setSelectedImages([]);
     setLoading(true);
 
@@ -279,39 +205,32 @@ export default function AiChatSheet({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: text,
-          prompt: text,
-          question: text,
-          doubt: text,
-          text: text,
-          query: text,
-          images: imagesToSend,
-          image: imagesToSend[0] || "",
-          mode: "chat",
+          message: userMsg.text,
+          images: sentImages,
           studentContext,
         }),
       });
 
       const data = await res.json();
-      const replyText = data?.reply || "Sawal samajhne mein dikkat aayi. Kripya dobara puchiye.";
-
-      const aiMsg: Message = {
-        id: "ai-" + Date.now(),
-        role: "assistant",
-        content: formatTextbookNotes(replyText),
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      };
-
-      setMessages((prev) => [...prev, aiMsg]);
-      setUsedDoubts((prev) => prev + 1);
-    } catch (err) {
       setMessages((prev) => [
         ...prev,
         {
-          id: "err-" + Date.now(),
-          role: "assistant",
-          content: "Network issue. Kripya apna internet connection check karke dobara try karein.",
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          id: (Date.now() + 1).toString(),
+          sender: "ai",
+          text: data.reply || "Kuch takneeki dikkat aayi, kripya dobara puchiye.",
+          provider: data.provider,
+          timestamp: new Date(),
+        },
+      ]);
+      setDoubtCount((c) => Math.min(10, c + 1));
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          sender: "ai",
+          text: "Server se connect nahi ho paya. Kripya connection check karein.",
+          timestamp: new Date(),
         },
       ]);
     } finally {
@@ -320,104 +239,112 @@ export default function AiChatSheet({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4">
-      <div className="relative w-full max-w-2xl h-[92vh] sm:h-[85vh] bg-[#0f172a] text-slate-100 rounded-t-2xl sm:rounded-2xl flex flex-col shadow-2xl border border-slate-800 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-2 sm:p-4">
+      <div className="relative flex flex-col w-full max-w-2xl h-[92vh] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
         
         {/* Header */}
-        <div className="px-4 py-3 bg-[#1e293b] border-b border-slate-800 flex items-center justify-between">
+        <div className="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold">
-              <IconSparkles className="w-4 h-4" />
+            <div className="p-2 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20">
+              <IconSparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold tracking-wide">AI Doubt Faculty</h2>
-              <p className="text-[11px] text-slate-400">JEE & NEET 24x7 Academic Mentor</p>
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                AI Doubt Faculty
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                  24x7 Academic Mentor
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400">JEE, NEET & Boards Preparation</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] px-2.5 py-1 rounded-full bg-slate-800 text-teal-300 font-medium border border-slate-700">
-              {usedDoubts} / {dailyLimit} Doubts
+          <div className="flex items-center gap-3">
+            <span className="text-xs px-3 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+              {doubtCount} / 10 Doubts
             </span>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
             >
               <IconClose className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Chat History */}
+        {/* Chat Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((m) => (
+          {messages.map((msg) => (
             <div
-              key={m.id}
-              className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
+              key={msg.id}
+              className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
             >
+              {/* User Attached Images */}
+              {msg.images && msg.images.length > 0 && (
+                <div className="flex gap-2 mb-2">
+                  {msg.images.map((img, i) => (
+                    <img
+                      key={i}
+                      src={img}
+                      alt="Uploaded Doubt"
+                      className="w-28 h-28 object-cover rounded-xl border border-slate-700"
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Message Bubble */}
               <div
-                className={`max-w-[88%] rounded-2xl p-3.5 text-xs sm:text-sm leading-relaxed ${
-                  m.role === "user"
-                    ? "bg-teal-600 text-white rounded-tr-xs"
-                    : "bg-[#1e293b] text-slate-200 border border-slate-700/80 rounded-tl-xs shadow-md font-sans"
+                className={`max-w-[88%] p-3.5 rounded-2xl ${
+                  msg.sender === "user"
+                    ? "bg-teal-600 text-white rounded-br-none shadow-md"
+                    : "bg-slate-950/70 border border-slate-800 text-slate-100 rounded-bl-none shadow-lg"
                 }`}
               >
-                {/* User Images */}
-                {m.images && m.images.length > 0 && (
-                  <div className="flex gap-2 mb-2 flex-wrap">
-                    {m.images.map((img, idx) => (
-                      <img
-                        key={idx}
-                        src={img}
-                        alt="Question"
-                        className="max-h-48 max-w-full rounded-lg object-contain border border-slate-700 bg-black/40"
-                      />
-                    ))}
-                  </div>
+                {msg.sender === "user" ? (
+                  <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                ) : (
+                  <RichMessageContent text={msg.text} />
                 )}
-
-                {/* Message Body with Textbook Layout */}
-                <div className="whitespace-pre-wrap font-normal selection:bg-teal-500 selection:text-white">
-                  {m.content}
-                </div>
               </div>
 
-              <span className="text-[10px] text-slate-500 mt-1 px-1">
-                {m.timestamp}
-              </span>
+              {/* Provider tag */}
+              {msg.provider && (
+                <span className="text-[10px] text-slate-500 mt-1 px-1">
+                  Answered via {msg.provider.toUpperCase()}
+                </span>
+              )}
             </div>
           ))}
 
-          {/* Dynamic Animated Status Indicator */}
           {loading && (
-            <div className="flex items-start gap-2">
-              <div className="bg-[#1e293b] border border-teal-500/40 rounded-2xl rounded-tl-xs p-3 text-xs text-teal-300 flex items-center gap-2.5 shadow-lg">
-                <IconSpinner className="w-4 h-4 text-teal-400" />
-                <span className="animate-pulse font-medium">{loadingMessages[loadingStep]}</span>
-              </div>
+            <div className="flex items-center gap-2 p-3 bg-slate-950/60 border border-slate-800 rounded-2xl w-fit">
+              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
+              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse delay-150"></span>
+              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse delay-300"></span>
+              <span className="text-xs text-teal-300 ml-1">AI Teacher step-by-step solution likh raha hai...</span>
             </div>
           )}
 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Selected Images Preview Bar */}
+        {/* Selected Image Preview before sending */}
         {selectedImages.length > 0 && (
-          <div className="px-4 py-2 bg-[#1e293b]/80 border-t border-slate-800 flex items-center gap-2">
-            <span className="text-[11px] text-slate-400">Attached ({selectedImages.length}/2):</span>
+          <div className="flex gap-2 px-4 py-2 bg-slate-950 border-t border-slate-800">
             {selectedImages.map((img, idx) => (
               <div key={idx} className="relative group">
                 <img
                   src={img}
-                  alt="Thumbnail"
-                  className="w-12 h-12 object-cover rounded-md border border-teal-500/50"
+                  alt="Preview"
+                  className="w-16 h-16 object-cover rounded-lg border border-teal-500/40"
                 />
                 <button
                   type="button"
-                  onClick={() => removeImage(idx)}
-                  className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-0.5 shadow-md"
+                  onClick={() => setSelectedImages((prev) => prev.filter((_, i) => i !== idx))}
+                  className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs shadow-md"
                 >
-                  <IconClose className="w-3 h-3" />
+                  ×
                 </button>
               </div>
             ))}
@@ -425,70 +352,44 @@ export default function AiChatSheet({
         )}
 
         {/* Input Bar */}
-        <div className="p-3 bg-[#1e293b] border-t border-slate-800">
-          <form onSubmit={handleSend} className="flex items-center gap-2">
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="image/*"
-              className="hidden"
-              onChange={handleImageSelect}
-            />
-            <input
-              type="file"
-              ref={cameraInputRef}
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={handleImageSelect}
-            />
+        <form
+          onSubmit={handleSend}
+          className="flex items-center gap-2 p-3 bg-slate-950 border-t border-slate-800"
+        >
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImageSelect}
+            accept="image/*"
+            className="hidden"
+            multiple
+          />
 
-            {/* Camera Button */}
-            <button
-              type="button"
-              onClick={() => cameraInputRef.current?.click()}
-              disabled={selectedImages.length >= 2 || compressing}
-              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors disabled:opacity-40"
-              title="Camera Se Photo Lein"
-            >
-              <IconCamera className="w-4 h-4" />
-            </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2.5 rounded-xl text-slate-400 hover:text-teal-400 hover:bg-slate-800/80 transition"
+            title="Attach Question Photo"
+          >
+            <IconImage className="w-5 h-5" />
+          </button>
 
-            {/* Gallery Upload Button */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={selectedImages.length >= 2 || compressing}
-              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors disabled:opacity-40"
-              title="Gallery Se Photo Chunein"
-            >
-              <IconImage className="w-4 h-4" />
-            </button>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Sawal, concept ya question likhein..."
+            className="flex-1 bg-slate-900 border border-slate-700 focus:border-teal-500 focus:outline-none text-white text-sm px-4 py-2.5 rounded-xl transition placeholder:text-slate-500"
+          />
 
-            {/* Text Input */}
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={
-                compressing
-                  ? "Photo compress ho rahi hai..."
-                  : "Sawal, concept ya question likhein..."
-              }
-              disabled={loading || compressing}
-              className="flex-1 bg-slate-900 border border-slate-700 text-slate-100 placeholder-slate-500 text-xs sm:text-sm rounded-xl px-3.5 py-2.5 focus:outline-hidden focus:border-teal-500 transition-colors"
-            />
-
-            {/* Send Button */}
-            <button
-              type="submit"
-              disabled={loading || compressing || (!input.trim() && selectedImages.length === 0)}
-              className="p-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-medium transition-colors disabled:opacity-40 disabled:hover:bg-teal-600"
-            >
-              <IconSend className="w-4 h-4" />
-            </button>
-          </form>
-        </div>
+          <button
+            type="submit"
+            disabled={loading || (!input.trim() && selectedImages.length === 0)}
+            className="p-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white font-medium transition shadow-md"
+          >
+            <IconSend className="w-5 h-5" />
+          </button>
+        </form>
 
       </div>
     </div>
