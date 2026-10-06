@@ -179,6 +179,7 @@ export default function AiChatSheet({
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [compressing, setCompressing] = useState(false);
 
@@ -189,6 +190,24 @@ export default function AiChatSheet({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Dynamic Animated Step Loading Status
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (loading) {
+      setLoadingStep(0);
+      interval = setInterval(() => {
+        setLoadingStep((prev) => (prev + 1) % 3);
+      }, 1200);
+    }
+    return () => clearInterval(interval);
+  }, [loading]);
+
+  const loadingMessages = [
+    "Faculty sawal samajh rahe hain...",
+    "Formulas aur steps calculate ho rahe hain...",
+    "Textbook solution format ho raha hai...",
+  ];
 
   useEffect(() => {
     if (isSheetOpen) {
@@ -244,7 +263,7 @@ export default function AiChatSheet({
     const userMsg: Message = {
       id: "u-" + Date.now(),
       role: "user",
-      content: text || "Please explain this question photo",
+      content: text || "Please check this question photo",
       images: selectedImages.length > 0 ? [...selectedImages] : undefined,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
@@ -264,8 +283,8 @@ export default function AiChatSheet({
           prompt: text,
           question: text,
           doubt: text,
-          query: text,
           text: text,
+          query: text,
           images: imagesToSend,
           image: imagesToSend[0] || "",
           mode: "chat",
@@ -369,11 +388,12 @@ export default function AiChatSheet({
             </div>
           ))}
 
+          {/* Dynamic Animated Status Indicator */}
           {loading && (
             <div className="flex items-start gap-2">
-              <div className="bg-[#1e293b] border border-slate-700 rounded-2xl rounded-tl-xs p-3 text-xs text-slate-400 flex items-center gap-2">
-                <IconSpinner className="w-3.5 h-3.5 text-teal-400" />
-                <span>Faculty solution calculate kar rahe hain...</span>
+              <div className="bg-[#1e293b] border border-teal-500/40 rounded-2xl rounded-tl-xs p-3 text-xs text-teal-300 flex items-center gap-2.5 shadow-lg">
+                <IconSpinner className="w-4 h-4 text-teal-400" />
+                <span className="animate-pulse font-medium">{loadingMessages[loadingStep]}</span>
               </div>
             </div>
           )}
