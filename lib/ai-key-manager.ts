@@ -6,7 +6,7 @@ interface KeyHealth {
 }
 
 const keyHealthMap = new Map<string, KeyHealth>();
-const COOLDOWN_MS = 60 * 1000; // 1 minute cooldown on 429 / rate-limit
+const COOLDOWN_MS = 60 * 1000; // 1 minute cooldown
 
 function cleanKey(raw?: string): string {
   if (!raw) return "";
@@ -14,26 +14,20 @@ function cleanKey(raw?: string): string {
 }
 
 /**
- * Chat Doubt ke liye dedicated keys:
- * 1. GEMINI_API_KEY_DOUBT ya GEMINI_API_KEY_DOUT
- * 2. Standard GEMINI_API_KEY
- * 3. GEMINI_API_KEYS pool (agar pehle wale busy hon)
+ * Chat Doubt Gemini Keys (Checks all possible env variable names)
  */
 export function getChatGeminiKeys(): string[] {
   const keys: string[] = [];
-  
-  // 1. Dedicated Doubt Keys (dono spellings handled)
+
   const doubtKey = cleanKey(process.env.GEMINI_API_KEY_DOUBT || process.env.GEMINI_API_KEY_DOUT);
   if (doubtKey) keys.push(doubtKey);
 
-  // 2. Standard Gemini Key
   const mainKey = cleanKey(process.env.GEMINI_API_KEY);
   if (mainKey && !keys.includes(mainKey)) keys.push(mainKey);
 
-  // 3. Pool keys fallback
   const poolRaw = process.env.GEMINI_API_KEYS || "";
   if (poolRaw) {
-    const pool = poolRaw.split(",").map(k => cleanKey(k)).filter(Boolean);
+    const pool = poolRaw.split(",").map((k) => cleanKey(k)).filter(Boolean);
     for (const k of pool) {
       if (!keys.includes(k)) keys.push(k);
     }
@@ -43,22 +37,22 @@ export function getChatGeminiKeys(): string[] {
 }
 
 /**
- * Live Video Call ke liye dedicated keys (chheda nahi gaya)
+ * Live Video Call Gemini Keys
  */
 export function getLiveGeminiKeys(): string[] {
   const raw = process.env.LIVE_GEMINI_API_KEYS || process.env.GEMINI_API_KEYS || "";
-  return raw.split(",").map(k => cleanKey(k)).filter(Boolean);
+  return raw.split(",").map((k) => cleanKey(k)).filter(Boolean);
 }
 
 /**
- * Groq Backup Key (GROQ_API_KEY ya GROK_API_KEY)
+ * Groq Key (GROQ_API_KEY ya GROK_API_KEY)
  */
 export function getGroqKey(): string {
   return cleanKey(process.env.GROQ_API_KEY || process.env.GROK_API_KEY);
 }
 
 /**
- * OpenRouter Backup Key
+ * OpenRouter Key
  */
 export function getOpenRouterKey(): string {
   return cleanKey(process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY);
@@ -91,4 +85,34 @@ export function reportKeyFailure(key: string, isRateLimit: boolean = false) {
 export function reportKeySuccess(key: string) {
   if (!key) return;
   keyHealthMap.delete(key);
+}
+
+// ==========================================
+// BACKWARD-COMPATIBILITY EXPORTS (Prevents any build break)
+// ==========================================
+export function getActiveLiveKey(): string | null {
+  const keys = getLiveGeminiKeys();
+  return getHealthyKey(keys);
+}
+
+export function getActiveChatKey(): string | null {
+  const keys = getChatGeminiKeys();
+  return getHealthyKey(keys);
+}
+
+export function getAllAvailableGeminiKeys(): string[] {
+  const chat = getChatGeminiKeys();
+  const live = getLiveGeminiKeys();
+  return Array.from(new Set([...chat, ...live]));
+}
+
+export function markKeyRateLimited(key: string) {
+  reportKeyFailure(key, true);
+}
+
+export function getBackupProviders() {
+  return {
+    groq: getGroqKey(),
+    openrouter: getOpenRouterKey(),
+  };
 }
