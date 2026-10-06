@@ -1,8 +1,8 @@
 // app/api/ai-doubt/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getActiveLiveKey,
-  getActiveChatKey,
+  getAllAvailableGeminiKeys,
+  getActiveGeminiKeyForDoubt,
   markKeyRateLimited,
   getBackupProviders,
 } from "@/lib/ai-key-manager";
@@ -11,7 +11,22 @@ export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, query, image, isLive, targetExam, studentContext } = await req.json();
+    const { messages, query, image, targetExam, studentContext } = await req.json();
+
+    const allKeys = getAllAvailableGeminiKeys();
+    const { groq, openRouter } = getBackupProviders();
+
+    // DIAGNOSTIC CHECK: Agar Cloudflare mein koi key nahi mili
+    if (allKeys.length === 0 && !groq && !openRouter) {
+      console.error("[AI-Doubt] No API keys found in process.env!");
+      return NextResponse.json(
+        {
+          reply:
+            "⚠️ Cloudflare Environment Variables active nahi huye hain! Cloudflare Pages mein jaakar 'Retry Deployment' karein.",
+        },
+        { status: 503 }
+      );
+    }
 
     const examName = targetExam || studentContext?.targetExam || "JEE/NEET";
 
@@ -25,30 +40,31 @@ BEHAVIOR RULES:
     const hasImage = Boolean(image);
 
     // ─────────────────────────────────────────────────────────────
-    // 1. PROVIDER 1: GOOGLE GEMINI (With Model Fallback: 2.0 -> 1.5)
+    // 1. PROVIDER 1: GOOGLE GEMINI (With inlineData fix & 2.0 -> 1.5)
     // ─────────────────────────────────────────────────────────────
     const geminiModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
-    const maxGeminiAttempts = isLive ? 4 : 2;
+    const maxAttempts = Math.min(allKeys.length || 1, 4);
     let attempts = 0;
 
-    while (attempts < maxGeminiAttempts) {
+    while (attempts < maxAttempts) {
       attempts++;
-      const apiKey = isLive ? getActiveLiveKey() : getActiveChatKey();
+      const apiKey = getActiveGeminiKeyForDoubt();
       if (!apiKey) break;
 
-      // Gemini Model Cascade Loop (2.0-flash -> 1.5-flash)
       for (const modelName of geminiModels) {
         try {
           const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
           const parts: any[] = [];
           if (query) parts.push({ text: query });
+
+          // CORRECT CAMELCASE FORMAT FOR GEMINI REST API: inlineData & mimeType
           if (image) {
             const match = image.match(/^data:image\/(\w+);base64,(.+)$/);
             if (match) {
               parts.push({
-                inline_data: {
-                  mime_type: `image/${match[1]}`,
+                inlineData: {
+                  mimeType: `image/${match[1]}`,
                   data: match[2],
                 },
               });
@@ -73,17 +89,20 @@ BEHAVIOR RULES:
           });
 
           if (res.status === 429 || res.status === 403) {
-            console.warn(`[AI-Doubt] Gemini 429 on key. Excluding key...`);
+            console.warn(`[AI-Doubt] Key 429. Marking cooldown...`);
             markKeyRateLimited(apiKey, 60);
-            break; // Break inner model loop to rotate to another key
+            break; // Switch to next key in pool
           }
 
           if (res.status === 503 || res.status === 500) {
-            console.warn(`[AI-Doubt] ${modelName} overloaded (503). Cascading to next Gemini model...`);
-            continue; // Try 1.5-flash on same key
+            continue; // Cascade from 2.0 to 1.5
           }
 
-          if (!res.ok) continue;
+          if (!res.ok) {
+            const errBody = await res.text();
+            console.error(`[AI-Doubt] Gemini ${modelName} error (${res.status}):`, errBody);
+            continue;
+          }
 
           const data = await res.json();
           const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -91,15 +110,13 @@ BEHAVIOR RULES:
             return NextResponse.json({ reply, provider: `gemini-${modelName}`, success: true });
           }
         } catch (err) {
-          console.error(`[AI-Doubt] Gemini ${modelName} error:`, err);
+          console.error(`[AI-Doubt] Gemini ${modelName} exception:`, err);
         }
       }
     }
 
-    const { groq, openRouter } = getBackupProviders();
-
     // ─────────────────────────────────────────────────────────────
-    // 2. PROVIDER 2: GROQ (Smart Vision vs Text Model Cascade)
+    // 2. PROVIDER 2: GROQ FALLBACK
     // ─────────────────────────────────────────────────────────────
     if (groq) {
       const groqModels = hasImage
@@ -108,7 +125,6 @@ BEHAVIOR RULES:
 
       for (const groqModel of groqModels) {
         try {
-          console.log(`[AI-Doubt] Invoking Groq Fallback Model: ${groqModel}...`);
           let groqMessages: any[] = [];
 
           if (hasImage) {
@@ -125,7 +141,7 @@ BEHAVIOR RULES:
           } else {
             groqMessages = [
               { role: "system", content: systemPrompt },
-              { role: "user", content: query || "Explain this topic" },
+              { role: "user", content: query || "Explain this concept" },
             ];
           }
 
@@ -149,32 +165,23 @@ BEHAVIOR RULES:
             if (gReply) {
               return NextResponse.json({ reply: gReply, provider: `groq-${groqModel}`, success: true });
             }
-          } else {
-            console.warn(`[AI-Doubt] Groq ${groqModel} returned status ${groqRes.status}. Trying next...`);
           }
         } catch (gErr) {
-          console.error(`[AI-Doubt] Groq ${groqModel} error:`, gErr);
+          console.error(`[AI-Doubt] Groq exception:`, gErr);
         }
       }
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 3. PROVIDER 3: OPENROUTER (Deep Multi-Model Cascade)
+    // 3. PROVIDER 3: OPENROUTER FALLBACK
     // ─────────────────────────────────────────────────────────────
     if (openRouter) {
       const orModels = hasImage
-        ? [
-            "meta-llama/llama-3.2-11b-vision-instruct:free",
-            "google/gemini-2.0-flash-exp:free",
-          ]
-        : [
-            "deepseek/deepseek-chat:free",
-            "meta-llama/llama-3.3-70b-instruct:free",
-          ];
+        ? ["meta-llama/llama-3.2-11b-vision-instruct:free"]
+        : ["deepseek/deepseek-chat:free", "meta-llama/llama-3.3-70b-instruct:free"];
 
       for (const orModel of orModels) {
         try {
-          console.log(`[AI-Doubt] Invoking OpenRouter Fallback Model: ${orModel}...`);
           let orMessages: any[] = [];
 
           if (hasImage) {
@@ -219,13 +226,13 @@ BEHAVIOR RULES:
             }
           }
         } catch (orErr) {
-          console.error(`[AI-Doubt] OpenRouter ${orModel} error:`, orErr);
+          console.error(`[AI-Doubt] OpenRouter exception:`, orErr);
         }
       }
     }
 
     return NextResponse.json(
-      { reply: "Abhi sabhi AI faculties busy hain. Kripya 1 minute baad dobara puchiye!" },
+      { reply: "Abhi sabhi AI faculties thode busy hain. Kripya 1 minute baad dobara puchiye!" },
       { status: 503 }
     );
   } catch (error: any) {
