@@ -122,7 +122,7 @@ async function tryGemini(
   return text;
 }
 
-// 2. Groq Caller (Ultra-Fast for Pure Text)
+// 2. Groq Production Caller (Free & Working)
 async function tryGroq(
   groqKey: string,
   model: string,
@@ -168,7 +168,7 @@ async function tryGroq(
   return text;
 }
 
-// 3. OpenRouter Caller (Free Models)
+// 3. OpenRouter Free Caller
 async function tryOpenRouter(
   orKey: string,
   model: string,
@@ -258,44 +258,63 @@ export async function POST(req: NextRequest) {
     const groqKey = getGroqKey();
     const orKey = getOpenRouterKey();
 
-    // 1. Google Gemini Live Validated Models
+    // 1. Google Gemini Models
     const geminiModels = ["gemini-3.8-flash", "gemini-3.5-flash"];
 
-    // 2. Groq Currently Active Free Models
-    const groqModels = ["llama-3.2-3b-preview", "llama-3.2-1b-preview", "deepseek-r1-distill-llama-70b"];
+    // 2. Groq Production Active Free Models
+    const groqModels = ["llama-3.3-70b-versatile", "qwen-2.5-32b", "mistral-saba-24b"];
 
-    // 3. OpenRouter Currently Active Free Models
+    // 3. OpenRouter Free Models (Traffic ones preserved + new fast free added)
     const orTextModels = [
-      "nvidia/nemotron-3.5-lightning:free",
       "google/gemma-4-31b-it:free",
       "google/gemma-4-26b-a4b-it:free",
+      "liquid/lfm-2.5-2.6b:free",
+      "nvidia/nemotron-3.5-lightning:free",
     ];
     const orVisionModels = ["google/gemini-2.0-flash-exp:free"];
 
     const errorLogs: string[] = [];
 
     // ========================================================
-    // PATH A: PURE TEXT DOUBT (Gemini ➔ Groq ➔ OpenRouter)
+    // PATH A: PURE TEXT DOUBT
     // ========================================================
     if (!hasImages) {
-      // 1. Google Gemini (3.8 ➔ 3.5 Backup)
-      if (geminiKeys.length > 0) {
-        for (const key of geminiKeys) {
-          for (const model of geminiModels) {
-            try {
-              const reply = await tryGemini(key, model, userText, []);
-              reportKeySuccess(key);
-              return NextResponse.json({ reply, provider: `gemini-${model}` });
-            } catch (err: any) {
-              const isRateLimit = err?.message?.includes("429");
-              reportKeyFailure(key, isRateLimit);
-              errorLogs.push(err?.message || String(err));
+      // 1. Google Gemini with Smart 503 Skip Logic
+      let geminiHit503Spike = false;
+
+      for (let i = 0; i < geminiKeys.length; i++) {
+        // Agar 1st key ke dono models par 503 spike tha, toh 2nd key skip ho jayegi
+        if (geminiHit503Spike) break;
+
+        const key = geminiKeys[i];
+        let allModelsOnThisKeyHit503 = true;
+
+        for (const model of geminiModels) {
+          try {
+            const reply = await tryGemini(key, model, userText, []);
+            reportKeySuccess(key);
+            return NextResponse.json({ reply, provider: `gemini-${model}` });
+          } catch (err: any) {
+            const msg = err?.message || String(err);
+            const is503 = msg.includes("503") || msg.includes("high demand");
+            const is429 = msg.includes("429");
+
+            if (!is503) {
+              allModelsOnThisKeyHit503 = false;
             }
+            if (is429) {
+              reportKeyFailure(key, true);
+            }
+            errorLogs.push(msg);
           }
+        }
+
+        if (allModelsOnThisKeyHit503) {
+          geminiHit503Spike = true;
         }
       }
 
-      // 2. Groq Active Free Models (Superfast)
+      // 2. Groq Production Models (0.4s Ultra-Fast)
       if (groqKey) {
         for (const model of groqModels) {
           try {
@@ -307,7 +326,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 3. OpenRouter Active Free Models
+      // 3. OpenRouter Free Models (Preserved + Expanded)
       if (orKey) {
         for (const model of orTextModels) {
           try {
