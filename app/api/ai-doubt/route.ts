@@ -8,13 +8,16 @@ import {
 
 export const runtime = "edge";
 
-const SYSTEM_PROMPT = `Tu PrepWise ka friendly aur expert Teacher hai. 
-Students JEE, NEET, aur Boards ki taiyari kar rahe hain.
-RULES:
-1. Sidha clear answer aur step-by-step calculation de.
-2. Equations aur mathematical terms ko clean text/Unicode format mein likh jaise: x² + 2x + 1 = 0, √(49) = 7, a/b, ±, →, °C. LaTeX delimiters ($ ya $$ ya \\frac) mat use kar taaki mobile screen par clean dikhe.
-3. Step 1, Step 2 karke bold headings aur bullet points use kar.
-4. Answer short, crisp aur visually easy-to-read hona chahiye. Bina faltu ki formality ke direct guide kar.`;
+const SYSTEM_PROMPT = `Tu PrepWise ka highly qualified Senior Academic Faculty hai jo JEE, NEET, aur Boards ke students ko padhata hai.
+RULES FOR PERFECT ANSWERS:
+1. Academic Accuracy: Pure NCERT aur Standard Indian Syllabus ke authentic facts aur accurate definitions use kar (jaise Koshika = Cell, Jeevan ki moolbhoot sanrachnatmak aur kriyatmak ikai / Structural and functional unit of life). Faltu ya galat translation mat kar.
+2. Clean Formatting:
+   - Mukhya headings ko **Heading Name** karke likh (e.g. **Paribhasha (Definition)**, **Mukhya Bindu**, **Udaharan**).
+   - Steps ko 'Step 1:', 'Step 2:' karke likh.
+   - Bullet points ke liye '- ' use kar.
+   - Formula ya Important baat ke liye 'Formula:' ya 'Important:' prefix use kar.
+3. Math & Science Symbols: Clean readable Unicode text use kar jaise x² + y² = r², √(49) = 7, a/b, ±, →, °C. Kabhi bhi LaTeX delimiters ($ ya $$ ya \\frac) mat use kar.
+4. Tone: Helpful, motivating, aur clear student-friendly Hinglish. Seedha to-the-point solution de bina lambi formality ya robotic greetings ke.`;
 
 // 1. GROQ PROVIDER (Priority 1 - Fastest 0.4s response)
 async function callGroq(prompt: string, hasImages: boolean, base64Images: { mimeType: string; data: string }[]): Promise<string> {
@@ -68,7 +71,6 @@ async function callCloudflareWorkersAi(prompt: string): Promise<string> {
   const config = getCloudflareWorkersAiConfig();
   if (!config) throw new Error("Cloudflare Workers AI credentials missing");
 
-  // Models to try: Meta Llama 3.1 8B, fallback to Mistral 7B
   const cfModels = [
     "@cf/meta/llama-3.1-8b-instruct",
     "@cf/mistral/mistral-7b-instruct-v0.1"
@@ -109,7 +111,7 @@ async function callCloudflareWorkersAi(prompt: string): Promise<string> {
   throw new Error(lastErr || "Workers AI failed");
 }
 
-// 3. GOOGLE GEMINI (Priority 3 - Multi-key JEE/NEET Reasoning)
+// 3. GOOGLE GEMINI (Priority 3 - JEE/NEET Multimodal Reasoning)
 async function callGemini(prompt: string, base64Images: { mimeType: string; data: string }[]): Promise<string> {
   const keys = getChatGeminiKeys();
   if (keys.length === 0) throw new Error("No Gemini Chat keys configured");
@@ -158,7 +160,7 @@ async function callGemini(prompt: string, base64Images: { mimeType: string; data
   throw new Error(lastErr || "All Gemini keys failed");
 }
 
-// 4. OPENROUTER (Priority 4 - Safety Net)
+// 4. OPENROUTER (Priority 4 - Safety Net Backup)
 async function callOpenRouter(prompt: string, hasImages: boolean, base64Images: { mimeType: string; data: string }[]): Promise<string> {
   const apiKey = getOpenRouterKey();
   if (!apiKey) throw new Error("OpenRouter API key missing");
@@ -223,7 +225,7 @@ export async function POST(req: NextRequest) {
     const prompt = (body.message || body.prompt || body.question || "").trim();
     const images: string[] = Array.isArray(body.images) ? body.images : [];
 
-    // Parse base64 safely without catastrophic backtracking
+    // Clean base64 extraction without regex backtracking
     const base64Images: { mimeType: string; data: string }[] = [];
     for (const raw of images) {
       if (typeof raw === "string" && raw.startsWith("data:")) {
@@ -251,7 +253,7 @@ export async function POST(req: NextRequest) {
 
     const errors: string[] = [];
 
-    // 1. GROQ (Priority 1)
+    // 1. GROQ
     try {
       const reply = await callGroq(finalPrompt, hasImages, base64Images);
       return NextResponse.json({ reply, provider: "groq" }, { status: 200 });
@@ -259,7 +261,7 @@ export async function POST(req: NextRequest) {
       errors.push(`Groq: ${e.message}`);
     }
 
-    // 2. CLOUDFLARE WORKERS AI (Priority 2 - Text Doubts)
+    // 2. CLOUDFLARE WORKERS AI (For Pure Text Doubts)
     if (!hasImages) {
       try {
         const reply = await callCloudflareWorkersAi(finalPrompt);
@@ -269,7 +271,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. GOOGLE GEMINI (Priority 3 - Handles both Text & Diagram/Images)
+    // 3. GOOGLE GEMINI (Handles Text & Multimodal Images)
     try {
       const reply = await callGemini(finalPrompt, base64Images);
       return NextResponse.json({ reply, provider: "gemini" }, { status: 200 });
@@ -277,7 +279,7 @@ export async function POST(req: NextRequest) {
       errors.push(`Gemini: ${e.message}`);
     }
 
-    // 4. OPENROUTER (Priority 4 - Final Fallback)
+    // 4. OPENROUTER (Safety Net)
     try {
       const reply = await callOpenRouter(finalPrompt, hasImages, base64Images);
       return NextResponse.json({ reply, provider: "openrouter" }, { status: 200 });
@@ -285,7 +287,7 @@ export async function POST(req: NextRequest) {
       errors.push(`OpenRouter: ${e.message}`);
     }
 
-    // If all fail
+    // Complete Error Diagnostics if all fail
     return NextResponse.json(
       {
         reply: `⚠️ Sabhi AI Providers connect nahi ho paaye:\n• ${errors.join("\n• ")}`
