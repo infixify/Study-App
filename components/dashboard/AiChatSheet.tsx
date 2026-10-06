@@ -2,16 +2,57 @@
 "use client";
 
 import React, { useState, useRef, useEffect, ChangeEvent } from "react";
-import {
-  X,
-  Send,
-  Camera,
-  Image as ImageIcon,
-  Video,
-  Sparkles,
-  RefreshCw,
-  Trash2,
-} from "lucide-react";
+
+// Inline Zero-Dependency SVG Icons
+function IconClose({ className = "w-5 h-5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
+function IconSend({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+    </svg>
+  );
+}
+
+function IconCamera({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  );
+}
+
+function IconImage({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+  );
+}
+
+function IconSparkles({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+    </svg>
+  );
+}
+
+function IconSpinner({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={`animate-spin ${className}`} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+  );
+}
 
 interface Message {
   id: string;
@@ -69,10 +110,8 @@ function formatTextbookNotes(text: string): string {
   if (!text) return "";
   let clean = text;
 
-  // Remove markdown code fence if wrapped
   clean = clean.replace(/```(?:markdown|latex|text)?\n([\s\S]*?)\n```/g, "$1");
 
-  // Common LaTeX math symbols to Unicode
   clean = clean
     .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)")
     .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
@@ -115,7 +154,6 @@ function formatTextbookNotes(text: string): string {
     .replace(/_f\b/g, "ᶠ")
     .replace(/_i\b/g, "ⁱ");
 
-  // Remove raw dollar signs used in LaTeX
   clean = clean.replace(/\$\$?/g, "");
 
   return clean;
@@ -263,7 +301,7 @@ export default function AiChatSheet({
         <div className="px-4 py-3 bg-[#1e293b] border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold">
-              <Sparkles className="w-4 h-4" />
+              <IconSparkles className="w-4 h-4" />
             </div>
             <div>
               <h2 className="text-sm font-semibold tracking-wide">AI Doubt Faculty</h2>
@@ -279,7 +317,7 @@ export default function AiChatSheet({
               onClick={onClose}
               className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
             >
-              <X className="w-5 h-5" />
+              <IconClose className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -298,7 +336,7 @@ export default function AiChatSheet({
                     : "bg-[#1e293b] text-slate-200 border border-slate-700/80 rounded-tl-xs shadow-md font-sans"
                 }`}
               >
-                {/* User Images if any */}
+                {/* User Images */}
                 {m.images && m.images.length > 0 && (
                   <div className="flex gap-2 mb-2 flex-wrap">
                     {m.images.map((img, idx) => (
@@ -327,7 +365,7 @@ export default function AiChatSheet({
           {loading && (
             <div className="flex items-start gap-2">
               <div className="bg-[#1e293b] border border-slate-700 rounded-2xl rounded-tl-xs p-3 text-xs text-slate-400 flex items-center gap-2">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-400" />
+                <IconSpinner className="w-3.5 h-3.5 text-teal-400" />
                 <span>Faculty solution calculate kar rahe hain...</span>
               </div>
             </div>
@@ -352,7 +390,7 @@ export default function AiChatSheet({
                   onClick={() => removeImage(idx)}
                   className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-0.5 shadow-md"
                 >
-                  <X className="w-3 h-3" />
+                  <IconClose className="w-3 h-3" />
                 </button>
               </div>
             ))}
@@ -387,7 +425,7 @@ export default function AiChatSheet({
               className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors disabled:opacity-40"
               title="Camera Se Photo Lein"
             >
-              <Camera className="w-4 h-4" />
+              <IconCamera className="w-4 h-4" />
             </button>
 
             {/* Gallery Upload Button */}
@@ -398,7 +436,7 @@ export default function AiChatSheet({
               className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors disabled:opacity-40"
               title="Gallery Se Photo Chunein"
             >
-              <ImageIcon className="w-4 h-4" />
+              <IconImage className="w-4 h-4" />
             </button>
 
             {/* Text Input */}
@@ -421,7 +459,7 @@ export default function AiChatSheet({
               disabled={loading || compressing || (!input.trim() && selectedImages.length === 0)}
               className="p-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-medium transition-colors disabled:opacity-40 disabled:hover:bg-teal-600"
             >
-              <Send className="w-4 h-4" />
+              <IconSend className="w-4 h-4" />
             </button>
           </form>
         </div>
