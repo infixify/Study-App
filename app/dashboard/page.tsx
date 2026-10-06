@@ -22,20 +22,22 @@ declare global {
 }
 
 // ─── HIGH-SPEED SWR IN-MEMORY CACHE (Eliminates Request Storms on Tab Switch) ───
-const CACHE_TTL_MS = 2 * 60 * 1000;
+const CACHE_TTL_MS = 1 * 60 * 1000; // 1 min memory, 3 min localStorage
+const CACHE_VERSION = "v3"; // bump this whenever you update daily_content structure
 const globalMemoryCache: Record<string, { timestamp: number; data: any }> = {};
 
 function getMemCache<T>(key: string): T | null {
-  const item = globalMemoryCache[key];
+  const vKey = `${key}_${CACHE_VERSION}`;
+  const item = globalMemoryCache[vKey];
   if (item && Date.now() - item.timestamp < CACHE_TTL_MS) {
     return item.data as T;
   }
   try {
-    const raw = localStorage.getItem(`pw_cache_${key}`);
+    const raw = localStorage.getItem(`pw_cache_${vKey}`);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Date.now() - parsed.timestamp < CACHE_TTL_MS * 3) {
-        globalMemoryCache[key] = parsed;
+        globalMemoryCache[vKey] = parsed;
         return parsed.data as T;
       }
     }
@@ -44,10 +46,17 @@ function getMemCache<T>(key: string): T | null {
 }
 
 function setMemCache<T>(key: string, data: T): void {
+  const vKey = `${key}_${CACHE_VERSION}`;
   const payload = { timestamp: Date.now(), data };
-  globalMemoryCache[key] = payload;
+  globalMemoryCache[vKey] = payload;
   try {
-    localStorage.setItem(`pw_cache_${key}`, JSON.stringify(payload));
+    // Clear old version keys
+    Object.keys(localStorage).forEach((k) => {
+      if (k.startsWith(`pw_cache_${key}`) && !k.endsWith(CACHE_VERSION)) {
+        localStorage.removeItem(k);
+      }
+    });
+    localStorage.setItem(`pw_cache_${vKey}`, JSON.stringify(payload));
   } catch (_) {}
 }
 
@@ -133,7 +142,6 @@ interface QuestionLogEntry {
 interface ContentCardItem {
   id: string;
   quote: string;
-  quote_source?: "human" | "anime";
   character: string;
   show: string;
   icon_or_sticker: string;
@@ -181,77 +189,15 @@ function saveDailyContentState(state: DailyContentState): void {
   } catch (_) {}
 }
 
-// ─── SHUFFLE-POINTER SYSTEM (No Hash Collisions, Guaranteed No-Repeat Until Full Cycle) ───
-// Uses a seeded Fisher-Yates shuffle stored in localStorage.
-// Pointer advances by 1 each day. On full cycle, reshuffles with new seed.
-
-function seededRandom(seed: number): () => number {
-  let s = seed;
-  return () => {
-    s = (s * 1664525 + 1013904223) & 0xffffffff;
-    return (s >>> 0) / 0xffffffff;
-  };
-}
-
-function shuffleDeck(length: number, seed: number): number[] {
-  const arr = Array.from({ length }, (_, i) => i);
-  const rand = seededRandom(seed);
-  for (let i = length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-interface ShufflePointerState {
-  deck: number[];
-  pointer: number;
-  deckLength: number;
-  lastDate: string;
-}
-
-function getShufflePointer(key: string, deckLength: number): number {
+function getDailyIndex(deckLength: number, salt: string): number {
   if (!deckLength) return 0;
-  const today = new Date().toISOString().split("T")[0];
-  const storageKey = `pw_shuffle_${key}`;
-  try {
-    const raw = localStorage.getItem(storageKey);
-    if (raw) {
-      const state: ShufflePointerState = JSON.parse(raw);
-      // Same day — return same index (deterministic within a day)
-      if (state.lastDate === today && state.deckLength === deckLength) {
-        return state.deck[state.pointer % state.deck.length] ?? 0;
-      }
-      // New day — advance pointer (or reshuffle if cycle complete)
-      const nextPointer = state.pointer + 1;
-      if (nextPointer >= state.deckLength || state.deckLength !== deckLength) {
-        // Full cycle done or deck size changed — reshuffle
-        const seed = Date.now() ^ (Math.random() * 0xffffffff);
-        const newDeck = shuffleDeck(deckLength, seed);
-        const newState: ShufflePointerState = { deck: newDeck, pointer: 0, deckLength, lastDate: today };
-        localStorage.setItem(storageKey, JSON.stringify(newState));
-        return newDeck[0];
-      }
-      const updatedState: ShufflePointerState = { ...state, pointer: nextPointer, lastDate: today, deckLength };
-      localStorage.setItem(storageKey, JSON.stringify(updatedState));
-      return state.deck[nextPointer] ?? 0;
-    }
-    // First time — create shuffle
-    const seed = Date.now() ^ (Math.random() * 0xffffffff);
-    const newDeck = shuffleDeck(deckLength, seed);
-    const newState: ShufflePointerState = { deck: newDeck, pointer: 0, deckLength, lastDate: today };
-    localStorage.setItem(storageKey, JSON.stringify(newState));
-    return newDeck[0];
-  } catch (_) {
-    return 0;
+  const dateStr = new Date().toISOString().split("T")[0];
+  const str = dateStr + salt;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) & 0xffffffff;
   }
-}
-
-// ─── HUMAN/ANIME ALTERNATION ───
-// Odd days → human quotes, Even days → anime quotes (from motivation deck)
-function getTodayQuoteSource(): "human" | "anime" {
-  const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000);
-  return dayOfYear % 2 === 0 ? "human" : "anime";
+  return Math.abs(hash) % deckLength;
 }
 
 const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
@@ -393,7 +339,6 @@ function HeroWidget({
             const item: ContentCardItem = {
               id: row.id,
               quote: row.quote,
-              quote_source: (row.quote_source as "human" | "anime") || "human",
               character: row.character,
               show: row.show || "PrepWise",
               icon_or_sticker: row.icon_or_sticker || "⚡",
@@ -429,12 +374,8 @@ function HeroWidget({
     if (mode === "motivation") {
       let item = motDeck.find((c) => c.id === saved.selectedMotivationId);
       if (!item) {
-        // Filter by today's source (human or anime), fallback to full deck if source empty
-        const todaySource = getTodayQuoteSource();
-        const sourceDeck = motDeck.filter((c) => (c.quote_source || "human") === todaySource);
-        const activeDeck = sourceDeck.length > 0 ? sourceDeck : motDeck;
-        const idx = getShufflePointer("motivation_" + todaySource, activeDeck.length);
-        item = activeDeck[idx] || activeDeck[0];
+        const idx = getDailyIndex(motDeck.length, "motivation");
+        item = motDeck[idx] || motDeck[0];
         const next: DailyContentState = { ...saved, motivationIndex: idx, selectedMotivationId: item.id };
         setDailyState(next);
         saveDailyContentState(next);
@@ -444,7 +385,7 @@ function HeroWidget({
     } else {
       let item = memDeck.find((c) => c.id === saved.selectedMemeId);
       if (!item) {
-        const idx = getShufflePointer("meme", memDeck.length);
+        const idx = getDailyIndex(memDeck.length, "meme");
         item = memDeck[idx] || memDeck[0];
         const next: DailyContentState = { ...saved, memeIndex: idx, selectedMemeId: item.id };
         setDailyState(next);
@@ -469,11 +410,8 @@ function HeroWidget({
     if (mode === "motivation") {
       if (saved.motivationCount >= QUOTE_LIMIT) { showLimit(); return; }
       const newCount = saved.motivationCount + 1;
-      const todaySource = getTodayQuoteSource();
-      const sourceDeck = motDeck.filter((c) => (c.quote_source || "human") === todaySource);
-      const activeDeck = sourceDeck.length > 0 ? sourceDeck : motDeck;
-      const nextIdx = (saved.motivationIndex + 1) % activeDeck.length;
-      const nextItem = activeDeck[nextIdx] || activeDeck[0];
+      const nextIdx = (saved.motivationIndex + 1) % motDeck.length;
+      const nextItem = motDeck[nextIdx] || motDeck[0];
       const next: DailyContentState = { ...saved, motivationIndex: nextIdx, motivationCount: newCount, selectedMotivationId: nextItem.id };
       setDailyState(next);
       saveDailyContentState(next);
@@ -646,11 +584,7 @@ function HeroWidget({
                 (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
                   <img
                     key={imgKey}
-                    src={
-                      currentItem.icon_or_sticker.includes("res.cloudinary.com")
-                        ? optimizeMediaUrl(currentItem.icon_or_sticker, 180)
-                        : currentItem.icon_or_sticker
-                    }
+                    src={optimizeMediaUrl(currentItem.icon_or_sticker, 180)}
                     alt=""
                     loading="lazy"
                     decoding="async"
