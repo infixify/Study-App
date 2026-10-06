@@ -1,36 +1,35 @@
 // app/api/ai-doubt/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { getActiveGeminiKey, markKeyRateLimited } from "@/lib/ai-key-manager";
+import {
+  getActiveLiveKey,
+  getActiveChatKey,
+  markKeyRateLimited,
+  getBackupProviders,
+} from "@/lib/ai-key-manager";
 
 export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, query, image, targetExam, studentContext } = await req.json();
+    const { messages, query, image, isLive, targetExam, studentContext } = await req.json();
 
     const examName = targetExam || studentContext?.targetExam || "JEE/NEET";
 
-    const systemPrompt = `You are the master AI Doubt Faculty for PrepWise (${examName}).
+    const systemPrompt = `You are the Master AI Doubt Faculty for PrepWise (${examName}).
 BEHAVIOR RULES:
-1. GREETINGS & SHORT TALK: If student says "Hello", "Hi", "Namaste" or greets without a question, reply warmly in 1 short sentence in Hinglish and politely ask them to show or ask their question.
-2. VOICE/CONCEPTUAL QUESTIONS: If student asks a conceptual, theoretical, or formula question verbally without showing a book/page, DO NOT ask them to show a page! Directly solve and explain it clearly.
-3. UNCLEAR VISUAL: If student says "solve this" but the camera image is completely blurry or blank, ask them to point the camera clearly at the question.
-4. QUESTION SOLVING: When solving an academic question:
-   - Provide a clear, step-by-step solution.
-   - Highlight final answer and shortcut/exam tip with "⚡ Exam Shortcut:".
-   - Keep tone energetic, encouraging, and mentor-like.
-   - Use Markdown for neat formulas.`;
+1. GREETINGS & SHORT TALK: If student greets ("Hello", "Hi", "Namaste") without a question, reply warmly in 1 short sentence in Hinglish and encourage them to show/ask their doubt.
+2. CONCEPTUAL/VOICE DOUBTS: If student asks verbally without showing a book/page, solve and explain it directly! DO NOT force them to show a page.
+3. UNCLEAR VISUAL: If student says "solve this" but the image is completely blurry or blank, politely ask them to focus camera on the question.
+4. ACADEMIC SOLUTION: Provide clear step-by-step solution, highlight final answer, and add an "⚡ Exam Shortcut:". Keep explanation encouraging and crisp.`;
 
+    // ── TIER 1 & TIER 2: GEMINI PRIMARY POOL & COMMON BACKUP ──
+    const maxGeminiAttempts = isLive ? 4 : 2;
     let attempts = 0;
-    const maxAttempts = 5; // Will try other keys if one gets 429
 
-    while (attempts < maxAttempts) {
+    while (attempts < maxGeminiAttempts) {
       attempts++;
-      const apiKey = getActiveGeminiKey();
-
-      if (!apiKey) {
-        break;
-      }
+      const apiKey = isLive ? getActiveLiveKey() : getActiveChatKey();
+      if (!apiKey) break;
 
       try {
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
@@ -60,7 +59,7 @@ BEHAVIOR RULES:
             parts: [{ text: systemPrompt }],
           },
           generationConfig: {
-            temperature: 0.4,
+            temperature: 0.35,
             maxOutputTokens: 1000,
           },
         };
@@ -72,29 +71,115 @@ BEHAVIOR RULES:
         });
 
         if (res.status === 429 || res.status === 403) {
-          console.warn(`[AI-Doubt] Key rate limited (${res.status}). Auto-excluding and retrying next key...`);
+          console.warn(`[AI-Doubt] Gemini 429 hit. Auto-excluding key...`);
           markKeyRateLimited(apiKey, 60);
-          continue; // Instantly retry next key!
+          continue; // Instantly retry next key in pool
         }
 
-        if (!res.ok) {
-          const errText = await res.text();
-          console.error("[AI-Doubt] Gemini API error:", errText);
-          continue;
-        }
+        if (!res.ok) continue;
 
         const data = await res.json();
         const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (reply) {
-          return NextResponse.json({ reply, success: true });
+          return NextResponse.json({ reply, provider: "gemini", success: true });
         }
       } catch (err) {
-        console.error("[AI-Doubt] Fetch exception:", err);
+        console.error("[AI-Doubt] Gemini attempt failed:", err);
+      }
+    }
+
+    const { groq, openRouter } = getBackupProviders();
+
+    // ── TIER 3: GROQ BACKUP (Llama 3.2 Vision) ──
+    if (groq) {
+      try {
+        console.log("[AI-Doubt] Falling back to Tier 3: Groq...");
+        const groqContent: any[] = [];
+        if (query) groqContent.push({ type: "text", text: query });
+        if (image) {
+          groqContent.push({
+            type: "image_url",
+            image_url: { url: image },
+          });
+        }
+        if (groqContent.length === 0) groqContent.push({ type: "text", text: "Hello" });
+
+        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${groq}`,
+          },
+          body: JSON.stringify({
+            model: "llama-3.2-11b-vision-preview",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: groqContent },
+            ],
+            temperature: 0.3,
+            max_tokens: 900,
+          }),
+        });
+
+        if (groqRes.ok) {
+          const gData = await groqRes.json();
+          const gReply = gData.choices?.[0]?.message?.content;
+          if (gReply) {
+            return NextResponse.json({ reply: gReply, provider: "groq-backup", success: true });
+          }
+        }
+      } catch (gErr) {
+        console.error("[AI-Doubt] Groq backup failed:", gErr);
+      }
+    }
+
+    // ── TIER 4: OPENROUTER BACKUP ──
+    if (openRouter) {
+      try {
+        console.log("[AI-Doubt] Falling back to Tier 4: OpenRouter...");
+        const orContent: any[] = [];
+        if (query) orContent.push({ type: "text", text: query });
+        if (image) {
+          orContent.push({
+            type: "image_url",
+            image_url: { url: image },
+          });
+        }
+        if (orContent.length === 0) orContent.push({ type: "text", text: "Hello" });
+
+        const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${openRouter}`,
+            "HTTP-Referer": "https://eterprep.pages.dev",
+            "X-Title": "PrepWise AI Doubt Faculty",
+          },
+          body: JSON.stringify({
+            model: "meta-llama/llama-3.2-11b-vision-instruct:free",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: orContent },
+            ],
+            temperature: 0.3,
+            max_tokens: 900,
+          }),
+        });
+
+        if (orRes.ok) {
+          const orData = await orRes.json();
+          const orReply = orData.choices?.[0]?.message?.content;
+          if (orReply) {
+            return NextResponse.json({ reply: orReply, provider: "openrouter-backup", success: true });
+          }
+        }
+      } catch (orErr) {
+        console.error("[AI-Doubt] OpenRouter backup failed:", orErr);
       }
     }
 
     return NextResponse.json(
-      { reply: "Filhaal sabhi AI faculties thode busy hain. Kripya 1 minute baad dobara puchiye!" },
+      { reply: "Abhi sabhi AI faculties thode busy hain. Kripya 1 minute baad dobara puchiye!" },
       { status: 503 }
     );
   } catch (error: any) {
