@@ -1,148 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  getImageGeminiKeys,
   getChatGeminiKeys,
   getGroqKey,
+  getSambaNovaKey,
   getCloudflareWorkersAiConfig,
+  getCloudflareImageAiConfig,
   getOpenRouterKey,
 } from "@/lib/ai-key-manager";
 
 export const runtime = "edge";
 
-// 1. GROQ PROVIDER (Priority 1 - Tested Active Free Models)
-async function callGroq(
-  prompt: string,
-  hasImages: boolean,
-  base64Images: { mimeType: string; data: string }[],
-  systemPrompt: string
-): Promise<string> {
-  const apiKey = getGroqKey();
-  if (!apiKey) throw new Error("Groq API key missing");
+const BASE_PROMPT = `Tu PrepWise ka highly qualified Senior Academic Faculty hai jo JEE, NEET aur Boards padhata hai.
+RULES FOR PERFECT ANSWERS:
+1. Academic Accuracy: NCERT aur standard formulas use kar (e.g. Koshika = Cell, Jeevan ki buniyadi ikai).
+2. Clean Formatting:
+   - Headings ko **Heading Name** karke likh.
+   - Steps ko 'Step 1:', 'Step 2:' likh.
+   - Formula ya Note ke liye 'Formula:' ya 'Important:' likh.
+   - Points ke liye '- ' bullet use kar.
+3. Math Symbols: Clean Unicode use kar (x², √(49)=7, a/b, ±, →, °C). LaTeX delimiters ($ ya $$ ya \\frac) mat use kar.
+4. Tone: Helpful aur clear Hinglish. Seedha step-by-step solution de.`;
 
-  const cleanKey = apiKey.replace(/["'\r\n]/g, "").trim();
-
-  // Active production free models on Groq
-  const modelsToTry = hasImages
-    ? ["llama-3.2-11b-vision-preview"]
-    : ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"];
-
-  let lastErr = "";
-  for (const model of modelsToTry) {
-    try {
-      let content: any = prompt;
-      if (hasImages) {
-        const parts: any[] = [{ type: "text", text: prompt }];
-        for (const img of base64Images) {
-          parts.push({
-            type: "image_url",
-            image_url: { url: `data:${img.mimeType};base64,${img.data}` },
-          });
-        }
-        content = parts;
-      }
-
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${cleanKey}`,
-          "Content-Type": "application/json",
-          "User-Agent": "PrepWise/1.0",
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content },
-          ],
-          temperature: 0.3,
-          max_tokens: 1500,
-        }),
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        lastErr = `Groq ${model} ${res.status}: ${errText.slice(0, 100)}`;
-        continue;
-      }
-
-      const data = await res.json();
-      const text = data?.choices?.[0]?.message?.content?.trim();
-      if (text) return text;
-    } catch (e: any) {
-      lastErr = e?.message || String(e);
-    }
-  }
-
-  throw new Error(lastErr || "All Groq models failed");
+interface ImagePart {
+  mimeType: string;
+  data: string;
 }
 
-// 2. CLOUDFLARE WORKERS AI (Priority 2 - 100% Free Edge Llama 3.1 & Mistral)
-async function callCloudflareWorkersAi(prompt: string, systemPrompt: string): Promise<string> {
-  const config = getCloudflareWorkersAiConfig();
-  if (!config) throw new Error("Cloudflare Workers AI credentials missing");
+// ---------------- VISION CALLERS ----------------
 
-  const cfModels = [
-    "@cf/meta/llama-3.1-8b-instruct",
-    "@cf/mistral/mistral-7b-instruct-v0.1",
-  ];
-
-  let lastErr = "";
-  for (const model of cfModels) {
-    try {
-      const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/run/${model}`;
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.apiToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: prompt },
-          ],
-        }),
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        lastErr = `WorkersAI ${model} ${res.status}: ${errText.slice(0, 100)}`;
-        continue;
-      }
-
-      const data = await res.json();
-      const text = data?.result?.response?.trim();
-      if (text) return text;
-    } catch (e: any) {
-      lastErr = e?.message || String(e);
-    }
-  }
-
-  throw new Error(lastErr || "Workers AI failed");
-}
-
-// 3. GOOGLE GEMINI (Priority 3 - Multimodal Reasoning)
-async function callGemini(
-  prompt: string,
-  base64Images: { mimeType: string; data: string }[],
-  systemPrompt: string
-): Promise<string> {
-  const keys = getChatGeminiKeys();
-  if (keys.length === 0) throw new Error("No Gemini Chat keys configured");
+// 1. Google Gemini Vision (Priority 1 for Images)
+async function callGeminiVision(prompt: string, images: ImagePart[]): Promise<{ reply: string; model: string }> {
+  const keys = getImageGeminiKeys();
+  if (keys.length === 0) throw new Error("No Gemini Image key found");
 
   const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
   let lastErr = "";
 
-  for (const rawKey of keys) {
-    const key = rawKey.replace(/["'\r\n]/g, "").trim();
+  for (const key of keys) {
     for (const model of models) {
       try {
         const parts: any[] = [{ text: prompt }];
-        for (const img of base64Images) {
+        for (const img of images) {
           parts.push({
-            inlineData: {
-              mimeType: img.mimeType,
-              data: img.data,
-            },
+            inlineData: { mimeType: img.mimeType, data: img.data }
           });
         }
 
@@ -151,137 +52,302 @@ async function callGemini(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents: [{ parts }],
-          }),
+            systemInstruction: { parts: [{ text: BASE_PROMPT }] },
+            contents: [{ parts }]
+          })
         });
 
         if (!res.ok) {
-          const errBody = await res.text();
-          lastErr = `Gemini ${model} ${res.status}: ${errBody.slice(0, 100)}`;
+          const errText = await res.text();
+          lastErr = `${model} ${res.status}: ${errText.slice(0, 90)}`;
           continue;
         }
 
         const data = await res.json();
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (text) return text;
+        if (text) return { reply: text, model };
       } catch (e: any) {
         lastErr = e?.message || String(e);
       }
     }
   }
-
-  throw new Error(lastErr || "All Gemini keys failed");
+  throw new Error(lastErr || "Gemini Vision failed");
 }
 
-// 4. OPENROUTER (Priority 4 - Final Fallback)
-async function callOpenRouter(
-  prompt: string,
-  hasImages: boolean,
-  base64Images: { mimeType: string; data: string }[],
-  systemPrompt: string
-): Promise<string> {
-  const apiKey = getOpenRouterKey();
-  if (!apiKey) throw new Error("OpenRouter API key missing");
+// 2. Groq Vision
+async function callGroqVision(prompt: string, images: ImagePart[]): Promise<{ reply: string; model: string }> {
+  const apiKey = getGroqKey();
+  if (!apiKey) throw new Error("Groq API key missing");
 
-  const cleanKey = apiKey.replace(/["'\r\n]/g, "").trim();
-  const models = hasImages
-    ? ["google/gemini-2.0-flash-001", "meta-llama/llama-3.2-11b-vision-instruct:free"]
-    : ["meta-llama/llama-3.1-8b-instruct:free", "mistralai/mistral-7b-instruct:free"];
+  const models = ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"];
+  const userContent: any[] = [{ type: "text", text: prompt }];
+  for (const img of images) {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: `data:${img.mimeType};base64,${img.data}` }
+    });
+  }
 
   let lastErr = "";
   for (const model of models) {
     try {
-      let content: any = prompt;
-      if (hasImages) {
-        content = [{ type: "text", text: prompt }];
-        for (const img of base64Images) {
-          content.push({
-            type: "image_url",
-            image_url: { url: `data:${img.mimeType};base64,${img.data}` },
-          });
-        }
-      }
-
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${cleanKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://eterprep.pages.dev",
-          "X-Title": "PrepWise AI Doubt",
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           model,
           messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content },
+            { role: "system", content: BASE_PROMPT },
+            { role: "user", content: userContent }
           ],
-          temperature: 0.3,
-        }),
+          temperature: 0.2,
+          max_tokens: 1500
+        })
       });
 
       if (!res.ok) {
         const errText = await res.text();
-        lastErr = `OpenRouter ${model} ${res.status}: ${errText.slice(0, 100)}`;
+        lastErr = `${model} ${res.status}: ${errText.slice(0, 90)}`;
         continue;
       }
 
       const data = await res.json();
       const text = data?.choices?.[0]?.message?.content?.trim();
-      if (text) return text;
+      if (text) return { reply: text, model };
     } catch (e: any) {
       lastErr = e?.message || String(e);
     }
   }
-
-  throw new Error(lastErr || "All OpenRouter models failed");
+  throw new Error(lastErr || "Groq Vision failed");
 }
 
-// MAIN POST ROUTE
+// 3. SambaNova Cloud Vision
+async function callSambaNovaVision(prompt: string, images: ImagePart[]): Promise<{ reply: string; model: string }> {
+  const apiKey = getSambaNovaKey();
+  if (!apiKey) throw new Error("SambaNova API key missing");
+
+  const model = "Llama-3.2-11B-Vision-Instruct";
+  const userContent: any[] = [{ type: "text", text: prompt }];
+  for (const img of images) {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: `data:${img.mimeType};base64,${img.data}` }
+    });
+  }
+
+  const res = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: BASE_PROMPT },
+        { role: "user", content: userContent }
+      ],
+      temperature: 0.2,
+      max_tokens: 1500
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`SambaNova ${res.status}: ${errText.slice(0, 90)}`);
+  }
+
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("SambaNova returned empty response");
+  return { reply: text, model };
+}
+
+// 4. Cloudflare Workers AI Vision (Account 2)
+async function callCloudflareWorkersAiVision(prompt: string, images: ImagePart[]): Promise<{ reply: string; model: string }> {
+  const config = getCloudflareImageAiConfig();
+  if (!config) throw new Error("Cloudflare Vision credentials missing");
+
+  const model = "@cf/meta/llama-3.2-11b-vision-instruct";
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/run/${model}`;
+
+  // Pass base64 image data to Workers AI
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${config.apiToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      prompt: `${BASE_PROMPT}\n\nQuestion: ${prompt}`,
+      image: images[0]?.data ? Array.from(Buffer.from(images[0].data, "base64")) : undefined
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`WorkersAI Vision ${res.status}: ${errText.slice(0, 90)}`);
+  }
+
+  const data = await res.json();
+  const text = data?.result?.response?.trim();
+  if (!text) throw new Error("WorkersAI Vision empty reply");
+  return { reply: text, model };
+}
+
+// 5. OpenRouter Vision
+async function callOpenRouterVision(prompt: string, images: ImagePart[]): Promise<{ reply: string; model: string }> {
+  const apiKey = getOpenRouterKey();
+  if (!apiKey) throw new Error("OpenRouter API key missing");
+
+  const models = ["google/gemini-2.0-flash-001", "meta-llama/llama-3.2-11b-vision-instruct:free"];
+  const userContent: any[] = [{ type: "text", text: prompt }];
+  for (const img of images) {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: `data:${img.mimeType};base64,${img.data}` }
+    });
+  }
+
+  let lastErr = "";
+  for (const model of models) {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://eterprep.pages.dev",
+          "X-Title": "PrepWise AI Doubt"
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: BASE_PROMPT },
+            { role: "user", content: userContent }
+          ],
+          temperature: 0.2
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        lastErr = `${model} ${res.status}: ${errText.slice(0, 90)}`;
+        continue;
+      }
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      if (text) return { reply: text, model };
+    } catch (e: any) {
+      lastErr = e?.message || String(e);
+    }
+  }
+  throw new Error(lastErr || "OpenRouter Vision failed");
+}
+
+// ---------------- TEXT-ONLY CALLERS ----------------
+
+async function callGroqText(prompt: string): Promise<{ reply: string; model: string }> {
+  const apiKey = getGroqKey();
+  if (!apiKey) throw new Error("Groq API key missing");
+
+  const models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"];
+  let lastErr = "";
+
+  for (const model of models) {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: BASE_PROMPT },
+            { role: "user", content: prompt }
+          ],
+          temperature: 0.3,
+          max_tokens: 1500
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        lastErr = `${model} ${res.status}: ${errText.slice(0, 90)}`;
+        continue;
+      }
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      if (text) return { reply: text, model };
+    } catch (e: any) {
+      lastErr = e?.message || String(e);
+    }
+  }
+  throw new Error(lastErr || "Groq Text failed");
+}
+
+async function callWorkersAiText(prompt: string): Promise<{ reply: string; model: string }> {
+  const config = getCloudflareWorkersAiConfig();
+  if (!config) throw new Error("Cloudflare Text AI credentials missing");
+
+  const models = ["@cf/meta/llama-3.1-8b-instruct", "@cf/mistral/mistral-7b-instruct-v0.1"];
+  let lastErr = "";
+
+  for (const model of models) {
+    try {
+      const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/run/${model}`;
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${config.apiToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: BASE_PROMPT },
+            { role: "user", content: prompt }
+          ]
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        lastErr = `${model} ${res.status}: ${errText.slice(0, 90)}`;
+        continue;
+      }
+
+      const data = await res.json();
+      const text = data?.result?.response?.trim();
+      if (text) return { reply: text, model };
+    } catch (e: any) {
+      lastErr = e?.message || String(e);
+    }
+  }
+  throw new Error(lastErr || "Workers AI Text failed");
+}
+
+// ---------------- MAIN ROUTE HANDLER ----------------
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const prompt = (body.message || body.prompt || body.question || "").trim();
     const images: string[] = Array.isArray(body.images) ? body.images : [];
-    const studentContext = body.studentContext || null;
 
-    // Build Personalized Academic Prompt
-    let contextAddition = "";
-    if (studentContext) {
-      const studentName = studentContext.name || "Student";
-      const targetExam = studentContext.targetExam || "JEE/NEET";
-      const daysLeft = studentContext.daysToExam ? `${studentContext.daysToExam} days left` : "";
-      const weakSubs = Array.isArray(studentContext.weakSubjects)
-        ? studentContext.weakSubjects.join(", ")
-        : "";
-
-      contextAddition = `\nSTUDENT PROFILE:
-- Name: ${studentName}
-- Target Exam: ${targetExam} ${daysLeft ? `(${daysLeft})` : ""}
-- Identified Weak Areas: ${weakSubs || "None reported"}
-RULE: Agar student kisi weak area se related sawal puche, toh step-by-step extra conceptual foundation aur encouragement do.`;
-    }
-
-    const SYSTEM_PROMPT = `Tu PrepWise ka highly qualified Senior Academic Faculty hai jo JEE, NEET, aur Boards ke students ko padhata hai.
-RULES FOR PERFECT ANSWERS:
-1. Academic Accuracy: Pure NCERT aur Standard Indian Syllabus ke authentic facts aur accurate definitions use kar (jaise Koshika = Cell, Jeevan ki moolbhoot sanrachnatmak aur kriyatmak ikai / Structural and functional unit of life). Faltu ya ajeeb translations bilkul mat kar.
-2. Clean Formatting:
-   - Headings ko **Heading Name** karke likh (e.g. **Paribhasha (Definition)**, **Mukhya Bindu**, **Udaharan**).
-   - Steps ko 'Step 1:', 'Step 2:' karke likh.
-   - Bullet points ke liye '- ' use kar.
-   - Formula ya Important baat ke liye 'Formula:' ya 'Important:' prefix use kar.
-3. Math & Science Symbols: Clean readable Unicode text use kar jaise x² + y² = r², √(49) = 7, a/b, ±, →, °C. Kabhi bhi LaTeX delimiters ($ ya $$ ya \\frac) mat use kar.
-4. Tone: Helpful, motivating, aur clear student-friendly Hinglish. Seedha to-the-point solution de.${contextAddition}`;
-
-    // Fast base64 parsing without regex backtracking
-    const base64Images: { mimeType: string; data: string }[] = [];
+    // Safe base64 substring parser
+    const base64Images: ImagePart[] = [];
     for (const raw of images) {
       if (typeof raw === "string" && raw.startsWith("data:")) {
         const commaIdx = raw.indexOf(",");
         if (commaIdx !== -1) {
-          const header = raw.slice(5, commaIdx);
-          const mimeType = header.split(";")[0] || "image/jpeg";
+          const mimeType = raw.slice(5, commaIdx).split(";")[0] || "image/jpeg";
           const data = raw.slice(commaIdx + 1);
           if (data.length > 50) {
             base64Images.push({ mimeType, data });
@@ -291,11 +357,7 @@ RULES FOR PERFECT ANSWERS:
     }
 
     const hasImages = base64Images.length > 0;
-    const finalPrompt =
-      prompt ||
-      (hasImages
-        ? "Kripya is photo mein diye gaye sawal ko step-by-step solve kijiye."
-        : "");
+    const finalPrompt = prompt || (hasImages ? "Kripya is photo mein diye gaye sawal ko step-by-step solve kijiye." : "");
 
     if (!finalPrompt) {
       return NextResponse.json(
@@ -304,46 +366,131 @@ RULES FOR PERFECT ANSWERS:
       );
     }
 
-    const errors: string[] = [];
+    const attemptsTrace: string[] = [];
 
-    // 1. GROQ (Priority 1)
-    try {
-      const reply = await callGroq(finalPrompt, hasImages, base64Images, SYSTEM_PROMPT);
-      return NextResponse.json({ reply, provider: "groq" }, { status: 200 });
-    } catch (e: any) {
-      errors.push(`Groq: ${e.message}`);
-    }
-
-    // 2. CLOUDFLARE WORKERS AI (Priority 2 - Text doubts)
-    if (!hasImages) {
+    // ==========================================
+    // CASE A: IMAGE + TEXT DOUBTS (VISION FLOW)
+    // ==========================================
+    if (hasImages) {
+      // 1. Gemini Vision (Dedicated Image Key)
       try {
-        const reply = await callCloudflareWorkersAi(finalPrompt, SYSTEM_PROMPT);
-        return NextResponse.json({ reply, provider: "cloudflare_workers_ai" }, { status: 200 });
+        const { reply, model } = await callGeminiVision(finalPrompt, base64Images);
+        attemptsTrace.push(`Gemini: Success (${model})`);
+        return NextResponse.json(
+          { reply, provider: "gemini", model, debugTrace: attemptsTrace },
+          { status: 200 }
+        );
       } catch (e: any) {
-        errors.push(`WorkersAI: ${e.message}`);
+        attemptsTrace.push(`Gemini: Failed (${e.message})`);
+      }
+
+      // 2. Groq Vision
+      try {
+        const { reply, model } = await callGroqVision(finalPrompt, base64Images);
+        attemptsTrace.push(`Groq Vision: Success (${model})`);
+        return NextResponse.json(
+          { reply, provider: "groq", model, debugTrace: attemptsTrace },
+          { status: 200 }
+        );
+      } catch (e: any) {
+        attemptsTrace.push(`Groq Vision: Failed (${e.message})`);
+      }
+
+      // 3. SambaNova Cloud Vision
+      try {
+        const { reply, model } = await callSambaNovaVision(finalPrompt, base64Images);
+        attemptsTrace.push(`SambaNova: Success (${model})`);
+        return NextResponse.json(
+          { reply, provider: "sambanova", model, debugTrace: attemptsTrace },
+          { status: 200 }
+        );
+      } catch (e: any) {
+        attemptsTrace.push(`SambaNova: Failed (${e.message})`);
+      }
+
+      // 4. Cloudflare Workers AI Vision (Account 2)
+      try {
+        const { reply, model } = await callCloudflareWorkersAiVision(finalPrompt, base64Images);
+        attemptsTrace.push(`WorkersAI Vision: Success (${model})`);
+        return NextResponse.json(
+          { reply, provider: "cloudflare_vision", model, debugTrace: attemptsTrace },
+          { status: 200 }
+        );
+      } catch (e: any) {
+        attemptsTrace.push(`WorkersAI Vision: Failed (${e.message})`);
+      }
+
+      // 5. OpenRouter Vision
+      try {
+        const { reply, model } = await callOpenRouterVision(finalPrompt, base64Images);
+        attemptsTrace.push(`OpenRouter: Success (${model})`);
+        return NextResponse.json(
+          { reply, provider: "openrouter", model, debugTrace: attemptsTrace },
+          { status: 200 }
+        );
+      } catch (e: any) {
+        attemptsTrace.push(`OpenRouter: Failed (${e.message})`);
       }
     }
 
-    // 3. GOOGLE GEMINI (Priority 3 - Multimodal Reasoning)
-    try {
-      const reply = await callGemini(finalPrompt, base64Images, SYSTEM_PROMPT);
-      return NextResponse.json({ reply, provider: "gemini" }, { status: 200 });
-    } catch (e: any) {
-      errors.push(`Gemini: ${e.message}`);
+    // ==========================================
+    // CASE B: PURE TEXT DOUBTS (TEXT FLOW)
+    // ==========================================
+    else {
+      // 1. Groq Text
+      try {
+        const { reply, model } = await callGroqText(finalPrompt);
+        attemptsTrace.push(`Groq: Success (${model})`);
+        return NextResponse.json(
+          { reply, provider: "groq", model, debugTrace: attemptsTrace },
+          { status: 200 }
+        );
+      } catch (e: any) {
+        attemptsTrace.push(`Groq: Failed (${e.message})`);
+      }
+
+      // 2. Cloudflare Workers AI Text (Account 1)
+      try {
+        const { reply, model } = await callWorkersAiText(finalPrompt);
+        attemptsTrace.push(`WorkersAI: Success (${model})`);
+        return NextResponse.json(
+          { reply, provider: "cloudflare_workers_ai", model, debugTrace: attemptsTrace },
+          { status: 200 }
+        );
+      } catch (e: any) {
+        attemptsTrace.push(`WorkersAI: Failed (${e.message})`);
+      }
+
+      // 3. Google Gemini Text
+      try {
+        const { reply, model } = await callGeminiVision(finalPrompt, []);
+        attemptsTrace.push(`Gemini: Success (${model})`);
+        return NextResponse.json(
+          { reply, provider: "gemini", model, debugTrace: attemptsTrace },
+          { status: 200 }
+        );
+      } catch (e: any) {
+        attemptsTrace.push(`Gemini: Failed (${e.message})`);
+      }
+
+      // 4. OpenRouter Text
+      try {
+        const { reply, model } = await callOpenRouterVision(finalPrompt, []);
+        attemptsTrace.push(`OpenRouter: Success (${model})`);
+        return NextResponse.json(
+          { reply, provider: "openrouter", model, debugTrace: attemptsTrace },
+          { status: 200 }
+        );
+      } catch (e: any) {
+        attemptsTrace.push(`OpenRouter: Failed (${e.message})`);
+      }
     }
 
-    // 4. OPENROUTER (Priority 4 - Safety Net)
-    try {
-      const reply = await callOpenRouter(finalPrompt, hasImages, base64Images, SYSTEM_PROMPT);
-      return NextResponse.json({ reply, provider: "openrouter" }, { status: 200 });
-    } catch (e: any) {
-      errors.push(`OpenRouter: ${e.message}`);
-    }
-
-    // If all fail
+    // If all providers fail, return clean transparent diagnostic
     return NextResponse.json(
       {
-        reply: `⚠️ Sabhi AI Providers connect nahi ho paaye:\n• ${errors.join("\n• ")}`,
+        reply: `⚠️ Sabhi AI Providers connect nahi ho paaye:\n• ${attemptsTrace.join("\n• ")}`,
+        debugTrace: attemptsTrace
       },
       { status: 200 }
     );
