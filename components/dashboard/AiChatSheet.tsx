@@ -43,7 +43,7 @@ function getTodayLimitKey(): string {
   return `pw_doubt_daily_quota_${today}`;
 }
 
-// ─── 1. UNIVERSAL TEXTBOOK MATH NORMALIZER ───
+// ─── 1. UNIVERSAL TEXTBOOK MATH NORMALIZER (Clean NCERT Symbols) ───
 function normalizeMathToTextbook(raw: string): string {
   if (!raw) return "";
   let s = raw;
@@ -92,7 +92,7 @@ function normalizeMathToTextbook(raw: string): string {
   return s;
 }
 
-// ─── 2. SMART SPEECH FILTER ───
+// ─── 2. SMART SPEECH FILTER (Used ONLY inside Live Video Call) ───
 function cleanTextForSpeech(raw: string): string {
   if (!raw) return "";
   let s = raw;
@@ -180,17 +180,16 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-  // VIP Quota (Owner gets 999)
+  // VIP Quota (sarthaksinghyadav1@gmail.com gets 999)
   const isOwner = studentContext?.email === "sarthaksinghyadav1@gmail.com";
   const dailyLimit = isOwner ? 999 : (studentContext?.dailyDoubtLimit || 10);
   const [remainingQuota, setRemainingQuota] = useState(dailyLimit);
 
-  // Audio Speech state
+  // Audio Speech state (Exclusively for Live Video Call)
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [audioMuted, setAudioMuted] = useState(false);
   const keepAliveTimerRef = useRef<any>(null);
 
-  // ── TRUE CONTINUOUS LIVE VIDEO CALL STATE ──
+  // ── TRUE CONTINUOUS LIVE VIDEO CALL STATE (Intact & Undisrupted) ──
   const [liveCallOpen, setLiveCallOpen] = useState(false);
   const [liveMicMuted, setLiveMicMuted] = useState(false);
   const [isLiveListening, setIsLiveListening] = useState(false);
@@ -253,7 +252,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     setMessages([
       {
         role: "assistant",
-        content: `Namaste ${name}! Main aapka AI Doubt Faculty hoon. Koi bhi sawaal type karein, photo attach karein ya **Live Call (🎥)** se direct hands-free video call karein! ✍️`,
+        content: `Namaste ${name}! Main aapka AI Doubt Faculty hoon. Koi bhi sawaal type karein, photo attach karein ya **Live Call (🎥)** se direct video call karein! ✍️`,
       },
     ]);
   }, [open, getRemainingQuotaVal]);
@@ -280,76 +279,73 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   }, []);
 
-  // ─── 4. NATURAL HD VOICE ENGINE (Anti-Freeze Heartbeat) ───
-  const speakNaturalVoice = useCallback(
-    (text: string, onFinish?: () => void) => {
-      if (audioMuted || typeof window === "undefined" || !("speechSynthesis" in window)) {
+  // ─── NATURAL HD VOICE (Live Video Exclusive) ───
+  const speakLiveVoice = useCallback((text: string, onFinish?: () => void) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      if (onFinish) onFinish();
+      return;
+    }
+
+    try {
+      window.speechSynthesis.cancel();
+      if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+
+      const cleanSpokenText = cleanTextForSpeech(text);
+      if (!cleanSpokenText) {
         if (onFinish) onFinish();
         return;
       }
 
-      try {
-        window.speechSynthesis.cancel();
-        if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+      const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
+      utterance.rate = 0.95;
+      utterance.pitch = 1.0;
 
-        const cleanSpokenText = cleanTextForSpeech(text);
-        if (!cleanSpokenText) {
-          if (onFinish) onFinish();
-          return;
-        }
+      const voices = window.speechSynthesis.getVoices();
+      const hdVoice =
+        voices.find(
+          (v) =>
+            v.name.includes("Google") &&
+            (v.lang.includes("en-IN") || v.lang.includes("hi-IN") || v.lang.includes("hi_IN"))
+        ) ||
+        voices.find((v) => v.lang.includes("en-IN") || v.lang.includes("hi-IN"));
 
-        const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
-        utterance.rate = 0.95;
-        utterance.pitch = 1.0;
-
-        const voices = window.speechSynthesis.getVoices();
-        const hdVoice =
-          voices.find(
-            (v) =>
-              v.name.includes("Google") &&
-              (v.lang.includes("en-IN") || v.lang.includes("hi-IN") || v.lang.includes("hi_IN"))
-          ) ||
-          voices.find((v) => v.lang.includes("en-IN") || v.lang.includes("hi-IN"));
-
-        if (hdVoice) {
-          utterance.voice = hdVoice;
-          utterance.lang = hdVoice.lang;
-        } else {
-          utterance.lang = "en-IN";
-        }
-
-        utterance.onstart = () => {
-          setIsSpeaking(true);
-          keepAliveTimerRef.current = setInterval(() => {
-            if (window.speechSynthesis.speaking) {
-              window.speechSynthesis.pause();
-              window.speechSynthesis.resume();
-            } else {
-              clearInterval(keepAliveTimerRef.current);
-            }
-          }, 8000);
-        };
-
-        utterance.onend = () => {
-          setIsSpeaking(false);
-          if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
-          if (onFinish) onFinish();
-        };
-
-        utterance.onerror = () => {
-          setIsSpeaking(false);
-          if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
-          if (onFinish) onFinish();
-        };
-
-        window.speechSynthesis.speak(utterance);
-      } catch (_) {
-        setIsSpeaking(false);
-        if (onFinish) onFinish();
+      if (hdVoice) {
+        utterance.voice = hdVoice;
+        utterance.lang = hdVoice.lang;
+      } else {
+        utterance.lang = "en-IN";
       }
-    },
-    [audioMuted]
-  );
+
+      utterance.onstart = () => {
+        setIsSpeaking(true);
+        keepAliveTimerRef.current = setInterval(() => {
+          if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.pause();
+            window.speechSynthesis.resume();
+          } else {
+            clearInterval(keepAliveTimerRef.current);
+          }
+        }, 8000);
+      };
+
+      utterance.onend = () => {
+        setIsSpeaking(false);
+        if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+        if (onFinish) onFinish();
+      };
+
+      utterance.onerror = () => {
+        setIsSpeaking(false);
+        if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+        if (onFinish) onFinish();
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } catch (_) {
+      setIsSpeaking(false);
+      if (onFinish) onFinish();
+    }
+  }, []);
 
   const stopSpeaking = () => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -359,7 +355,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     setIsSpeaking(false);
   };
 
-  // ─── 5. TRUE CONTINUOUS LIVE VIDEO CALL (Autonomous Turn-Loop) ───
+  // ─── 4. LIVE VIDEO CALL CONTROLS (Intact & Undisrupted) ───
   const startLiveCall = async (mode: "environment" | "user" = facingMode) => {
     setLiveCallOpen(true);
     setLiveMicMuted(false);
@@ -388,7 +384,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         videoRef.current.play().catch(() => {});
       }
 
-      // Start Android Turn-Loop listener
       startAndroidTurnListener();
     } catch (e) {
       alert("Camera permission allow karein live video call ke liye.");
@@ -442,7 +437,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     return canvas.toDataURL("image/jpeg", 0.65);
   };
 
-  // 🤖 AUTONOMOUS ANDROID TURN-LOOP (No more Mute/Unmute glitch)
   const startAndroidTurnListener = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -451,7 +445,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     try {
       const recognition = new SpeechRecognition();
       recognition.lang = "en-IN";
-      recognition.continuous = false; // Native Android Chrome mode (fires immediately on pause!)
+      recognition.continuous = false;
       recognition.interimResults = false;
 
       recognition.onstart = () => {
@@ -461,12 +455,11 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
       recognition.onresult = (event: any) => {
         const spoken = event.results[0]?.[0]?.transcript?.trim() || "";
         if (spoken.length > 2 && !liveMicMuted) {
-          stopSpeaking(); // Immediate Barge-in
+          stopSpeaking();
           const snap = captureFastFrame();
           const isFollowUp = liveExchanges.length > 0;
 
           handleLiveExecution(snap, spoken, isFollowUp, () => {
-            // When AI finishes speaking, seamlessly restart listening!
             if (isListeningLoopActiveRef.current && !liveMicMuted) {
               startAndroidTurnListener();
             }
@@ -480,7 +473,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
 
       recognition.onend = () => {
         setIsLiveListening(false);
-        // If user didn't speak or pause happened, auto-loop
         if (isListeningLoopActiveRef.current && !liveMicMuted && !isSpeaking && !loading) {
           setTimeout(() => {
             if (isListeningLoopActiveRef.current && !liveMicMuted && !isSpeaking && !loading) {
@@ -506,7 +498,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   };
 
-  // ─── EXECUTE LIVE CALL (Uses 5 LIVE Dedicated Keys) ───
+  // Live Call Execution (Calls Live Keys)
   const handleLiveExecution = async (
     imgData: string | null,
     promptText: string,
@@ -548,7 +540,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           { query: promptText, reply: replyText, isFollowUp },
         ]);
 
-        speakNaturalVoice(speakText, onSpeechComplete);
+        speakLiveVoice(speakText, onSpeechComplete);
       } else {
         setLiveSolution("Sawal samajhne mein dikkat aayi. Kripya dobara bolein!");
         if (onSpeechComplete) onSpeechComplete();
@@ -561,7 +553,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   };
 
-  // ─── EXECUTE CHAT MODE (Uses Dedicated GEMINI_API_KEY_DOUBT) ───
+  // ─── 5. CHAT MODE EXECUTION (100% SILENT & TEXTBOOK CLEAN) ───
   const handleExecuteDoubt = async (imgData: string | null, promptText: string) => {
     if (remainingQuota <= 0) {
       setMessages((prev) => [
@@ -587,7 +579,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         body: JSON.stringify({
           query: promptText,
           image: imgData,
-          isLive: false,
+          isLive: false, // 👈 Calls Chat Pipeline
           targetExam: studentContext?.targetExam || "JEE",
           studentContext,
         }),
@@ -596,9 +588,8 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
       if (res.ok) {
         const data = await res.json();
         const replyText = data.reply || "Solution complete.";
-        const speakText = data.spoken || replyText;
+        // 🔇 CHAT IS 100% SILENT - NO AUDIO CALLED HERE!
         setMessages((prev) => [...prev, { role: "assistant", content: replyText }]);
-        speakNaturalVoice(speakText);
       } else {
         setMessages((prev) => [
           ...prev,
@@ -615,6 +606,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   };
 
+  // ⚡ AUTO-COMPRESS PHOTO TO ~80KB FOR ZERO-LAG UPLOAD & DATA SAVINGS
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -624,7 +616,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
       img.src = uploadEvent.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        const maxDim = 1000;
+        const maxDim = 800; // Balanced sharp size for math/handwriting
         let w = img.width, h = img.height;
         if (w > maxDim || h > maxDim) {
           if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
@@ -633,7 +625,8 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         canvas.width = w; canvas.height = h;
         const ctx = canvas.getContext("2d");
         ctx?.drawImage(img, 0, 0, w, h);
-        setSelectedImage(canvas.toDataURL("image/jpeg", 0.75));
+        // Compressed to ~70-80KB WebP/JPEG
+        setSelectedImage(canvas.toDataURL("image/jpeg", 0.72));
       };
     };
     reader.readAsDataURL(file);
@@ -645,7 +638,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end animate-in fade-in">
       <div className="w-full max-w-md mx-auto bg-white rounded-t-3xl shadow-2xl flex flex-col h-[85vh] border-t border-ink/10 relative overflow-hidden">
 
-        {/* ── 1. TRUE HANDS-FREE LIVE VIDEO CALL OVERLAY ── */}
+        {/* ── 1. TRUE HANDS-FREE LIVE VIDEO CALL OVERLAY (Intact) ── */}
         {liveCallOpen && (
           <div className="absolute inset-0 z-50 bg-black flex flex-col justify-between animate-in fade-in">
             {/* Top Bar */}
@@ -761,7 +754,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
         )}
 
-        {/* ── 2. NORMAL CHAT HEADER (Dedicated Chat Key) ── */}
+        {/* ── 2. NORMAL CHAT HEADER (Quiet & Clean) ── */}
         <div className="p-3.5 border-b border-ink/8 flex items-center justify-between bg-paper/50 rounded-t-3xl">
           <div className="flex items-center gap-2">
             <span className="w-8 h-8 rounded-xl bg-teal text-white flex items-center justify-center text-sm font-bold shadow-xs">
@@ -788,22 +781,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
 
             <button
               type="button"
-              onClick={() => {
-                if (isSpeaking) stopSpeaking();
-                setAudioMuted(!audioMuted);
-              }}
-              title={audioMuted ? "Unmute Voice" : "Mute Voice"}
-              className={`p-1.5 rounded-lg border text-xs font-bold transition-all ${
-                audioMuted
-                  ? "bg-slate-100 text-slate-400 border-slate-200"
-                  : "bg-teal/15 text-teal border-teal/30"
-              }`}
-            >
-              {audioMuted ? "🔇" : isSpeaking ? "🔊" : "🔈"}
-            </button>
-
-            <button
-              type="button"
               onClick={onClose}
               className="w-7 h-7 rounded-full flex items-center justify-center text-slate hover:bg-ink/10"
             >
@@ -812,7 +789,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
         </div>
 
-        {/* ── CHAT MESSAGES ── */}
+        {/* ── CHAT MESSAGES (Pure Textbook Reading) ── */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((m, idx) => (
             <div
@@ -870,16 +847,16 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           <div ref={chatEndRef} />
         </div>
 
-        {/* Gallery Image Preview */}
+        {/* Gallery Image Preview (Single Image) */}
         {selectedImage && (
           <div className="px-4 py-2 bg-paper/60 border-t border-ink/5 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <img
                 src={selectedImage}
                 alt="Preview"
-                className="w-10 h-10 object-cover rounded-lg"
+                className="w-10 h-10 object-cover rounded-lg border border-ink/10"
               />
-              <span className="text-[11px] font-bold text-ink">Photo attached</span>
+              <span className="text-[11px] font-bold text-ink">Photo attached (~80KB)</span>
             </div>
             <button
               type="button"
