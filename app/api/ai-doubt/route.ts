@@ -30,10 +30,9 @@ FORMATTING RULES:
 
 interface ImageAttachment {
   mimeType: string;
-  data: string; // pure base64 without prefix
+  data: string; // pure base64 without data: prefix
 }
 
-// Bulletproof substring parser — Zero Regex, Zero Stack Overrun
 function extractImages(body: any): ImageAttachment[] {
   const images: ImageAttachment[] = [];
 
@@ -62,7 +61,6 @@ function extractImages(body: any): ImageAttachment[] {
       }
     }
 
-    // Clean any whitespace
     data = data.replace(/[\r\n\s]/g, "");
 
     if (data.length > 50) {
@@ -111,13 +109,13 @@ async function tryGemini(
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini ${cleanModel} ${res.status}: ${errText.slice(0, 300)}`);
+    throw new Error(`Gemini ${cleanModel} ${res.status}: ${errText.slice(0, 180)}`);
   }
 
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) {
-    throw new Error("Gemini returned empty response");
+    throw new Error(`Gemini ${cleanModel} returned empty response`);
   }
   return text;
 }
@@ -169,7 +167,7 @@ async function tryGroq(
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Groq ${res.status}: ${err.slice(0, 300)}`);
+    throw new Error(`Groq ${res.status}: ${err.slice(0, 180)}`);
   }
 
   const data = await res.json();
@@ -227,7 +225,7 @@ async function tryOpenRouter(
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`OpenRouter ${res.status}: ${err.slice(0, 300)}`);
+    throw new Error(`OpenRouter ${res.status}: ${err.slice(0, 180)}`);
   }
 
   const data = await res.json();
@@ -240,7 +238,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    // Check all possible field names
     const userText = (
       body.message ||
       body.prompt ||
@@ -262,28 +259,34 @@ export async function POST(req: NextRequest) {
     }
 
     const geminiKeys = mode === "live" ? getLiveGeminiKeys() : getChatGeminiKeys();
-    const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"];
+    const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
 
     const errorLogs: string[] = [];
 
-    // TIER 1 & 2: Gemini Pool
-    for (const key of geminiKeys) {
-      for (const model of candidateModels) {
-        try {
-          const reply = await tryGemini(key, model, userText, images);
-          reportKeySuccess(key);
-          return NextResponse.json({ reply, provider: `gemini-${model}` });
-        } catch (err: any) {
-          const isRateLimit = err?.message?.includes("429");
-          reportKeyFailure(key, isRateLimit);
-          errorLogs.push(err?.message || String(err));
+    // TIER 1 & 2: Chat-designated Gemini Keys
+    if (geminiKeys.length === 0) {
+      errorLogs.push("No Gemini Chat Keys detected in environment variables");
+    } else {
+      for (const key of geminiKeys) {
+        for (const model of candidateModels) {
+          try {
+            const reply = await tryGemini(key, model, userText, images);
+            reportKeySuccess(key);
+            return NextResponse.json({ reply, provider: `gemini-${model}` });
+          } catch (err: any) {
+            const isRateLimit = err?.message?.includes("429");
+            reportKeyFailure(key, isRateLimit);
+            errorLogs.push(err?.message || String(err));
+          }
         }
       }
     }
 
     // TIER 3: Groq Fallback
     const groqKey = getGroqKey();
-    if (groqKey) {
+    if (!groqKey) {
+      errorLogs.push("No Groq key detected in environment variables");
+    } else {
       try {
         const reply = await tryGroq(groqKey, userText, images);
         return NextResponse.json({ reply, provider: "groq-fallback" });
@@ -294,7 +297,9 @@ export async function POST(req: NextRequest) {
 
     // TIER 4: OpenRouter Fallback
     const orKey = getOpenRouterKey();
-    if (orKey) {
+    if (!orKey) {
+      errorLogs.push("No OpenRouter key detected in environment variables");
+    } else {
       try {
         const reply = await tryOpenRouter(orKey, userText, images);
         return NextResponse.json({ reply, provider: "openrouter-fallback" });
@@ -303,16 +308,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    console.error("[AI Doubt All Providers Failed]", errorLogs);
+    // Live transparent diagnostic — student & developer can see exact reason
+    const diagnosticText = errorLogs.length > 0
+      ? errorLogs.join(" \n• ")
+      : "No API keys configured.";
+
     return NextResponse.json(
       {
-        reply: "Abhi sabhi AI faculties thode busy hain. Kripya 1 minute baad dobara puchiye!",
+        reply: `⚠️ AI Faculty Connection Issue:\n• ${diagnosticText}`,
       },
       { status: 200 }
     );
   } catch (globalErr: any) {
     return NextResponse.json(
-      { reply: "Sawal samajhne mein dikkat aayi. Kripya dobara bhejiye." },
+      { reply: `Sawal samajhne mein dikkat aayi: ${globalErr?.message || String(globalErr)}` },
       { status: 200 }
     );
   }
