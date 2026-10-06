@@ -10,80 +10,44 @@ import {
 
 export const runtime = "edge";
 
-// Cache discovered working model name in memory
-let cachedGeminiModel: string | null = null;
-let cachedGroqModel: string | null = null;
-
 export async function POST(req: NextRequest) {
-  const debugLogs: string[] = [];
-
   try {
-    const { messages, query, image, isLive, targetExam, studentContext } = await req.json();
+    const { query, image, isLive, targetExam, studentContext } = await req.json();
 
     const allKeys = getAllAvailableGeminiKeys();
-    const { groq, openRouter } = getBackupProviders();
+    const { groq } = getBackupProviders();
 
-    if (allKeys.length === 0 && !groq && !openRouter) {
+    if (allKeys.length === 0 && !groq) {
       return NextResponse.json(
-        { reply: "⚠️ Cloudflare Environment Variables mein koi API key nahi mili!" },
+        { reply: "⚠️ API keys check karein!", spoken: "API key missing hai." },
         { status: 500 }
       );
     }
 
     const examName = targetExam || studentContext?.targetExam || "JEE/NEET";
 
-    const systemPrompt = `You are the Master AI Doubt Faculty for PrepWise (${examName}).
-BEHAVIOR RULES:
-1. GREETINGS: If user greets ("Hello", "Hi", "Namaste") without a question, reply warmly in 1 short sentence in Hinglish and encourage them to show/ask their doubt.
-2. CONCEPTUAL/VOICE DOUBTS: If student asks verbally without showing a book/page, solve and explain it directly! DO NOT force them to show a page.
-3. UNCLEAR VISUAL: If student says "solve this" but the image is completely blurry or blank, politely ask them to focus camera on the question.
-4. ACADEMIC SOLUTION: Provide clear step-by-step solution, highlight final answer, and add an "⚡ Exam Shortcut:". Keep explanation encouraging and crisp.`;
+    // System prompt guides AI to speak naturally in clear spoken English/Hindi
+    const systemPrompt = `You are the master AI Doubt Faculty for PrepWise (${examName}).
+You must answer in this EXACT JSON structure:
+{
+  "written": "Your detailed step-by-step solution formatted with Markdown and clear equations for the phone screen.",
+  "spoken": "A short, 2-to-3 sentence warm conversational voice explanation in simple everyday teacher language. No emojis, no markdown, no latex symbols, just clear spoken words."
+}
 
-    const hasImage = Boolean(image);
+Rules:
+1. GREETINGS: If user just greets, acknowledge warmly and ask for their doubt in 'spoken' and 'written'.
+2. If unable to return JSON, return the written solution directly.`;
 
-    // ─────────────────────────────────────────────────────────────
-    // 1. PROVIDER 1: GEMINI (Auto-Discover Active Models for Key)
-    // ─────────────────────────────────────────────────────────────
     const apiKey = isLive ? getActiveLiveKey() : getActiveChatKey();
-
     if (apiKey) {
-      // Step A: Find working model from live Google catalog
-      let modelsToTry: string[] = cachedGeminiModel
-        ? [cachedGeminiModel]
-        : ["gemini-1.5-flash-002", "gemini-1.5-flash-001", "gemini-1.5-flash", "gemini-2.0-flash-exp"];
+      const models = ["gemini-1.5-flash-002", "gemini-1.5-flash", "gemini-2.0-flash-exp"];
 
-      try {
-        const listRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
-        );
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          const liveModels = (listData.models || [])
-            .filter((m: any) => m.supportedGenerationMethods?.includes("generateContent"))
-            .map((m: any) => m.name.replace("models/", ""));
-
-          if (liveModels.length > 0) {
-            // Prioritize flash models, then any model
-            const flash = liveModels.filter((m: string) => m.includes("flash"));
-            modelsToTry = flash.length > 0 ? flash : liveModels;
-            debugLogs.push(`Live Gemini models discovered: ${modelsToTry.slice(0, 3).join(", ")}`);
-          }
-        } else {
-          const err = await listRes.text();
-          debugLogs.push(`Gemini /models list error ${listRes.status}: ${err.slice(0, 80)}`);
-        }
-      } catch (e: any) {
-        debugLogs.push(`Gemini discovery error: ${e.message}`);
-      }
-
-      // Step B: Execute generateContent on discovered model
-      for (const model of modelsToTry) {
+      for (const model of models) {
         try {
           const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
           const parts: any[] = [];
           if (query) parts.push({ text: query });
-
           if (image) {
             const match = image.match(/^data:image\/(\w+);base64,(.+)$/);
             if (match) {
@@ -96,133 +60,48 @@ BEHAVIOR RULES:
             }
           }
 
-          const payload = {
-            contents: [
-              {
-                role: "user",
-                parts: parts.length > 0 ? parts : [{ text: "Hello" }],
-              },
-            ],
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            generationConfig: { temperature: 0.35, maxOutputTokens: 1000 },
-          };
-
           const res = await fetch(geminiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-
-          if (res.status === 429 || res.status === 403) {
-            markKeyRateLimited(apiKey, 60);
-            debugLogs.push(`Gemini ${model} 429: Rate limited`);
-            break;
-          }
-
-          if (res.ok) {
-            const data = await res.json();
-            const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (reply) {
-              cachedGeminiModel = model; // Remember working model
-              return NextResponse.json({ reply, provider: `gemini-${model}`, success: true });
-            }
-          } else {
-            const t = await res.text();
-            debugLogs.push(`Gemini ${model} ${res.status}: ${t.slice(0, 90)}`);
-          }
-        } catch (err: any) {
-          debugLogs.push(`Gemini ${model} ex: ${err.message}`);
-        }
-      }
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // 2. PROVIDER 2: GROQ (Auto-Discover Active Groq Models)
-    // ─────────────────────────────────────────────────────────────
-    if (groq) {
-      let groqModelsToTry = cachedGroqModel ? [cachedGroqModel] : [];
-
-      if (groqModelsToTry.length === 0) {
-        try {
-          const gListRes = await fetch("https://api.groq.com/openai/v1/models", {
-            headers: { Authorization: `Bearer ${groq}` },
-          });
-          if (gListRes.ok) {
-            const gListData = await gListRes.json();
-            const liveGModels = (gListData.data || []).map((m: any) => m.id);
-            if (hasImage) {
-              groqModelsToTry = liveGModels.filter((id: string) => id.includes("vision"));
-            } else {
-              groqModelsToTry = liveGModels.filter(
-                (id: string) => id.includes("llama") || id.includes("gemma")
-              );
-            }
-            if (groqModelsToTry.length === 0) groqModelsToTry = liveGModels;
-            debugLogs.push(`Live Groq models discovered: ${groqModelsToTry.slice(0, 3).join(", ")}`);
-          }
-        } catch (_) {}
-      }
-
-      for (const groqModel of groqModelsToTry.slice(0, 3)) {
-        try {
-          let groqMessages: any[] = [];
-          if (hasImage) {
-            groqMessages = [
-              { role: "system", content: systemPrompt },
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: query || "Solve this question" },
-                  { type: "image_url", image_url: { url: image } },
-                ],
-              },
-            ];
-          } else {
-            groqMessages = [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: query || "Hello" },
-            ];
-          }
-
-          const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${groq}`,
-            },
             body: JSON.stringify({
-              model: groqModel,
-              messages: groqMessages,
-              temperature: 0.3,
-              max_tokens: 1000,
+              contents: [{ role: "user", parts: parts.length > 0 ? parts : [{ text: "Hello" }] }],
+              systemInstruction: { parts: [{ text: systemPrompt }] },
+              generationConfig: { temperature: 0.3, maxOutputTokens: 1000 },
             }),
           });
 
-          if (groqRes.ok) {
-            const gData = await groqRes.json();
-            const gReply = gData.choices?.[0]?.message?.content;
-            if (gReply) {
-              cachedGroqModel = groqModel;
-              return NextResponse.json({ reply: gReply, provider: `groq-${groqModel}`, success: true });
-            }
-          } else {
-            const gt = await groqRes.text();
-            debugLogs.push(`Groq ${groqModel} ${groqRes.status}: ${gt.slice(0, 90)}`);
+          if (res.ok) {
+            const data = await res.json();
+            const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+            // Try parsing JSON structure
+            try {
+              const cleanJson = textResponse.replace(/```json/g, "").replace(/```/g, "").trim();
+              const parsed = JSON.parse(cleanJson);
+              if (parsed.written) {
+                return NextResponse.json({
+                  reply: parsed.written,
+                  spoken: parsed.spoken || parsed.written,
+                  success: true,
+                });
+              }
+            } catch (_) {}
+
+            return NextResponse.json({
+              reply: textResponse,
+              spoken: textResponse.slice(0, 300),
+              success: true,
+            });
           }
-        } catch (gErr: any) {
-          debugLogs.push(`Groq ${groqModel} ex: ${gErr.message}`);
-        }
+        } catch (_) {}
       }
     }
 
     return NextResponse.json(
-      { reply: `⚠️ AI Auto-Discovery Report:\n${debugLogs.join("\n")}` },
-      { status: 500 }
+      { reply: "Abhi sabhi faculties busy hain. 1 minute baad dobara puchiye!", spoken: "Kripya 1 minute baad dobara puchiye." },
+      { status: 503 }
     );
-  } catch (error: any) {
-    return NextResponse.json(
-      { reply: `Server Error: ${error.message}` },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    return NextResponse.json({ reply: `Error: ${err.message}`, spoken: "Technical error." }, { status: 500 });
   }
 }
