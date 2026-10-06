@@ -23,12 +23,13 @@ interface ChatMessage {
   text: string;
   images?: string[];
   provider?: string;
+  model?: string;
+  debugTrace?: string[];
   timestamp: string;
 }
 
-const STORAGE_KEY = "pw_doubt_chat_session_v2";
+const STORAGE_KEY = "pw_doubt_chat_session_v3";
 
-// Lightweight, custom inline SVGs (Zero package dependencies)
 function SvgX({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -70,7 +71,6 @@ function SvgTrash({ className }: { className?: string }) {
   );
 }
 
-// Colored Markdown Renderer without raw asterisks
 function RenderFormattedMessage({ text }: { text: string }) {
   const lines = text.split("\n");
 
@@ -94,7 +94,6 @@ function RenderFormattedMessage({ text }: { text: string }) {
         const clean = line.trim();
         if (!clean) return <div key={idx} className="h-1.5" />;
 
-        // Headings: **Heading** or ### Heading
         if (
           (clean.startsWith("**") && clean.endsWith("**") && clean.length < 65) ||
           clean.startsWith("### ") ||
@@ -111,7 +110,6 @@ function RenderFormattedMessage({ text }: { text: string }) {
           );
         }
 
-        // Steps
         if (/^Step\s*\d+[:.-]/i.test(clean)) {
           return (
             <div key={idx} className="bg-teal-950/40 border-l-2 border-teal-400 px-3 py-1.5 rounded-r-lg my-1">
@@ -122,7 +120,6 @@ function RenderFormattedMessage({ text }: { text: string }) {
           );
         }
 
-        // Formula / Notes
         if (/^(Formula|Important|Note|Sutra)[:.-]/i.test(clean)) {
           return (
             <div key={idx} className="bg-amber-950/30 border-l-2 border-amber-400 px-3 py-1.5 rounded-r-lg text-amber-200 my-1">
@@ -131,7 +128,6 @@ function RenderFormattedMessage({ text }: { text: string }) {
           );
         }
 
-        // Bullets
         if (clean.startsWith("- ") || clean.startsWith("• ") || clean.startsWith("* ")) {
           const bullet = clean.replace(/^[-•*]\s*/, "");
           return (
@@ -156,8 +152,8 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
   const visible = open !== undefined ? open : !!isOpen;
 
   const defaultGreeting = studentContext?.studentName
-    ? `Namaste ${studentContext.studentName}! Aapke ${studentContext.targetExam || "exam"} ki taiyari ke liye main hazir hoon. Kisi bhi concept ya numerical ka sawal likhiye ya photo bhejiye.`
-    : "Namaste! Main aapka PrepWise Academic Mentor hoon. Kisi bhi Physics, Chemistry, Maths ya Biology concept ka sawal likhiye ya photo upload kijiye.";
+    ? `Namaste ${studentContext.studentName}! Aapke ${studentContext.targetExam || "exam"} ki taiyari ke liye main hazir hoon. Kisi bhi concept ka sawal likhiye ya photo bhejiye.`
+    : "Namaste! Main aapka PrepWise Academic Mentor hoon. Kisi bhi Physics, Chemistry, Maths ya Biology question ka text likhiye ya photo upload kijiye.";
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -169,7 +165,6 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Restore 24hr Session Memory
   useEffect(() => {
     try {
       const saved = sessionStorage.getItem(STORAGE_KEY);
@@ -181,9 +176,7 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
           return;
         }
       }
-    } catch {
-      // Session storage unavailable
-    }
+    } catch {}
 
     setMessages([
       {
@@ -195,18 +188,15 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
     ]);
   }, [defaultGreeting]);
 
-  // Persist Messages (Images stripped to prevent quota overflow)
   useEffect(() => {
     if (messages.length > 0) {
       try {
         const lightweight = messages.slice(-15).map((m) => ({
           ...m,
-          images: undefined, // Strip large base64
+          images: undefined,
         }));
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(lightweight));
-      } catch {
-        // Storage quota safeguard
-      }
+      } catch {}
     }
   }, [messages]);
 
@@ -285,6 +275,8 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
           sender: "ai",
           text: data.reply || "Takneeki dikkat aayi, kripya dobara puchiye.",
           provider: data.provider,
+          model: data.model,
+          debugTrace: data.debugTrace,
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -295,7 +287,7 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
         {
           id: (Date.now() + 1).toString(),
           sender: "ai",
-          text: "Server se connect nahi ho paya. Kripya connection check karein.",
+          text: "Server se connect nahi ho paya. Kripya internet connection check karein.",
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -391,10 +383,18 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
                 )}
               </div>
 
-              {msg.provider && (
-                <span className="text-[10px] text-slate-500 mt-1 px-1">
-                  Solved via {msg.provider.toUpperCase()}
-                </span>
+              {/* Real-time Diagnostics Pill */}
+              {msg.sender === "ai" && msg.provider && (
+                <div className="mt-1 px-1 flex flex-col gap-0.5 text-[10px]">
+                  <span className="text-teal-400 font-medium">
+                    ✓ Solved via: {msg.provider.toUpperCase()} {msg.model ? `(${msg.model})` : ""}
+                  </span>
+                  {msg.debugTrace && msg.debugTrace.length > 1 && (
+                    <span className="text-slate-500 text-[9px] truncate max-w-sm">
+                      Path: {msg.debugTrace.join(" ➔ ")}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           ))}
@@ -404,7 +404,7 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
               <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
               <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse delay-150"></span>
               <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse delay-300"></span>
-              <span className="text-xs text-teal-300 ml-1">AI Teacher step-by-step solution likh raha hai...</span>
+              <span className="text-xs text-teal-300 ml-1">AI Teacher photo inspect karke step-by-step solution likh raha hai...</span>
             </div>
           )}
 
@@ -451,7 +451,7 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="p-2.5 rounded-xl text-slate-400 hover:text-teal-400 hover:bg-slate-800/80 transition"
-            title="Attach Image"
+            title="Attach Question Photo"
           >
             <SvgPaperclip className="w-5 h-5" />
           </button>
@@ -460,7 +460,7 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Sawal, concept ya numerical likhein..."
+            placeholder="Sawal likhein ya photo attach karein..."
             className="flex-1 bg-slate-900 border border-slate-700 focus:border-teal-500 focus:outline-none text-white text-sm px-4 py-2.5 rounded-xl transition placeholder:text-slate-500"
           />
 
