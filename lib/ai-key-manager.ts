@@ -7,29 +7,54 @@ interface KeyStatus {
 
 const keyPool: Map<string, KeyStatus> = new Map();
 
-function getLiveKeys(): string[] {
+/**
+ * Cloudflare environment se saari Gemini keys nikalta hai chahe kisi bhi naam se save ho
+ */
+export function getAllAvailableGeminiKeys(): string[] {
   const keys: string[] = [];
-  if (process.env.LIVE_GEMINI_API_KEYS) {
-    keys.push(
-      ...process.env.LIVE_GEMINI_API_KEYS.split(",")
-        .map((k) => k.trim())
-        .filter(Boolean)
-    );
+
+  // Comma-separated lists
+  const commaSeparated = [
+    process.env.LIVE_GEMINI_API_KEYS,
+    process.env.GEMINI_API_KEYS,
+  ];
+
+  for (const raw of commaSeparated) {
+    if (raw) {
+      keys.push(...raw.split(",").map((k) => k.trim()).filter(Boolean));
+    }
   }
+
+  // Individual variables
+  const individualVars = [
+    process.env.GEMINI_API_KEY_DOUBT,
+    process.env.GEMINI_API_KEY,
+    process.env.GEMINI_API_KEY_MENTOR,
+    process.env.NEXT_PUBLIC_GEMINI_API_KEY,
+  ];
+
   for (let i = 1; i <= 5; i++) {
-    const k = process.env[`LIVE_GEMINI_API_KEY_${i}`];
-    if (k && !keys.includes(k.trim())) keys.push(k.trim());
+    individualVars.push(process.env[`LIVE_GEMINI_API_KEY_${i}`]);
+    individualVars.push(process.env[`GEMINI_API_KEY_${i}`]);
   }
+
+  for (const k of individualVars) {
+    if (k && k.trim() && !keys.includes(k.trim())) {
+      keys.push(k.trim());
+    }
+  }
+
   return keys;
 }
 
 /**
- * Live Doubt Solver ke liye 5 keys ke pool se active key uthata hai
+ * Live ya Chat ke liye active, healthy key deta hai
  */
-export function getActiveLiveKey(): string | null {
-  const all = getLiveKeys();
+export function getActiveGeminiKeyForDoubt(): string | null {
+  const allKeys = getAllAvailableGeminiKeys();
   const now = Date.now();
-  const available = all.filter((k) => {
+
+  const available = allKeys.filter((k) => {
     const st = keyPool.get(k);
     return !st || st.cooldownUntil <= now;
   });
@@ -38,47 +63,19 @@ export function getActiveLiveKey(): string | null {
     return available[Math.floor(Math.random() * available.length)];
   }
 
-  // Fallback to common backup
-  return process.env.GEMINI_API_KEY || null;
+  return allKeys.length > 0 ? allKeys[0] : null;
 }
 
 /**
- * Normal Chat/Photo Doubt ke liye key nikalta hai
- */
-export function getActiveChatKey(): string | null {
-  const doubtKey = process.env.GEMINI_API_KEY_DOUBT;
-  const now = Date.now();
-
-  if (doubtKey) {
-    const st = keyPool.get(doubtKey);
-    if (!st || st.cooldownUntil <= now) return doubtKey;
-  }
-
-  // Fallback to Common Backup
-  const commonKey = process.env.GEMINI_API_KEY;
-  if (commonKey) {
-    const st = keyPool.get(commonKey);
-    if (!st || st.cooldownUntil <= now) return commonKey;
-  }
-
-  // If both rate limited, try any healthy Live key
-  return getActiveLiveKey();
-}
-
-/**
- * Rate-limited (429) key ko 60 min ke liye blacklist/exclude karta hai
+ * 429 par key ko cooldown mein daalna
  */
 export function markKeyRateLimited(key: string, cooldownMinutes = 60) {
   keyPool.set(key, {
     key,
     cooldownUntil: Date.now() + cooldownMinutes * 60 * 1000,
   });
-  console.warn(`[KeyManager] Key ...${key.slice(-5)} rate-limited. Excluded for ${cooldownMinutes}m.`);
 }
 
-/**
- * Backup External Providers
- */
 export function getBackupProviders() {
   return {
     groq: process.env.GROQ_API_KEY?.trim() || null,
