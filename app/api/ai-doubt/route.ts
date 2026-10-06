@@ -10,78 +10,57 @@ import {
 
 export const runtime = "edge";
 
-let cachedWorkingModel: string | null = null;
+function cleanKey(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/["'\r\n]/g, "").trim();
+  return cleaned.length > 10 ? cleaned : null;
+}
 
 export async function POST(req: NextRequest) {
-  const errors: string[] = [];
-
   try {
     const { query, image, isLive, targetExam, studentContext } = await req.json();
 
-    const allKeys = getAllAvailableGeminiKeys();
-    const { groq } = getBackupProviders();
+    const { groq, openRouter } = getBackupProviders();
+    const commonGeminiKey = cleanKey(process.env.GEMINI_API_KEY);
+    const examName = targetExam || studentContext?.targetExam || "JEE/NEET";
+    const studentName = studentContext?.name || "Student";
 
-    if (allKeys.length === 0 && !groq) {
-      return NextResponse.json(
-        { reply: "⚠️ API keys check karein!", spoken: "API key missing hai." },
-        { status: 500 }
-      );
+    const systemPrompt = isLive
+      ? `You are the personal AI Faculty for ${studentName} (${examName}) on a real-time live video call.
+Be energetic, encouraging, and clear like a top mentor.
+CRITICAL RULES:
+1. FORMULAS: Write formulas in clean textbook notation: 1/f = (μ_rel - 1)(1/R₁ - 1/R₂). Do NOT use \\frac or \\left.
+2. DUAL OUTPUT JSON: Return JSON:
+{
+  "written": "Clear step-by-step textbook solution for the screen HUD.",
+  "spoken": "Crisp 2-3 sentence conversational spoken answer without any symbols, formulas, or emojis."
+}`
+      : `You are the Master AI Doubt Faculty for ${studentName} (${examName}).
+Provide a detailed step-by-step written solution for their doubt.
+Use clean textbook formulas like 1/f = (μ - 1)(1/R₁ - 1/R₂). Format with clear bullet points.`;
+
+    // ─────────────────────────────────────────────────────────────
+    // 🔑 TIER 1 & TIER 2: GEMINI DEDICATED KEYS ➔ COMMON BACKUP
+    // ─────────────────────────────────────────────────────────────
+    const primaryKey = isLive ? getActiveLiveKey() : getActiveChatKey();
+    
+    // Key sequence: Primary Dedicated Key ➔ Common Backup Key
+    const geminiKeysToTry: string[] = [];
+    if (primaryKey) geminiKeysToTry.push(primaryKey);
+    if (commonGeminiKey && !geminiKeysToTry.includes(commonGeminiKey)) {
+      geminiKeysToTry.push(commonGeminiKey);
     }
 
-    const examName = targetExam || studentContext?.targetExam || "JEE/NEET";
+    const models = ["gemini-1.5-flash-002", "gemini-1.5-flash", "gemini-2.0-flash-exp"];
 
-    const systemPrompt = `You are the Master AI Doubt Faculty for PrepWise (${examName}).
-CRITICAL RULES:
-1. FORMULA FORMATTING: DO NOT output raw LaTeX code like \\frac{a}{b}, \\left(, \\right), or \\implies!
-   Write formulas in clean readable textbook format:
-   - Fractions: 1/f = (μ_rel - 1)(1/R₁ - 1/R₂)
-   - Symbols: μ, θ, λ, Δ, π, ×, •, ⇒
-   - Subscripts: R₁, R₂, μ_rel
-2. DUAL RESPONSE (JSON): Return your answer in this exact JSON:
-{
-  "written": "Your clear, step-by-step solution formatted with clean textbook formulas for the phone screen.",
-  "spoken": "A short, 2 to 3 sentence conversational explanation in clear everyday Hindi/English without any formulas, symbols, or emojis."
-}
-If unable to return JSON, return the written solution directly.`;
-
-    const hasImage = Boolean(image);
-    const apiKey = isLive ? getActiveLiveKey() : getActiveChatKey();
-
-    // ─────────────────────────────────────────────────────────────
-    // 1. PROVIDER 1: GEMINI (Auto-Discover Working Models)
-    // ─────────────────────────────────────────────────────────────
-    if (apiKey) {
-      let modelsToTry: string[] = cachedWorkingModel ? [cachedWorkingModel] : [];
-
-      if (modelsToTry.length === 0) {
-        try {
-          const listRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
-          );
-          if (listRes.ok) {
-            const listData = await listRes.json();
-            const liveModels = (listData.models || [])
-              .filter((m: any) => m.supportedGenerationMethods?.includes("generateContent"))
-              .map((m: any) => m.name.replace("models/", ""));
-
-            const flash = liveModels.filter((m: string) => m.includes("flash"));
-            modelsToTry = flash.length > 0 ? flash : liveModels;
-          }
-        } catch (_) {}
-      }
-
-      if (modelsToTry.length === 0) {
-        modelsToTry = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash-exp"];
-      }
-
-      for (const model of modelsToTry.slice(0, 4)) {
+    for (const apiKey of geminiKeysToTry) {
+      for (const model of models) {
         try {
           const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
           const parts: any[] = [];
           if (query) parts.push({ text: query });
 
-          // Safe Base64 Regex with [\s\S]+ for large camera frames
           if (image) {
             const match = image.match(/^data:image\/([a-zA-Z0-9]+);base64,([\s\S]+)$/);
             if (match) {
@@ -95,47 +74,42 @@ If unable to return JSON, return the written solution directly.`;
             }
           }
 
-          const payload = {
-            contents: [
-              {
-                role: "user",
-                parts: parts.length > 0 ? parts : [{ text: "Explain the question shown." }],
-              },
-            ],
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            generationConfig: { temperature: 0.35, maxOutputTokens: 1000 },
-          };
-
           const res = await fetch(geminiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({
+              contents: [{ role: "user", parts: parts.length > 0 ? parts : [{ text: "Explain this." }] }],
+              systemInstruction: { parts: [{ text: systemPrompt }] },
+              generationConfig: {
+                temperature: 0.3,
+                maxOutputTokens: isLive ? 350 : 900,
+              },
+            }),
           });
 
           if (res.status === 429 || res.status === 403) {
             markKeyRateLimited(apiKey, 60);
-            errors.push(`Gemini ${model} rate limited (${res.status})`);
-            break;
+            break; // Switch to Common Backup Key or next provider
           }
 
           if (res.ok) {
             const data = await res.json();
             const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-            cachedWorkingModel = model; // Cache successful model
-
-            try {
-              const cleanJson = textResponse.replace(/```json/g, "").replace(/```/g, "").trim();
-              const parsed = JSON.parse(cleanJson);
-              if (parsed.written) {
-                return NextResponse.json({
-                  reply: parsed.written,
-                  spoken: parsed.spoken || parsed.written,
-                  provider: `gemini-${model}`,
-                  success: true,
-                });
-              }
-            } catch (_) {}
+            if (isLive) {
+              try {
+                const cleanJson = textResponse.replace(/```json/g, "").replace(/```/g, "").trim();
+                const parsed = JSON.parse(cleanJson);
+                if (parsed.written) {
+                  return NextResponse.json({
+                    reply: parsed.written,
+                    spoken: parsed.spoken || parsed.written,
+                    provider: `gemini-${model}`,
+                    success: true,
+                  });
+                }
+              } catch (_) {}
+            }
 
             return NextResponse.json({
               reply: textResponse,
@@ -143,30 +117,25 @@ If unable to return JSON, return the written solution directly.`;
               provider: `gemini-${model}`,
               success: true,
             });
-          } else {
-            const errT = await res.text();
-            errors.push(`Gemini ${model} ${res.status}: ${errT.slice(0, 90)}`);
           }
-        } catch (err: any) {
-          errors.push(`Gemini ${model} err: ${err.message}`);
-        }
+        } catch (_) {}
       }
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 2. PROVIDER 2: GROQ FALLBACK (If Gemini is busy)
+    // 🌐 TIER 3: GROQ BACKUP (GROQ_API_KEY)
     // ─────────────────────────────────────────────────────────────
     if (groq) {
-      const groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.1-8b-instant";
+      const groqModel = image ? "llama-3.2-11b-vision-preview" : "llama-3.1-8b-instant";
       try {
         let groqMessages: any[] = [];
-        if (hasImage) {
+        if (image) {
           groqMessages = [
             { role: "system", content: systemPrompt },
             {
               role: "user",
               content: [
-                { type: "text", text: query || "Solve this question step-by-step" },
+                { type: "text", text: query || "Solve this question" },
                 { type: "image_url", image_url: { url: image } },
               ],
             },
@@ -174,7 +143,7 @@ If unable to return JSON, return the written solution directly.`;
         } else {
           groqMessages = [
             { role: "system", content: systemPrompt },
-            { role: "user", content: query || "Hello" },
+            { role: "user", content: query || "Explain this" },
           ];
         }
 
@@ -188,7 +157,7 @@ If unable to return JSON, return the written solution directly.`;
             model: groqModel,
             messages: groqMessages,
             temperature: 0.3,
-            max_tokens: 1000,
+            max_tokens: isLive ? 400 : 900,
           }),
         });
 
@@ -201,26 +170,75 @@ If unable to return JSON, return the written solution directly.`;
             provider: `groq-${groqModel}`,
             success: true,
           });
-        } else {
-          const gErr = await groqRes.text();
-          errors.push(`Groq ${groqRes.status}: ${gErr.slice(0, 90)}`);
         }
-      } catch (gErr: any) {
-        errors.push(`Groq ex: ${gErr.message}`);
-      }
+      } catch (_) {}
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 🌐 TIER 4: OPENROUTER BACKUP (OPENROUTER_API_KEY)
+    // ─────────────────────────────────────────────────────────────
+    if (openRouter) {
+      const orModel = image
+        ? "meta-llama/llama-3.2-11b-vision-instruct:free"
+        : "meta-llama/llama-3.2-3b-instruct:free";
+
+      try {
+        let orMessages: any[] = [];
+        if (image) {
+          orMessages = [
+            { role: "system", content: systemPrompt },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: query || "Solve this question" },
+                { type: "image_url", image_url: { url: image } },
+              ],
+            },
+          ];
+        } else {
+          orMessages = [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: query || "Explain this" },
+          ];
+        }
+
+        const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${openRouter}`,
+            "HTTP-Referer": "https://eterprep.pages.dev",
+            "X-Title": "PrepWise AI Faculty",
+          },
+          body: JSON.stringify({
+            model: orModel,
+            messages: orMessages,
+            temperature: 0.3,
+            max_tokens: isLive ? 400 : 900,
+          }),
+        });
+
+        if (orRes.ok) {
+          const orData = await orRes.json();
+          const orReply = orData.choices?.[0]?.message?.content || "";
+          return NextResponse.json({
+            reply: orReply,
+            spoken: orReply.slice(0, 300),
+            provider: `openrouter-${orModel}`,
+            success: true,
+          });
+        }
+      } catch (_) {}
     }
 
     return NextResponse.json(
       {
-        reply: `⚠️ Live Doubt Error:\n${errors.join("\n")}`,
-        spoken: "Faculty abhi busy hain, kripya dobara try karein.",
+        reply: "Abhi sabhi AI faculties busy hain. Kripya 1 minute baad dobara puchiye!",
+        spoken: "Faculty abhi busy hain, kripya 1 minute baad puchiye.",
       },
-      { status: 500 }
+      { status: 503 }
     );
-  } catch (error: any) {
-    return NextResponse.json(
-      { reply: `Server Error: ${error.message}`, spoken: "Technical error." },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    return NextResponse.json({ reply: `Error: ${err.message}`, spoken: "Error." }, { status: 500 });
   }
 }
