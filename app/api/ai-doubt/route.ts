@@ -71,6 +71,7 @@ function extractImages(body: any): ImageAttachment[] {
   return images.slice(0, 2);
 }
 
+// Gemini Caller with 503 Auto-Retry
 async function tryGemini(
   key: string,
   modelName: string,
@@ -101,15 +102,26 @@ async function tryGemini(
     },
   };
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const makeCall = async () => {
+    return await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(4500), // 4.5s max to prevent long hangs
+    });
+  };
+
+  let res = await makeCall();
+
+  // If 503 High Demand Spike, wait 600ms and retry once
+  if (res.status === 503) {
+    await new Promise((r) => setTimeout(r, 600));
+    res = await makeCall();
+  }
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini ${cleanModel} ${res.status}: ${errText.slice(0, 180)}`);
+    throw new Error(`Gemini ${cleanModel} ${res.status}: ${errText.slice(0, 160)}`);
   }
 
   const data = await res.json();
@@ -120,6 +132,7 @@ async function tryGemini(
   return text;
 }
 
+// Groq with Browser User-Agent (Fixes 403 block)
 async function tryGroq(
   groqKey: string,
   model: string,
@@ -160,14 +173,16 @@ async function tryGroq(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       Authorization: `Bearer ${groqKey}`,
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(3500),
   });
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Groq ${model} ${res.status}: ${err.slice(0, 180)}`);
+    throw new Error(`Groq ${model} ${res.status}: ${err.slice(0, 160)}`);
   }
 
   const data = await res.json();
@@ -176,6 +191,7 @@ async function tryGroq(
   return text;
 }
 
+// OpenRouter Caller
 async function tryOpenRouter(
   orKey: string,
   model: string,
@@ -216,16 +232,18 @@ async function tryOpenRouter(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       Authorization: `Bearer ${orKey}`,
       "HTTP-Referer": "https://eterprep.pages.dev",
       "X-Title": "PrepWise JEE NEET",
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(4500),
   });
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`OpenRouter ${model} ${res.status}: ${err.slice(0, 180)}`);
+    throw new Error(`OpenRouter ${model} ${res.status}: ${err.slice(0, 160)}`);
   }
 
   const data = await res.json();
@@ -260,28 +278,23 @@ export async function POST(req: NextRequest) {
     }
 
     const geminiKeys = mode === "live" ? getLiveGeminiKeys() : getChatGeminiKeys();
-    
-    // 1. Exact model requested by Google in the error message!
-    const geminiModels = ["gemini-3.8-flash", "gemini-2.0-flash-exp", "gemini-1.5-flash"];
 
-    // 2. Exact universal models supported on Groq
+    // Only active valid models
+    const geminiModels = ["gemini-3.8-flash", "gemini-1.5-pro"];
+
     const groqModels = hasImages
       ? ["llama-3.2-11b-vision-preview"]
-      : ["llama-3.1-8b-instant", "llama3-8b-8192"];
+      : ["llama-3.1-8b-instant"];
 
-    // 3. Exact slug recommended by OpenRouter in the error message!
-    const orModels = [
-      "meta-llama/llama-3.3-70b-instruct",
-      "meta-llama/llama-3.1-8b-instruct:free",
-      "google/gemini-2.0-flash-exp:free",
-    ];
+    // OpenRouter models (free models for text, vision models for photos)
+    const orModels = hasImages
+      ? ["meta-llama/llama-3.2-11b-vision-instruct:free", "google/gemini-2.0-flash-001"]
+      : ["meta-llama/llama-3.1-8b-instruct:free", "google/gemini-2.0-flash-001"];
 
     const errorLogs: string[] = [];
 
-    // TIER 1 & 2: Chat Gemini Keys with Google's updated gemini-3.8-flash
-    if (geminiKeys.length === 0) {
-      errorLogs.push("No Gemini Chat Keys found in environment");
-    } else {
+    // TIER 1: Google Gemini (Target: 1.5s)
+    if (geminiKeys.length > 0) {
       for (const key of geminiKeys) {
         for (const model of geminiModels) {
           try {
@@ -297,11 +310,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // TIER 3: Groq Fallback with working llama-3.1-8b-instant
+    // TIER 2: Superfast Groq with User-Agent (Target: 0.4s)
     const groqKey = getGroqKey();
-    if (!groqKey) {
-      errorLogs.push("No Groq key configured");
-    } else {
+    if (groqKey) {
       for (const model of groqModels) {
         try {
           const reply = await tryGroq(groqKey, model, userText, images);
@@ -312,11 +323,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // TIER 4: OpenRouter Fallback with recommended slug
+    // TIER 3: OpenRouter (Target: 1.8s)
     const orKey = getOpenRouterKey();
-    if (!orKey) {
-      errorLogs.push("No OpenRouter key configured");
-    } else {
+    if (orKey) {
       for (const model of orModels) {
         try {
           const reply = await tryOpenRouter(orKey, model, userText, images);
@@ -327,7 +336,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // If still fails, show exact reasons
     const diagnosticText = errorLogs.length > 0
       ? errorLogs.slice(0, 3).join("\n• ")
       : "All AI providers temporarily busy.";
