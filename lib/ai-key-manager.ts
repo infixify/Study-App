@@ -14,9 +14,9 @@ export function cleanKey(raw?: string): string {
 }
 
 /**
- * CHAT DOUBT KEYS (Dedicated):
- * Strictly checks Chat keys only (GEMINI_API_KEY_DOUBT, GEMINI_API_KEY).
- * 5 Live Keys (GEMINI_API_KEYS) are strictly EXCLUDED.
+ * CHAT DOUBT KEYS:
+ * Strictly dedicated Chat keys.
+ * 5 Live Keys (GEMINI_API_KEYS) are 100% EXCLUDED.
  */
 export function getChatGeminiKeys(): string[] {
   const keys: string[] = [];
@@ -28,22 +28,18 @@ export function getChatGeminiKeys(): string[] {
     }
   };
 
-  // 1. Dedicated Doubt Keys (all possible naming variations)
-  add(process.env.GEMINI_API_KEY_DOUBT);
-  add(process.env.GEMINI_API_KEY_DOUT);
-  add(process.env.GOOGLE_API_KEY_DOUBT);
-  add(process.env.GOOGLE_API_KEY_DOUT);
+  // 1. Dedicated Doubt Keys (both spellings)
+  add(process.env.GEMINI_API_KEY_DOUBT || process.env.GOOGLE_API_KEY_DOUBT);
+  add(process.env.GEMINI_API_KEY_DOUT || process.env.GOOGLE_API_KEY_DOUT);
 
-  // 2. Standard Gemini / Google Key
-  add(process.env.GEMINI_API_KEY);
-  add(process.env.GOOGLE_API_KEY);
-  add(process.env.GEMINI_KEY);
+  // 2. Main Standard Key
+  add(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_KEY);
 
   return keys;
 }
 
 /**
- * LIVE CAM / VIDEO KEYS (Dedicated 5 keys pool):
+ * LIVE CAM / VIDEO KEYS (5 separate project keys pool):
  */
 export function getLiveGeminiKeys(): string[] {
   const raw = process.env.GEMINI_API_KEYS || process.env.LIVE_GEMINI_API_KEYS || "";
@@ -51,19 +47,11 @@ export function getLiveGeminiKeys(): string[] {
 }
 
 export function getGroqKey(): string {
-  return cleanKey(
-    process.env.GROQ_API_KEY ||
-    process.env.GROK_API_KEY ||
-    process.env.GROQ_KEY
-  );
+  return cleanKey(process.env.GROQ_API_KEY || process.env.GROK_API_KEY || process.env.GROQ_KEY);
 }
 
 export function getOpenRouterKey(): string {
-  return cleanKey(
-    process.env.OPENROUTER_API_KEY ||
-    process.env.OPEN_ROUTER_API_KEY ||
-    process.env.OPENROUTER_KEY
-  );
+  return cleanKey(process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY || process.env.OPENROUTER_KEY);
 }
 
 export function getHealthyKey(keys: string[]): string | null {
