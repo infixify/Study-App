@@ -30,7 +30,7 @@ FORMATTING RULES:
 
 interface ImageAttachment {
   mimeType: string;
-  data: string; // base64 without prefix
+  data: string;
 }
 
 function extractImages(body: any): ImageAttachment[] {
@@ -112,7 +112,6 @@ async function tryGroq(
 ): Promise<string> {
   const url = "https://api.groq.com/openai/v1/chat/completions";
   const hasImages = images.length > 0;
-  // Use vision model if image attached, else ultra-fast text model
   const model = hasImages ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
 
   const contentParts: any[] = [];
@@ -234,13 +233,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1. Select Gemini Keys based on mode
     const geminiKeys = mode === "live" ? getLiveGeminiKeys() : getChatGeminiKeys();
     const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"];
 
     const errorLogs: string[] = [];
 
-    // TIER 1 & 2: Gemini Pool with Multi-Model Fallback
+    // TIER 1 & 2: Gemini
     for (const key of geminiKeys) {
       for (const model of candidateModels) {
         try {
@@ -277,7 +275,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Never return technical crash string to student
     console.error("[AI Doubt Cascade Failed]", errorLogs);
     return NextResponse.json(
       {
