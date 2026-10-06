@@ -3,7 +3,6 @@
 
 import React, { useState, useRef, useEffect, ChangeEvent } from "react";
 
-// Inline Zero-Dependency SVG Icons (No lucide-react needed)
 function IconClose({ className = "w-5 h-5" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -62,7 +61,6 @@ interface Message {
   timestamp: string;
 }
 
-// Accepts BOTH 'open' and 'isOpen' to match app/dashboard/page.tsx
 interface AiChatSheetProps {
   open?: boolean;
   isOpen?: boolean;
@@ -107,7 +105,6 @@ async function compressImage(file: File, maxWidth = 1280, quality = 0.75): Promi
   });
 }
 
-// Textbook math normalizer: converts any raw LaTeX leftovers to clean Unicode book text
 function formatTextbookNotes(text: string): string {
   if (!text) return "";
   let clean = text;
@@ -168,7 +165,6 @@ export default function AiChatSheet({
   userEmail,
   studentContext,
 }: AiChatSheetProps) {
-  // Supports both open and isOpen props safely
   const isSheetOpen = open ?? isOpen ?? false;
 
   const [messages, setMessages] = useState<Message[]>([
@@ -186,7 +182,6 @@ export default function AiChatSheet({
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [compressing, setCompressing] = useState(false);
 
-  // VIP Limit: Owner gets 999
   const isOwner = userEmail === "sarthaksinghyadav1@gmail.com";
   const dailyLimit = isOwner ? 999 : 10;
   const [usedDoubts, setUsedDoubts] = useState(0);
@@ -249,7 +244,7 @@ export default function AiChatSheet({
     const userMsg: Message = {
       id: "u-" + Date.now(),
       role: "user",
-      content: text || "Please check this question photo",
+      content: text || "Please explain this question photo",
       images: selectedImages.length > 0 ? [...selectedImages] : undefined,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
@@ -266,7 +261,13 @@ export default function AiChatSheet({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
+          prompt: text,
+          question: text,
+          doubt: text,
+          query: text,
+          text: text,
           images: imagesToSend,
+          image: imagesToSend[0] || "",
           mode: "chat",
           studentContext,
         }),
@@ -406,7 +407,6 @@ export default function AiChatSheet({
         {/* Input Bar */}
         <div className="p-3 bg-[#1e293b] border-t border-slate-800">
           <form onSubmit={handleSend} className="flex items-center gap-2">
-            {/* Hidden File Inputs */}
             <input
               type="file"
               ref={fileInputRef}
