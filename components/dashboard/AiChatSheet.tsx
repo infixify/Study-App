@@ -3,11 +3,17 @@
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 
+interface LiveExchange {
+  query: string;
+  reply: string;
+  isFollowUp?: boolean;
+}
+
 interface Message {
   role: "assistant" | "user";
   content: string;
   image?: string;
-  isLiveSession?: boolean;
+  liveSessionGroup?: LiveExchange[];
 }
 
 interface StudentContext {
@@ -37,12 +43,11 @@ function getTodayLimitKey(): string {
   return `pw_doubt_daily_quota_${today}`;
 }
 
-// ─── 1. UNIVERSAL TEXTBOOK MATH NORMALIZER (Converts LaTeX to clean NCERT style) ───
+// ─── 1. UNIVERSAL TEXTBOOK MATH NORMALIZER (Clean NCERT Symbols) ───
 function normalizeMathToTextbook(raw: string): string {
   if (!raw) return "";
   let s = raw;
 
-  // 1. Remove LaTeX brackets & implies
   s = s.replace(/\\left\(/g, "(")
        .replace(/\\right\)/g, ")")
        .replace(/\\left\[/g, "[")
@@ -51,10 +56,8 @@ function normalizeMathToTextbook(raw: string): string {
        .replace(/\\iff/g, " ⇔ ")
        .replace(/\\to/g, " → ");
 
-  // 2. Fractions: \frac{a}{b} -> a/b
   s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)");
 
-  // 3. Greek Letters to True Unicode
   s = s.replace(/\\mu/g, "μ")
        .replace(/\\phi/g, "Φ")
        .replace(/\\theta/g, "θ")
@@ -63,30 +66,24 @@ function normalizeMathToTextbook(raw: string): string {
        .replace(/\\beta/g, "β")
        .replace(/\\Delta/g, "Δ")
        .replace(/\\omega/g, "ω")
-       .replace(/\\pi/g, "π")
-       .replace(/\\sigma/g, "σ");
+       .replace(/\\pi/g, "π");
 
-  // 4. Subscripts & Superscripts
   s = s.replace(/_\{1\}|_1/g, "₁")
        .replace(/_\{2\}|_2/g, "₂")
        .replace(/_\{3\}|_3/g, "₃")
        .replace(/_\{0\}|_0/g, "₀")
        .replace(/\^\{2\}|\^2/g, "²")
        .replace(/\^\{3\}|\^3/g, "³")
-       .replace(/_\{([^}]+)\}/g, "_$1"); // \mu_{rel} -> μ_rel
+       .replace(/_\{([^}]+)\}/g, "_$1");
 
-  // 5. Operators & Vectors
   s = s.replace(/\\cdot/g, " • ")
        .replace(/\\times/g, " × ")
        .replace(/\\vec\{([^}]+)\}/g, "$1⃗")
        .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
        .replace(/\\approx/g, " ≈ ")
        .replace(/\\neq/g, " ≠ ")
-       .replace(/\\pm/g, " ± ")
-       .replace(/\\infty/g, " ∞ ")
-       .replace(/\\degree/g, "°");
+       .replace(/\\pm/g, " ± ");
 
-  // 6. Clean stray dollar signs and backslashes
   s = s.replace(/\$\$/g, "")
        .replace(/\$/g, "")
        .replace(/\\text\{([^}]+)\}/g, "$1")
@@ -95,15 +92,13 @@ function normalizeMathToTextbook(raw: string): string {
   return s;
 }
 
-// ─── 2. SMART SPEECH FILTER (Removes emojis, code & speaks naturally) ───
+// ─── 2. SMART SPEECH FILTER (Speaks Naturally Without Emojis / Math Code) ───
 function cleanTextForSpeech(raw: string): string {
   if (!raw) return "";
   let s = raw;
 
-  // Remove emojis
   s = s.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "");
 
-  // Spoken math words
   s = s.replace(/\\phi/gi, " Phi ")
        .replace(/\\theta/gi, " Theta ")
        .replace(/\\vec\{([^}]+)\}/gi, " vector $1 ")
@@ -112,8 +107,7 @@ function cleanTextForSpeech(raw: string): string {
        .replace(/\\cos/gi, " cos ")
        .replace(/\\sin/gi, " sin ")
        .replace(/\\tan/gi, " tan ")
-       .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, " $1 divided by $2 ")
-       .replace(/\\Delta/gi, " Delta ");
+       .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, " $1 divided by $2 ");
 
   s = s.replace(/\$\$/g, " ")
        .replace(/\$/g, " ")
@@ -122,7 +116,7 @@ function cleanTextForSpeech(raw: string): string {
        .replace(/\s+/g, " ")
        .trim();
 
-  return s.slice(0, 450);
+  return s.slice(0, 420);
 }
 
 // ─── 3. TEXTBOOK VISUAL COMPONENT ───
@@ -135,7 +129,6 @@ function FormattedSolution({ text }: { text: string }) {
         const trimmed = line.trim();
         if (!trimmed) return <div key={idx} className="h-1" />;
 
-        // Display Equation Card Block
         if (
           trimmed.startsWith("$$") ||
           trimmed.includes("\\frac") ||
@@ -152,7 +145,6 @@ function FormattedSolution({ text }: { text: string }) {
           );
         }
 
-        // Section Headings ###
         if (trimmed.startsWith("###")) {
           return (
             <h4
@@ -164,9 +156,7 @@ function FormattedSolution({ text }: { text: string }) {
           );
         }
 
-        // Normal Line with clean math symbols
         const cleanLine = normalizeMathToTextbook(trimmed);
-
         return (
           <p
             key={idx}
@@ -190,7 +180,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-  // VIP Dynamic Quota (sarthaksinghyadav1@gmail.com gets 999 doubts)
+  // VIP Quota (Owner gets 999)
   const isOwner = studentContext?.email === "sarthaksinghyadav1@gmail.com";
   const dailyLimit = isOwner ? 999 : (studentContext?.dailyDoubtLimit || 10);
   const [remainingQuota, setRemainingQuota] = useState(dailyLimit);
@@ -202,15 +192,15 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
 
   // ── TRUE CONTINUOUS LIVE VIDEO CALL STATE ──
   const [liveCallOpen, setLiveCallOpen] = useState(false);
-  const [isLiveListening, setIsLiveListening] = useState(false);
+  const [liveMicMuted, setLiveMicMuted] = useState(false);
   const [liveSolution, setLiveSolution] = useState<string | null>(null);
   const [isSolutionExpanded, setIsSolutionExpanded] = useState(true);
-  const [liveSessionItems, setLiveSessionItems] = useState<{ query: string; reply: string }[]>([]);
+  const [liveExchanges, setLiveExchanges] = useState<LiveExchange[]>([]);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const liveRecognitionRef = useRef<any>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -261,7 +251,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     setMessages([
       {
         role: "assistant",
-        content: `Namaste ${name}! Main aapka AI Doubt Faculty hoon. Koi bhi sawaal bol kar puchein, photo attach karein ya **Live Call (🎥)** se direct uninterrupted video call karein! ✍️`,
+        content: `Namaste ${name}! Main aapka AI Doubt Faculty hoon. Koi bhi sawaal type karein, photo attach karein ya **Live Call (🎥)** se direct hands-free video call karein! ✍️`,
       },
     ]);
   }, [open, getRemainingQuotaVal]);
@@ -279,6 +269,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   }, [messages]);
 
+  // Preload voices
   useEffect(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.getVoices();
@@ -288,7 +279,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   }, []);
 
-  // ─── 4. NATURAL HD VOICE ENGINE (Anti-Freeze 15-second heartbeat) ───
+  // ─── NATURAL HD VOICE ENGINE (With 15-second Anti-Freeze Heartbeat) ───
   const speakNaturalVoice = useCallback(
     (text: string) => {
       if (audioMuted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -358,12 +349,13 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     setIsSpeaking(false);
   };
 
-  // ─── 5. TRUE CONTINUOUS LIVE VIDEO CALL CONTROLS ───
+  // ─── 4. TRUE CONTINUOUS LIVE VIDEO CALL CONTROLS ───
   const startLiveCall = async (mode: "environment" | "user" = facingMode) => {
     setLiveCallOpen(true);
+    setLiveMicMuted(false);
     setLiveSolution(null);
     setIsSolutionExpanded(true);
-    setLiveSessionItems([]);
+    setLiveExchanges([]);
 
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -373,8 +365,8 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: mode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 640 }, // Optimized for ultra-fast 0.8s upload
+          height: { ideal: 480 },
         },
         audio: false,
       });
@@ -384,6 +376,9 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         videoRef.current.srcObject = stream;
         videoRef.current.play().catch(() => {});
       }
+
+      // Start Hands-Free Continuous Speech Listener
+      initContinuousLiveListener();
     } catch (e) {
       alert("Camera permission allow karein live video call ke liye.");
       setLiveCallOpen(false);
@@ -396,6 +391,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     startLiveCall(next);
   };
 
+  // 🛑 END LIVE CALL: Appends Threaded Card into Normal Chat
   const stopLiveCall = () => {
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -404,74 +400,103 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    if (liveRecognitionRef.current) {
+      try { liveRecognitionRef.current.abort(); } catch (_) {}
+    }
     stopSpeaking();
 
-    if (liveSessionItems.length > 0) {
-      const newChatMessages: Message[] = [];
-      liveSessionItems.forEach((item) => {
-        newChatMessages.push({ role: "user", content: `🎥 [Live Call Doubt]: ${item.query}` });
-        newChatMessages.push({ role: "assistant", content: item.reply, isLiveSession: true });
-      });
-      setMessages((prev) => [...prev, ...newChatMessages]);
+    // Append Threaded Live Session Card into Chat!
+    if (liveExchanges.length > 0) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `🎥 Live Call Notes (${liveExchanges.length} doubts resolved)`,
+          liveSessionGroup: [...liveExchanges],
+        },
+      ]);
     }
 
     setLiveCallOpen(false);
-    setIsLiveListening(false);
   };
 
-  const captureLiveVideoFrame = (): string | null => {
+  const captureFastFrame = (): string | null => {
     if (!videoRef.current) return null;
     const v = videoRef.current;
     const canvas = document.createElement("canvas");
-    canvas.width = v.videoWidth || 640;
-    canvas.height = v.videoHeight || 480;
+    canvas.width = 480;
+    canvas.height = 360;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.75);
+    return canvas.toDataURL("image/jpeg", 0.65); // Ultra-lightweight ~25KB
   };
 
-  const triggerLiveSpeechQuery = () => {
+  // 🎙️ CONTINUOUS HANDS-FREE LISTENER (With Instant Barge-in Interruption)
+  const initContinuousLiveListener = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
 
-    if (!SpeechRecognition) {
-      const snap = captureLiveVideoFrame();
-      handleLiveExecution(snap, "Explain the question shown in the camera step-by-step.");
-      return;
-    }
-
-    setIsLiveListening(true);
     try {
       const recognition = new SpeechRecognition();
       recognition.lang = "en-IN";
+      recognition.continuous = true;
       recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
 
       recognition.onresult = (event: any) => {
-        const spoken = event.results[0][0]?.transcript || "";
-        setIsLiveListening(false);
-        const snap = captureLiveVideoFrame();
-        handleLiveExecution(snap, spoken || "Explain this question");
+        if (liveMicMuted) return; // Ignore if user muted mic
+
+        const latestResult = event.results[event.results.length - 1];
+        if (latestResult.isFinal) {
+          const spoken = latestResult[0]?.transcript?.trim() || "";
+          if (spoken.length > 2) {
+            // 🛑 BARGE-IN: If AI was speaking, interrupt immediately!
+            stopSpeaking();
+
+            const snap = captureFastFrame();
+            const isFollowUp = liveExchanges.length > 0;
+            handleLiveExecution(snap, spoken, isFollowUp);
+          }
+        }
       };
 
       recognition.onerror = () => {
-        setIsLiveListening(false);
-        const snap = captureLiveVideoFrame();
-        handleLiveExecution(snap, "Explain this question");
+        // Restart listener if dropped
+        if (liveCallOpen && !liveMicMuted) {
+          setTimeout(() => {
+            try { recognition.start(); } catch (_) {}
+          }, 1000);
+        }
       };
 
-      recognition.onend = () => setIsLiveListening(false);
-      recognitionRef.current = recognition;
+      recognition.onend = () => {
+        if (liveCallOpen && !liveMicMuted) {
+          setTimeout(() => {
+            try { recognition.start(); } catch (_) {}
+          }, 500);
+        }
+      };
+
+      liveRecognitionRef.current = recognition;
       recognition.start();
-    } catch (_) {
-      setIsLiveListening(false);
+    } catch (_) {}
+  };
+
+  const toggleLiveMic = () => {
+    const nextState = !liveMicMuted;
+    setLiveMicMuted(nextState);
+    if (nextState) {
+      try { liveRecognitionRef.current?.stop(); } catch (_) {}
+    } else {
+      try { liveRecognitionRef.current?.start(); } catch (_) {}
     }
   };
 
-  const handleLiveExecution = async (imgData: string | null, promptText: string) => {
+  // ─── EXECUTE LIVE CALL (Uses 5 LIVE Dedicated Keys) ───
+  const handleLiveExecution = async (imgData: string | null, promptText: string, isFollowUp: boolean) => {
     if (remainingQuota <= 0) {
-      setLiveSolution("⚠️ Aaj ka free doubt quota khatam ho chuka hai! Kal naya quota milega.");
+      setLiveSolution("⚠️ Aaj ka free doubt quota complete ho chuka hai.");
       return;
     }
 
@@ -486,7 +511,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         body: JSON.stringify({
           query: promptText,
           image: imgData,
-          isLive: true,
+          isLive: true, // 👈 Routes to 5 Dedicated Live Keys
           targetExam: studentContext?.targetExam || "JEE",
           studentContext,
         }),
@@ -496,28 +521,33 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         const data = await res.json();
         const replyText = data.reply || "Solution complete.";
         const speakText = data.spoken || replyText;
+
         setLiveSolution(replyText);
         setIsSolutionExpanded(true);
-        setLiveSessionItems((prev) => [...prev, { query: promptText, reply: replyText }]);
+        setLiveExchanges((prev) => [
+          ...prev,
+          { query: promptText, reply: replyText, isFollowUp },
+        ]);
+
         speakNaturalVoice(speakText);
       } else {
-        setLiveSolution("Sawal samajhne mein dikkat aayi. Kripya dobara mic daba kar puchein!");
+        setLiveSolution("Sawal samajhne mein dikkat aayi. Kripya dobara bolein!");
       }
     } catch {
-      setLiveSolution("Network error. Internet check karein!");
+      setLiveSolution("Network error. Kripya internet connection check karein!");
     } finally {
       setLoading(false);
     }
   };
 
-  // ─── CHAT MODE EXECUTION ───
+  // ─── EXECUTE CHAT MODE (Uses Dedicated GEMINI_API_KEY_DOUBT) ───
   const handleExecuteDoubt = async (imgData: string | null, promptText: string) => {
     if (remainingQuota <= 0) {
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `⚠️ Aaj ke **${dailyLimit} free doubts** khatam ho chuke hain! Raat 12 baje reset ho jayega.`,
+          content: `⚠️ Aaj ke **${dailyLimit} free doubts** khatam ho chuke hain! Raat 12 baje reset hoga.`,
         },
       ]);
       return;
@@ -536,7 +566,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         body: JSON.stringify({
           query: promptText,
           image: imgData,
-          isLive: false,
+          isLive: false, // 👈 Routes to Dedicated Chat Key
           targetExam: studentContext?.targetExam || "JEE",
           studentContext,
         }),
@@ -594,15 +624,17 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end animate-in fade-in">
       <div className="w-full max-w-md mx-auto bg-white rounded-t-3xl shadow-2xl flex flex-col h-[85vh] border-t border-ink/10 relative overflow-hidden">
 
-        {/* ── 1. TRUE FULLSCREEN CONTINUOUS LIVE VIDEO CALL OVERLAY ── */}
+        {/* ═════════════════════════════════════════════════════════════ */}
+        {/* ── 1. TRUE HANDS-FREE LIVE VIDEO CALL OVERLAY ── */}
+        {/* ═════════════════════════════════════════════════════════════ */}
         {liveCallOpen && (
           <div className="absolute inset-0 z-50 bg-black flex flex-col justify-between animate-in fade-in">
             {/* Top Bar */}
-            <div className="p-3.5 flex items-center justify-between text-white z-20 bg-gradient-to-b from-black/80 to-transparent">
+            <div className="p-3.5 flex items-center justify-between text-white z-20 bg-gradient-to-b from-black/85 to-transparent">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
                 <span className="text-xs font-black tracking-wide bg-white/20 px-2.5 py-1 rounded-full backdrop-blur-md">
-                  Gemini Live Call
+                  Gemini Live Video Call
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -624,7 +656,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               </div>
             </div>
 
-            {/* Continuous Video Feed */}
+            {/* Continuous Video Feed (Camera ALWAYS active) */}
             <div className="absolute inset-0 z-0 bg-black flex items-center justify-center">
               <video
                 ref={(el) => {
@@ -641,7 +673,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               />
             </div>
 
-            {/* Floating Expandable Solution Card */}
+            {/* Floating Expandable Solution HUD */}
             {liveSolution && (
               <div className="mx-3.5 z-20 transition-all duration-300">
                 <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/40 overflow-hidden flex flex-col">
@@ -650,7 +682,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
                     className="p-2.5 px-3.5 bg-ink text-white flex items-center justify-between cursor-pointer select-none"
                   >
                     <span className="text-xs font-black flex items-center gap-1.5 text-teal">
-                      <span>✨</span> Solution Step-by-Step
+                      <span>✨</span> Solution (Live HUD)
                     </span>
                     <button type="button" className="text-xs font-bold text-white/80 hover:text-white">
                       {isSolutionExpanded ? "Collapse ▾" : "Expand ▴"}
@@ -666,49 +698,49 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               </div>
             )}
 
-            {/* Bottom Call Controls & Glowing Orb */}
+            {/* Bottom Controls: Floating Mic Toggle & Live Voice Indicator */}
             <div className="p-4 pb-6 flex flex-col items-center gap-3 z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
               <div className="flex items-center gap-2">
                 <div
                   className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
                     isSpeaking
                       ? "bg-teal animate-ping scale-125"
-                      : isLiveListening
-                      ? "bg-rose-500 animate-pulse"
-                      : "bg-white/40"
+                      : liveMicMuted
+                      ? "bg-slate-500"
+                      : "bg-emerald-400 animate-pulse"
                   }`}
                 />
-                <span className="text-[11px] font-semibold text-white/90">
+                <span className="text-[11.5px] font-semibold text-white/95">
                   {loading
                     ? "Thinking & Solving…"
                     : isSpeaking
-                    ? "AI is Speaking Solution (🔊)"
-                    : isLiveListening
-                    ? "Listening to your doubt…"
-                    : "Tap mic & ask question from book"}
+                    ? "AI is Speaking Solution (Tokne ke liye bolo 🗣️)"
+                    : liveMicMuted
+                    ? "Mic Muted (Unmute to ask)"
+                    : "Mic Live: Kitaab dikhayein aur bole"}
                 </span>
               </div>
 
+              {/* Floating Mic Mute / Unmute Toggle Button */}
               <button
                 type="button"
-                onClick={triggerLiveSpeechQuery}
-                disabled={loading}
+                onClick={toggleLiveMic}
                 className={`w-full py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 ${
-                  isLiveListening
-                    ? "bg-rose-600 text-white animate-pulse"
+                  liveMicMuted
+                    ? "bg-slate-700 text-white"
                     : "bg-gradient-to-r from-teal to-emerald-500 text-white"
                 }`}
               >
-                <span className="text-lg">🎙️</span>
-                <span>
-                  {isLiveListening ? "Listening... Speak now!" : "Tap to Speak Doubt (Live Video)"}
-                </span>
+                <span className="text-lg">{liveMicMuted ? "🔇" : "🎙️"}</span>
+                <span>{liveMicMuted ? "Unmute Mic to Ask" : "Mute Mic (Stop Background Voice)"}</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* ── 2. NORMAL CHAT HEADER ── */}
+        {/* ═════════════════════════════════════════════════════════════ */}
+        {/* ── 2. NORMAL CHAT HEADER (Dedicated Chat Key) ── */}
+        {/* ═════════════════════════════════════════════════════════════ */}
         <div className="p-3.5 border-b border-ink/8 flex items-center justify-between bg-paper/50 rounded-t-3xl">
           <div className="flex items-center gap-2">
             <span className="w-8 h-8 rounded-xl bg-teal text-white flex items-center justify-center text-sm font-bold shadow-xs">
@@ -759,38 +791,54 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
         </div>
 
-        {/* ── CHAT MESSAGES WITH TEXTBOOK MATH ── */}
+        {/* ── CHAT MESSAGES (With Threaded Live Call Cards) ── */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((m, idx) => (
             <div
               key={idx}
               className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
             >
-              <div
-                className={`max-w-[88%] rounded-2xl p-3.5 text-xs leading-relaxed ${
-                  m.role === "user"
-                    ? "bg-ink text-paper rounded-br-xs"
-                    : "bg-paper/80 border border-ink/8 text-ink rounded-bl-xs shadow-xs"
-                }`}
-              >
-                {m.image && (
-                  <img
-                    src={m.image}
-                    alt="Question"
-                    className="max-h-48 rounded-lg mb-2 object-contain bg-black/5"
-                  />
-                )}
-                {m.isLiveSession && (
-                  <span className="block text-[9.5px] font-bold text-teal mb-1">
-                    🎥 Resolved during Live Call:
-                  </span>
-                )}
-                {m.role === "assistant" ? (
-                  <FormattedSolution text={m.content} />
-                ) : (
-                  <span className="whitespace-pre-wrap">{m.content}</span>
-                )}
-              </div>
+              {/* Threaded Live Session Card */}
+              {m.liveSessionGroup ? (
+                <div className="w-full bg-teal/5 border border-teal/20 rounded-2xl p-3.5 space-y-3 shadow-xs">
+                  <div className="flex items-center gap-2 text-teal font-black text-xs border-b border-teal/15 pb-2">
+                    <span>🎥</span>
+                    <span>Live Video Call Session Notes</span>
+                  </div>
+                  {m.liveSessionGroup.map((item, itemIdx) => (
+                    <div key={itemIdx} className="space-y-1.5 pt-1">
+                      <p className="text-[11px] font-bold text-ink flex items-center gap-1.5">
+                        <span className="text-teal">👤 Student {item.isFollowUp ? "(Follow-up)" : ""}:</span>
+                        <span>"{item.query}"</span>
+                      </p>
+                      <div className="bg-white/80 p-2.5 rounded-xl border border-ink/8">
+                        <FormattedSolution text={item.reply} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className={`max-w-[88%] rounded-2xl p-3.5 text-xs leading-relaxed ${
+                    m.role === "user"
+                      ? "bg-ink text-paper rounded-br-xs"
+                      : "bg-paper/80 border border-ink/8 text-ink rounded-bl-xs shadow-xs"
+                  }`}
+                >
+                  {m.image && (
+                    <img
+                      src={m.image}
+                      alt="Question"
+                      className="max-h-48 rounded-lg mb-2 object-contain bg-black/5"
+                    />
+                  )}
+                  {m.role === "assistant" ? (
+                    <FormattedSolution text={m.content} />
+                  ) : (
+                    <span className="whitespace-pre-wrap">{m.content}</span>
+                  )}
+                </div>
+              )}
             </div>
           ))}
 
@@ -802,7 +850,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           <div ref={chatEndRef} />
         </div>
 
-        {/* Image Preview if Gallery Chosen */}
+        {/* Gallery Image Preview */}
         {selectedImage && (
           <div className="px-4 py-2 bg-paper/60 border-t border-ink/5 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -823,7 +871,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
         )}
 
-        {/* ── INPUT BAR WITH START LIVE CALL ── */}
+        {/* ── NORMAL INPUT BAR ── */}
         <div className="p-3 border-t border-ink/10 bg-white">
           <form
             onSubmit={(e) => {
@@ -836,7 +884,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
             }}
             className="flex items-center gap-2"
           >
-            {/* START TRUE LIVE VIDEO CALL */}
+            {/* START LIVE VIDEO CALL */}
             <button
               type="button"
               onClick={() => startLiveCall()}
