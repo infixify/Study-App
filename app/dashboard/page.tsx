@@ -646,7 +646,11 @@ function HeroWidget({
                 (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
                   <img
                     key={imgKey}
-                    src={optimizeMediaUrl(currentItem.icon_or_sticker, 180)}
+                    src={
+                      currentItem.icon_or_sticker.includes("res.cloudinary.com")
+                        ? optimizeMediaUrl(currentItem.icon_or_sticker, 180)
+                        : currentItem.icon_or_sticker
+                    }
                     alt=""
                     loading="lazy"
                     decoding="async"
