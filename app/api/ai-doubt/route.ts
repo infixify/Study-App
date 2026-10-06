@@ -71,7 +71,53 @@ function extractImages(body: any): ImageAttachment[] {
   return images.slice(0, 2);
 }
 
-// Gemini Caller
+// 1. Groq Caller (Ultra-Fast 0.4s for Text)
+async function tryGroq(
+  groqKey: string,
+  model: string,
+  userText: string
+): Promise<string> {
+  const url = "https://api.groq.com/openai/v1/chat/completions";
+
+  const payload = {
+    model,
+    messages: [
+      {
+        role: "system",
+        content: SYSTEM_PROMPT,
+      },
+      {
+        role: "user",
+        content: userText || "Hello",
+      },
+    ],
+    temperature: 0.3,
+    max_tokens: 2048,
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      Authorization: `Bearer ${groqKey}`,
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(18000),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Groq ${model} ${res.status}: ${err.slice(0, 160)}`);
+  }
+
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error(`Groq ${model} returned empty text`);
+  return text;
+}
+
+// 2. Gemini Caller (Multimodal: Text + Image)
 async function tryGemini(
   key: string,
   modelName: string,
@@ -106,7 +152,7 @@ async function tryGemini(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(22000), // Generous timeout (22s) so AI never aborts mid-writing
+    signal: AbortSignal.timeout(22000),
   });
 
   if (!res.ok) {
@@ -122,53 +168,7 @@ async function tryGemini(
   return text;
 }
 
-// Groq Caller (for Text doubts)
-async function tryGroq(
-  groqKey: string,
-  model: string,
-  userText: string
-): Promise<string> {
-  const url = "https://api.groq.com/openai/v1/chat/completions";
-
-  const payload = {
-    model,
-    messages: [
-      {
-        role: "system",
-        content: SYSTEM_PROMPT,
-      },
-      {
-        role: "user",
-        content: userText || "Hello",
-      },
-    ],
-    temperature: 0.3,
-    max_tokens: 2048,
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      Authorization: `Bearer ${groqKey}`,
-    },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(20000),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Groq ${model} ${res.status}: ${err.slice(0, 160)}`);
-  }
-
-  const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
-  if (!text) throw new Error(`Groq ${model} returned empty text`);
-  return text;
-}
-
-// OpenRouter Caller (Both Text & Vision)
+// 3. OpenRouter Caller (Universal Backup)
 async function tryOpenRouter(
   orKey: string,
   model: string,
@@ -215,7 +215,7 @@ async function tryOpenRouter(
       "X-Title": "PrepWise JEE NEET",
     },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(25000),
+    signal: AbortSignal.timeout(24000),
   });
 
   if (!res.ok) {
@@ -254,61 +254,98 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Chat uses only Chat keys (GEMINI_API_KEY_DOUBT, GEMINI_API_KEY).
-    // Live uses 5 keys pool (GEMINI_API_KEYS).
     const geminiKeys = mode === "live" ? getLiveGeminiKeys() : getChatGeminiKeys();
+    const groqKey = getGroqKey();
+    const orKey = getOpenRouterKey();
 
-    // The ONLY verified active model on Gemini
-    const geminiModels = ["gemini-3.8-flash"];
+    // Validated Multi-Model Cascades
+    const geminiModels = ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.8-flash"];
+    const groqModels = ["llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it"];
+    const orTextModels = ["google/gemma-4-26b-a4b-it:free", "deepseek/deepseek-chat:free", "nvidia/nemotron-3.5-lightning:free"];
+    const orVisionModels = ["google/gemini-2.0-flash-exp:free"];
 
     const errorLogs: string[] = [];
 
-    // TIER 1: Google Gemini (High precision for Math & Vision)
-    if (geminiKeys.length > 0) {
-      for (const key of geminiKeys) {
-        for (const model of geminiModels) {
+    // ========================================================
+    // PATH A: PURE TEXT DOUBT (Groq First ➔ Gemini ➔ OpenRouter)
+    // ========================================================
+    if (!hasImages) {
+      // 1. Primary: Groq (0.4s Fastest)
+      if (groqKey) {
+        for (const model of groqModels) {
           try {
-            const reply = await tryGemini(key, model, userText, images);
-            reportKeySuccess(key);
-            return NextResponse.json({ reply, provider: `gemini-${model}` });
+            const reply = await tryGroq(groqKey, model, userText);
+            return NextResponse.json({ reply, provider: `groq-${model}` });
           } catch (err: any) {
-            const isRateLimit = err?.message?.includes("429");
-            reportKeyFailure(key, isRateLimit);
+            errorLogs.push(err?.message || String(err));
+          }
+        }
+      }
+
+      // 2. Fallback: Google Gemini
+      if (geminiKeys.length > 0) {
+        for (const key of geminiKeys) {
+          for (const model of geminiModels) {
+            try {
+              const reply = await tryGemini(key, model, userText, []);
+              reportKeySuccess(key);
+              return NextResponse.json({ reply, provider: `gemini-${model}` });
+            } catch (err: any) {
+              const isRateLimit = err?.message?.includes("429");
+              reportKeyFailure(key, isRateLimit);
+              errorLogs.push(err?.message || String(err));
+            }
+          }
+        }
+      }
+
+      // 3. Emergency: OpenRouter Free Models
+      if (orKey) {
+        for (const model of orTextModels) {
+          try {
+            const reply = await tryOpenRouter(orKey, model, userText, []);
+            return NextResponse.json({ reply, provider: `openrouter-${model}` });
+          } catch (err: any) {
             errorLogs.push(err?.message || String(err));
           }
         }
       }
     }
 
-    // TIER 2: Groq (For pure text doubts — ultra-fast)
-    const groqKey = getGroqKey();
-    if (!hasImages && groqKey) {
-      try {
-        const reply = await tryGroq(groqKey, "llama-3.1-8b-instant", userText);
-        return NextResponse.json({ reply, provider: "groq-llama-3.1-8b" });
-      } catch (err: any) {
-        errorLogs.push(err?.message || String(err));
+    // ========================================================
+    // PATH B: IMAGE + TEXT DOUBT (Gemini Vision First ➔ OpenRouter)
+    // ========================================================
+    if (hasImages) {
+      // 1. Primary: Google Gemini Vision
+      if (geminiKeys.length > 0) {
+        for (const key of geminiKeys) {
+          for (const model of geminiModels) {
+            try {
+              const reply = await tryGemini(key, model, userText, images);
+              reportKeySuccess(key);
+              return NextResponse.json({ reply, provider: `gemini-${model}` });
+            } catch (err: any) {
+              const isRateLimit = err?.message?.includes("429");
+              reportKeyFailure(key, isRateLimit);
+              errorLogs.push(err?.message || String(err));
+            }
+          }
+        }
       }
-    }
 
-    // TIER 3: OpenRouter (Handles both Text & Vision)
-    const orKey = getOpenRouterKey();
-    if (orKey) {
-      const orModels = hasImages
-        ? ["google/gemini-2.0-flash-001", "meta-llama/llama-3.2-11b-vision-instruct:free"]
-        : ["meta-llama/llama-3.1-8b-instruct:free", "google/gemini-2.0-flash-001"];
-
-      for (const model of orModels) {
-        try {
-          const reply = await tryOpenRouter(orKey, model, userText, images);
-          return NextResponse.json({ reply, provider: `openrouter-${model}` });
-        } catch (err: any) {
-          errorLogs.push(err?.message || String(err));
+      // 2. Fallback: OpenRouter Vision
+      if (orKey) {
+        for (const model of orVisionModels) {
+          try {
+            const reply = await tryOpenRouter(orKey, model, userText, images);
+            return NextResponse.json({ reply, provider: `openrouter-${model}` });
+          } catch (err: any) {
+            errorLogs.push(err?.message || String(err));
+          }
         }
       }
     }
 
-    // Detailed error trace if all fail
     const diagnosticText = errorLogs.length > 0
       ? errorLogs.join("\n• ")
       : "All AI providers temporarily busy.";
