@@ -11,6 +11,7 @@ interface Message {
 }
 
 interface StudentContext {
+  email?: string;
   name?: string;
   targetExam?: string;
   classLevel?: string;
@@ -19,6 +20,7 @@ interface StudentContext {
   weakSubjects?: string[];
   weaknesses?: string[];
   pendingBacklogCount?: number;
+  dailyDoubtLimit?: number;
 }
 
 interface AiChatSheetProps {
@@ -29,36 +31,13 @@ interface AiChatSheetProps {
 
 const SESSION_KEY = "pw_doubt_chat_session";
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
-const DAILY_LIMIT = 10;
 
 function getTodayLimitKey(): string {
   const today = new Date().toISOString().split("T")[0];
   return `pw_doubt_daily_quota_${today}`;
 }
 
-function getRemainingQuota(): number {
-  try {
-    const raw = localStorage.getItem(getTodayLimitKey());
-    if (raw !== null) {
-      const used = parseInt(raw) || 0;
-      return Math.max(0, DAILY_LIMIT - used);
-    }
-  } catch (_) {}
-  return DAILY_LIMIT;
-}
-
-function decrementQuota(): number {
-  try {
-    const current = getRemainingQuota();
-    const used = DAILY_LIMIT - current + 1;
-    localStorage.setItem(getTodayLimitKey(), used.toString());
-    return Math.max(0, DAILY_LIMIT - used);
-  } catch (_) {
-    return DAILY_LIMIT - 1;
-  }
-}
-
-// ─── 1. SMART SPEECH FILTER (Removes emojis, symbols & makes formulas natural) ───
+// ─── 1. SMART SPEECH FILTER (Removes emojis, cleans math & makes pronunciation fluent) ───
 function cleanTextForSpeech(raw: string): string {
   if (!raw) return "";
   let s = raw;
@@ -66,7 +45,7 @@ function cleanTextForSpeech(raw: string): string {
   // 1. Remove all emojis
   s = s.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "");
 
-  // 2. Pronounce math symbols naturally
+  // 2. Natural phonetic math pronunciation
   s = s.replace(/\\phi/gi, " Phi ")
        .replace(/\\theta/gi, " Theta ")
        .replace(/\\vec\{([^}]+)\}/gi, " vector $1 ")
@@ -78,7 +57,7 @@ function cleanTextForSpeech(raw: string): string {
        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, " $1 divided by $2 ")
        .replace(/\\Delta/gi, " Delta ");
 
-  // 3. Remove Markdown & LaTeX syntax markers
+  // 3. Strip Markdown & code markers
   s = s.replace(/\$\$/g, " ")
        .replace(/\$/g, " ")
        .replace(/[*_#`~=\-]/g, " ")
@@ -86,10 +65,10 @@ function cleanTextForSpeech(raw: string): string {
        .replace(/\s+/g, " ")
        .trim();
 
-  return s.slice(0, 480);
+  return s.slice(0, 450);
 }
 
-// ─── 2. MATH & MARKDOWN VISUAL FORMATTER ───
+// ─── 2. BEAUTIFUL TEXTBOOK MATH & SYMBOL FORMATTER ───
 function FormattedSolution({ text }: { text: string }) {
   const lines = text.split("\n");
 
@@ -124,7 +103,7 @@ function FormattedSolution({ text }: { text: string }) {
           );
         }
 
-        // Clean inline math & bold
+        // Inline math & bold formatting
         const cleanLine = trimmed
           .replace(/\$\$(.*?)\$\$/g, " $1 ")
           .replace(/\$(.*?)\$/g, " $1 ")
@@ -148,11 +127,16 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [remainingQuota, setRemainingQuota] = useState(DAILY_LIMIT);
+
+  // 🛡️ VIP Dynamic Quota (Owner gets 999 doubts, others get studentContext/10)
+  const isOwner = studentContext?.email === "sarthaksinghyadav1@gmail.com";
+  const dailyLimit = isOwner ? 999 : (studentContext?.dailyDoubtLimit || 10);
+  const [remainingQuota, setRemainingQuota] = useState(dailyLimit);
 
   // Audio Speech state
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
+  const keepAliveTimerRef = useRef<any>(null);
 
   // ── TRUE CONTINUOUS LIVE VIDEO CALL STATE ──
   const [liveCallOpen, setLiveCallOpen] = useState(false);
@@ -162,9 +146,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   const [liveSessionItems, setLiveSessionItems] = useState<{ query: string; reply: string }[]>([]);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
 
-  // Pure Voice in Chat
-  const [isChatVoiceRecording, setIsChatVoiceRecording] = useState(false);
-
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -172,13 +153,35 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const getRemainingQuotaVal = useCallback((): number => {
+    try {
+      const raw = localStorage.getItem(getTodayLimitKey());
+      if (raw !== null) {
+        const used = parseInt(raw) || 0;
+        return Math.max(0, dailyLimit - used);
+      }
+    } catch (_) {}
+    return dailyLimit;
+  }, [dailyLimit]);
+
+  const decrementQuotaVal = useCallback((): number => {
+    try {
+      const current = getRemainingQuotaVal();
+      const used = dailyLimit - current + 1;
+      localStorage.setItem(getTodayLimitKey(), used.toString());
+      return Math.max(0, dailyLimit - used);
+    } catch (_) {
+      return dailyLimit - 1;
+    }
+  }, [dailyLimit, getRemainingQuotaVal]);
+
   useEffect(() => {
     if (!open) {
       stopLiveCall();
       stopSpeaking();
       return;
     }
-    setRemainingQuota(getRemainingQuota());
+    setRemainingQuota(getRemainingQuotaVal());
 
     try {
       const raw = sessionStorage.getItem(SESSION_KEY);
@@ -192,15 +195,14 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     } catch (_) {}
 
     const name = studentContext?.name || "Champion";
-    const exam = studentContext?.targetExam || "JEE/NEET";
 
     setMessages([
       {
         role: "assistant",
-        content: `Namaste ${name}! Main aapka AI Doubt Faculty hoon. Koi bhi sawaal bol kar puchein (🎙️), photo attach karein ya **Start Live Call (🎥)** se direct uninterrupted video call karein! ✍️`,
+        content: `Namaste ${name}! Main aapka AI Doubt Faculty hoon. Koi bhi sawaal bol kar puchein, photo attach karein ya **Live Call (🎥)** se direct uninterrupted video call karein! ✍️`,
       },
     ]);
-  }, [open]);
+  }, [open, getRemainingQuotaVal]);
 
   useEffect(() => {
     if (open) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -215,34 +217,71 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   }, [messages]);
 
-  // ─── NATURAL GOOGLE VOICE (Web Speech API with neural accent) ───
+  // Preload voices for mobile browsers
+  useEffect(() => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
+
+  // ─── 3. NATURAL HD VOICE ENGINE (Anti-Freeze 15-second heartbeat) ───
   const speakNaturalVoice = useCallback(
     (text: string) => {
       if (audioMuted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+
       try {
         window.speechSynthesis.cancel();
+        if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+
         const cleanSpokenText = cleanTextForSpeech(text);
         if (!cleanSpokenText) return;
 
         const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
-        utterance.rate = 1.0;
+        utterance.rate = 0.95; // Steady conversational pace
         utterance.pitch = 1.0;
 
-        // Find Natural Google Indian English / Hindi voice
+        // Select best available Google Indian English/Hindi voice
         const voices = window.speechSynthesis.getVoices();
-        const bestVoice = voices.find(
-          (v) =>
-            v.lang.includes("hi-IN") ||
-            v.lang.includes("en-IN") ||
-            v.name.includes("Google हिन्दी") ||
-            v.name.includes("India")
-        );
-        if (bestVoice) utterance.voice = bestVoice;
-        else utterance.lang = "en-IN";
+        const hdVoice =
+          voices.find(
+            (v) =>
+              v.name.includes("Google") &&
+              (v.lang.includes("en-IN") || v.lang.includes("hi-IN") || v.lang.includes("hi_IN"))
+          ) ||
+          voices.find((v) => v.lang.includes("en-IN") || v.lang.includes("hi-IN"));
 
-        utterance.onstart = () => setIsSpeaking(true);
-        utterance.onend = () => setIsSpeaking(false);
-        utterance.onerror = () => setIsSpeaking(false);
+        if (hdVoice) {
+          utterance.voice = hdVoice;
+          utterance.lang = hdVoice.lang;
+        } else {
+          utterance.lang = "en-IN";
+        }
+
+        utterance.onstart = () => {
+          setIsSpeaking(true);
+          // 🛡️ CHROME 15-SECOND FREEZE BUG FIX (Heartbeat ping)
+          keepAliveTimerRef.current = setInterval(() => {
+            if (window.speechSynthesis.speaking) {
+              window.speechSynthesis.pause();
+              window.speechSynthesis.resume();
+            } else {
+              clearInterval(keepAliveTimerRef.current);
+            }
+          }, 8000);
+        };
+
+        utterance.onend = () => {
+          setIsSpeaking(false);
+          if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+        };
+
+        utterance.onerror = () => {
+          setIsSpeaking(false);
+          if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+        };
 
         window.speechSynthesis.speak(utterance);
       } catch (_) {
@@ -256,10 +295,11 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
+    if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
     setIsSpeaking(false);
   };
 
-  // ─── TRUE CONTINUOUS LIVE VIDEO CALL CONTROLS ───
+  // ─── 4. TRUE CONTINUOUS LIVE VIDEO CALL CONTROLS ───
   const startLiveCall = async (mode: "environment" | "user" = facingMode) => {
     setLiveCallOpen(true);
     setLiveSolution(null);
@@ -297,7 +337,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     startLiveCall(next);
   };
 
-  // END LIVE CALL: Camera closes & all live doubts are dumped into Chat!
+  // END LIVE CALL: Camera closes & all doubts are saved to the Chat!
   const stopLiveCall = () => {
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -308,7 +348,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
     stopSpeaking();
 
-    // Append all resolved doubts from this live call to the main Chat!
     if (liveSessionItems.length > 0) {
       const newChatMessages: Message[] = [];
       liveSessionItems.forEach((item) => {
@@ -334,7 +373,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     return canvas.toDataURL("image/jpeg", 0.75);
   };
 
-  // Speak inside Live Video Call (Camera stays open!)
+  // Speak inside Live Video Call (Camera stays active!)
   const triggerLiveSpeechQuery = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -380,7 +419,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
 
     setLoading(true);
-    const updatedQuota = decrementQuota();
+    const updatedQuota = decrementQuotaVal();
     setRemainingQuota(updatedQuota);
 
     try {
@@ -399,10 +438,11 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
       if (res.ok) {
         const data = await res.json();
         const replyText = data.reply || "Solution complete.";
+        const speakText = data.spoken || replyText;
         setLiveSolution(replyText);
         setIsSolutionExpanded(true);
         setLiveSessionItems((prev) => [...prev, { query: promptText, reply: replyText }]);
-        speakNaturalVoice(replyText); // 🔊 Speaks in clean natural voice!
+        speakNaturalVoice(speakText); // 🔊 Speaks in clean natural voice!
       } else {
         setLiveSolution("Sawal samajhne mein dikkat aayi. Kripya dobara mic daba kar puchein!");
       }
@@ -420,7 +460,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         ...prev,
         {
           role: "assistant",
-          content: `⚠️ Aaj ke **${DAILY_LIMIT} free doubts** khatam ho chuke hain! Raat 12 baje reset ho jayega.`,
+          content: `⚠️ Aaj ke **${dailyLimit} free doubts** khatam ho chuke hain! Raat 12 baje reset ho jayega.`,
         },
       ]);
       return;
@@ -429,7 +469,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     const userMsg: Message = { role: "user", content: promptText, image: imgData || undefined };
     setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
-    const updatedQuota = decrementQuota();
+    const updatedQuota = decrementQuotaVal();
     setRemainingQuota(updatedQuota);
 
     try {
@@ -448,8 +488,9 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
       if (res.ok) {
         const data = await res.json();
         const replyText = data.reply || "Solution complete.";
+        const speakText = data.spoken || replyText;
         setMessages((prev) => [...prev, { role: "assistant", content: replyText }]);
-        speakNaturalVoice(replyText);
+        speakNaturalVoice(speakText);
       } else {
         setMessages((prev) => [
           ...prev,
@@ -628,7 +669,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
               remainingQuota > 2 ? "bg-teal/10 border-teal/20 text-teal" : "bg-rose-50 border-rose-200 text-rose-600"
             }`}>
-              {remainingQuota} / {DAILY_LIMIT} Doubts
+              {remainingQuota} / {dailyLimit} Doubts
             </span>
 
             <button
@@ -702,7 +743,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
         )}
 
-        {/* ── INPUT BAR WITH START LIVE CALL & PURE VOICE ── */}
+        {/* ── INPUT BAR WITH START LIVE CALL ── */}
         <div className="p-3 border-t border-ink/10 bg-white">
           <form
             onSubmit={(e) => {
