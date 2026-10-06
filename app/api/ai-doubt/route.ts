@@ -1,382 +1,300 @@
-// app/api/ai-doubt/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import {
   getChatGeminiKeys,
-  getLiveGeminiKeys,
   getGroqKey,
+  getCloudflareWorkersAiConfig,
   getOpenRouterKey,
-  reportKeyFailure,
-  reportKeySuccess,
 } from "@/lib/ai-key-manager";
 
 export const runtime = "edge";
 
-const SYSTEM_PROMPT = `You are the Senior Academic Faculty & Mentor for JEE and NEET at PrepWise.
-Your task is to provide structured, textbook-quality solutions just like an official NCERT textbook or standard solution manual.
+const SYSTEM_PROMPT = `Tu PrepWise ka friendly aur expert Teacher hai. 
+Students JEE, NEET, aur Boards ki taiyari kar rahe hain.
+RULES:
+1. Sidha clear answer aur step-by-step calculation de.
+2. Equations aur mathematical terms ko clean text/Unicode format mein likh jaise: x² + 2x + 1 = 0, √(49) = 7, a/b, ±, →, °C. LaTeX delimiters ($ ya $$ ya \\frac) mat use kar taaki mobile screen par clean dikhe.
+3. Step 1, Step 2 karke bold headings aur bullet points use kar.
+4. Answer short, crisp aur visually easy-to-read hona chahiye. Bina faltu ki formality ke direct guide kar.`;
 
-FORMATTING RULES:
-1. NEVER output raw LaTeX tags like \\frac, \\sqrt, \\begin{aligned}, \\times, or \\left.
-2. ALWAYS use clean textbook math and Unicode symbols:
-   - Fractions: Use simple inline division: a/b or (x + y)/(z - w)
-   - Powers/Subscripts: Use standard Unicode super/subscripts: x², y³, v₀, a₁, 10⁻³, cm³
-   - Roots: Use √(expression)
-   - Symbols: Use ×, ÷, ±, ≈, ≠, ≤, ≥, °, →, ⇒, ⇌, α, β, θ, λ, π, μ, ω, Δ
-3. STRUCTURE:
-   - 📌 **Concept / Given Data** (briefly state what is given and required)
-   - 📐 **Formula Used** (state the standard formula clearly)
-   - 📝 **Step-by-Step Solution** (numbered steps, clean arithmetic)
-   - 🎯 **Final Answer** (highlight the final value, unit, or option)
-4. TONE: Encouraging, precise, crystal clear. If the user asks a greeting (like 'Hello', 'Hi'), reply warmly and politely in 1-2 lines inviting them to ask any study doubt.`;
+// 1. GROQ PROVIDER (Priority 1 - Fastest 0.4s response)
+async function callGroq(prompt: string, hasImages: boolean, base64Images: { mimeType: string; data: string }[]): Promise<string> {
+  const apiKey = getGroqKey();
+  if (!apiKey) throw new Error("Groq API key missing");
 
-interface ImageAttachment {
-  mimeType: string;
-  data: string; // pure base64 without prefix
-}
+  const model = hasImages ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
 
-function extractImages(body: any): ImageAttachment[] {
-  const images: ImageAttachment[] = [];
-
-  const rawList: string[] = [];
-  if (body.images && Array.isArray(body.images)) {
-    rawList.push(...body.images);
-  } else if (body.image && typeof body.image === "string") {
-    rawList.push(body.image);
+  let content: any = prompt;
+  if (hasImages) {
+    const parts: any[] = [{ type: "text", text: prompt }];
+    for (const img of base64Images) {
+      parts.push({
+        type: "image_url",
+        image_url: { url: `data:${img.mimeType};base64,${img.data}` }
+      });
+    }
+    content = parts;
   }
 
-  for (const item of rawList) {
-    if (!item || typeof item !== "string" || item.length < 20) continue;
-
-    let mimeType = "image/jpeg";
-    let data = item.trim();
-
-    if (data.startsWith("data:")) {
-      const commaIndex = data.indexOf(",");
-      if (commaIndex !== -1) {
-        const header = data.substring(0, commaIndex);
-        data = data.substring(commaIndex + 1);
-
-        if (header.includes("png")) mimeType = "image/png";
-        else if (header.includes("webp")) mimeType = "image/webp";
-        else mimeType = "image/jpeg";
-      }
-    }
-
-    data = data.replace(/[\r\n\s]/g, "");
-
-    if (data.length > 50) {
-      images.push({ mimeType, data });
-    }
-  }
-
-  return images.slice(0, 2);
-}
-
-// 1. Groq Caller (Ultra-Fast for Pure Text)
-async function tryGroq(
-  groqKey: string,
-  model: string,
-  userText: string
-): Promise<string> {
-  const url = "https://api.groq.com/openai/v1/chat/completions";
-
-  const payload = {
-    model,
-    messages: [
-      {
-        role: "system",
-        content: SYSTEM_PROMPT,
-      },
-      {
-        role: "user",
-        content: userText || "Hello",
-      },
-    ],
-    temperature: 0.3,
-    max_tokens: 2048,
-  };
-
-  const res = await fetch(url, {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      Authorization: `Bearer ${groqKey}`,
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
     },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(18000),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Groq ${model} ${res.status}: ${err.slice(0, 160)}`);
-  }
-
-  const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
-  if (!text) throw new Error(`Groq ${model} returned empty text`);
-  return text;
-}
-
-// 2. Gemini Caller (Multimodal: Text + Image)
-async function tryGemini(
-  key: string,
-  modelName: string,
-  userText: string,
-  images: ImageAttachment[]
-): Promise<string> {
-  const cleanModel = modelName.replace(/^models\//, "");
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${key}`;
-
-  const parts: any[] = [];
-  for (const img of images) {
-    parts.push({
-      inlineData: {
-        mimeType: img.mimeType,
-        data: img.data,
-      },
-    });
-  }
-  parts.push({
-    text: `${SYSTEM_PROMPT}\n\nStudent Query: ${userText || "Please solve and explain this question step-by-step."}`,
-  });
-
-  const payload = {
-    contents: [{ parts }],
-    generationConfig: {
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content }
+      ],
       temperature: 0.3,
-      maxOutputTokens: 2048,
-    },
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(20000),
+      max_tokens: 1500
+    })
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini ${cleanModel} ${res.status}: ${errText.slice(0, 160)}`);
+    throw new Error(`Groq ${res.status}: ${errText.slice(0, 120)}`);
   }
 
   const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error(`Gemini ${cleanModel} returned empty response`);
-  }
+  const text = data?.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("Groq empty reply");
   return text;
 }
 
-// 3. OpenRouter Caller (Universal Backup)
-async function tryOpenRouter(
-  orKey: string,
-  model: string,
-  userText: string,
-  images: ImageAttachment[]
-): Promise<string> {
-  const url = "https://openrouter.ai/api/v1/chat/completions";
-  const hasImages = images.length > 0;
+// 2. CLOUDFLARE WORKERS AI (Priority 2 - 100% Free Edge Llama 3.1 & Mistral)
+async function callCloudflareWorkersAi(prompt: string): Promise<string> {
+  const config = getCloudflareWorkersAiConfig();
+  if (!config) throw new Error("Cloudflare Workers AI credentials missing");
 
-  const contentParts: any[] = [];
-  contentParts.push({
-    type: "text",
-    text: `${SYSTEM_PROMPT}\n\nStudent Query: ${userText || "Solve this academic doubt."}`,
-  });
+  // Models to try: Meta Llama 3.1 8B, fallback to Mistral 7B
+  const cfModels = [
+    "@cf/meta/llama-3.1-8b-instruct",
+    "@cf/mistral/mistral-7b-instruct-v0.1"
+  ];
 
-  for (const img of images) {
-    contentParts.push({
-      type: "image_url",
-      image_url: {
-        url: `data:${img.mimeType};base64,${img.data}`,
-      },
-    });
+  let lastErr = "";
+  for (const model of cfModels) {
+    try {
+      const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/run/${model}`;
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${config.apiToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: prompt }
+          ]
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        lastErr = `WorkersAI ${model} ${res.status}: ${errText.slice(0, 100)}`;
+        continue;
+      }
+
+      const data = await res.json();
+      const text = data?.result?.response?.trim();
+      if (text) return text;
+    } catch (e: any) {
+      lastErr = e?.message || String(e);
+    }
   }
 
-  const payload = {
-    model,
-    messages: [
-      {
-        role: "user",
-        content: hasImages ? contentParts : contentParts[0].text,
-      },
-    ],
-    temperature: 0.3,
-    max_tokens: 2048,
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      Authorization: `Bearer ${orKey}`,
-      "HTTP-Referer": "https://eterprep.pages.dev",
-      "X-Title": "PrepWise JEE NEET",
-    },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(22000),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`OpenRouter ${model} ${res.status}: ${err.slice(0, 160)}`);
-  }
-
-  const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
-  if (!text) throw new Error(`OpenRouter ${model} returned empty text`);
-  return text;
+  throw new Error(lastErr || "Workers AI failed");
 }
 
+// 3. GOOGLE GEMINI (Priority 3 - Multi-key JEE/NEET Reasoning)
+async function callGemini(prompt: string, base64Images: { mimeType: string; data: string }[]): Promise<string> {
+  const keys = getChatGeminiKeys();
+  if (keys.length === 0) throw new Error("No Gemini Chat keys configured");
+
+  const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
+  let lastErr = "";
+
+  for (const key of keys) {
+    for (const model of models) {
+      try {
+        const parts: any[] = [{ text: prompt }];
+        for (const img of base64Images) {
+          parts.push({
+            inlineData: {
+              mimeType: img.mimeType,
+              data: img.data
+            }
+          });
+        }
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents: [{ parts }]
+          })
+        });
+
+        if (!res.ok) {
+          const errBody = await res.text();
+          lastErr = `Gemini ${model} ${res.status}: ${errBody.slice(0, 100)}`;
+          continue;
+        }
+
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (text) return text;
+      } catch (e: any) {
+        lastErr = e?.message || String(e);
+      }
+    }
+  }
+
+  throw new Error(lastErr || "All Gemini keys failed");
+}
+
+// 4. OPENROUTER (Priority 4 - Safety Net)
+async function callOpenRouter(prompt: string, hasImages: boolean, base64Images: { mimeType: string; data: string }[]): Promise<string> {
+  const apiKey = getOpenRouterKey();
+  if (!apiKey) throw new Error("OpenRouter API key missing");
+
+  const models = hasImages
+    ? ["google/gemini-2.0-flash-001", "meta-llama/llama-3.2-11b-vision-instruct:free"]
+    : ["meta-llama/llama-3.1-8b-instruct:free", "mistralai/mistral-7b-instruct:free"];
+
+  let lastErr = "";
+  for (const model of models) {
+    try {
+      let content: any = prompt;
+      if (hasImages) {
+        content = [{ type: "text", text: prompt }];
+        for (const img of base64Images) {
+          content.push({
+            type: "image_url",
+            image_url: { url: `data:${img.mimeType};base64,${img.data}` }
+          });
+        }
+      }
+
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://eterprep.pages.dev",
+          "X-Title": "PrepWise AI Doubt"
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content }
+          ],
+          temperature: 0.3
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        lastErr = `OpenRouter ${model} ${res.status}: ${errText.slice(0, 100)}`;
+        continue;
+      }
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      if (text) return text;
+    } catch (e: any) {
+      lastErr = e?.message || String(e);
+    }
+  }
+
+  throw new Error(lastErr || "All OpenRouter models failed");
+}
+
+// MAIN POST ROUTE
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const prompt = (body.message || body.prompt || body.question || "").trim();
+    const images: string[] = Array.isArray(body.images) ? body.images : [];
 
-    const userText = (
-      body.message ||
-      body.prompt ||
-      body.question ||
-      body.doubt ||
-      body.text ||
-      body.query ||
-      ""
-    ).toString().trim();
+    // Parse base64 safely without catastrophic backtracking
+    const base64Images: { mimeType: string; data: string }[] = [];
+    for (const raw of images) {
+      if (typeof raw === "string" && raw.startsWith("data:")) {
+        const commaIdx = raw.indexOf(",");
+        if (commaIdx !== -1) {
+          const header = raw.slice(5, commaIdx);
+          const mimeType = header.split(";")[0] || "image/jpeg";
+          const data = raw.slice(commaIdx + 1);
+          if (data.length > 50) {
+            base64Images.push({ mimeType, data });
+          }
+        }
+      }
+    }
 
-    const mode = body.mode || "chat";
-    const images = extractImages(body);
-    const hasImages = images.length > 0;
+    const hasImages = base64Images.length > 0;
+    const finalPrompt = prompt || (hasImages ? "Kripya is photo mein diye gaye sawal ko step-by-step solve kijiye." : "");
 
-    if (!userText && !hasImages) {
+    if (!finalPrompt) {
       return NextResponse.json(
         { reply: "Kripya koi sawal likhein ya photo attach karein." },
         { status: 200 }
       );
     }
 
-    const geminiKeys = mode === "live" ? getLiveGeminiKeys() : getChatGeminiKeys();
-    const groqKey = getGroqKey();
-    const orKey = getOpenRouterKey();
+    const errors: string[] = [];
 
-    // 1. Google Gemini Models
-    const geminiModels = ["gemini-3.8-flash", "gemini-3.5-flash"];
+    // 1. GROQ (Priority 1)
+    try {
+      const reply = await callGroq(finalPrompt, hasImages, base64Images);
+      return NextResponse.json({ reply, provider: "groq" }, { status: 200 });
+    } catch (e: any) {
+      errors.push(`Groq: ${e.message}`);
+    }
 
-    // 2. Groq Verified Active Production Free Models
-    const groqModels = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
-
-    // 3. OpenRouter Free Models (Retained Traffic Models, Empty liquid removed)
-    const orTextModels = ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"];
-    const orVisionModels = ["google/gemini-2.0-flash-exp:free"];
-
-    const errorLogs: string[] = [];
-
-    // ========================================================
-    // PATH A: PURE TEXT DOUBT (Groq #1 ➔ Gemini #2 ➔ OpenRouter #3)
-    // ========================================================
+    // 2. CLOUDFLARE WORKERS AI (Priority 2 - Text Doubts)
     if (!hasImages) {
-      // 🥇 #1: Groq First (0.4s Fastest)
-      if (groqKey) {
-        for (const model of groqModels) {
-          try {
-            const reply = await tryGroq(groqKey, model, userText);
-            return NextResponse.json({ reply, provider: `groq-${model}` });
-          } catch (err: any) {
-            errorLogs.push(err?.message || String(err));
-          }
-        }
-      }
-
-      // 🥈 #2: Google Gemini (Smart 503 Skip)
-      let geminiHit503Spike = false;
-      for (let i = 0; i < geminiKeys.length; i++) {
-        if (geminiHit503Spike) break;
-
-        const key = geminiKeys[i];
-        let allModelsOnThisKeyHit503 = true;
-
-        for (const model of geminiModels) {
-          try {
-            const reply = await tryGemini(key, model, userText, []);
-            reportKeySuccess(key);
-            return NextResponse.json({ reply, provider: `gemini-${model}` });
-          } catch (err: any) {
-            const msg = err?.message || String(err);
-            const is503 = msg.includes("503") || msg.includes("high demand");
-            const is429 = msg.includes("429");
-
-            if (!is503) {
-              allModelsOnThisKeyHit503 = false;
-            }
-            if (is429) {
-              reportKeyFailure(key, true);
-            }
-            errorLogs.push(msg);
-          }
-        }
-
-        if (allModelsOnThisKeyHit503) {
-          geminiHit503Spike = true;
-        }
-      }
-
-      // 🥉 #3: OpenRouter Free Models
-      if (orKey) {
-        for (const model of orTextModels) {
-          try {
-            const reply = await tryOpenRouter(orKey, model, userText, []);
-            return NextResponse.json({ reply, provider: `openrouter-${model}` });
-          } catch (err: any) {
-            errorLogs.push(err?.message || String(err));
-          }
-        }
+      try {
+        const reply = await callCloudflareWorkersAi(finalPrompt);
+        return NextResponse.json({ reply, provider: "cloudflare_workers_ai" }, { status: 200 });
+      } catch (e: any) {
+        errors.push(`WorkersAI: ${e.message}`);
       }
     }
 
-    // ========================================================
-    // PATH B: IMAGE + TEXT DOUBT (Preserved Intact)
-    // ========================================================
-    if (hasImages) {
-      if (geminiKeys.length > 0) {
-        for (const key of geminiKeys) {
-          for (const model of geminiModels) {
-            try {
-              const reply = await tryGemini(key, model, userText, images);
-              reportKeySuccess(key);
-              return NextResponse.json({ reply, provider: `gemini-${model}` });
-            } catch (err: any) {
-              const isRateLimit = err?.message?.includes("429");
-              reportKeyFailure(key, isRateLimit);
-              errorLogs.push(err?.message || String(err));
-            }
-          }
-        }
-      }
-
-      if (orKey) {
-        for (const model of orVisionModels) {
-          try {
-            const reply = await tryOpenRouter(orKey, model, userText, images);
-            return NextResponse.json({ reply, provider: `openrouter-${model}` });
-          } catch (err: any) {
-            errorLogs.push(err?.message || String(err));
-          }
-        }
-      }
+    // 3. GOOGLE GEMINI (Priority 3 - Handles both Text & Diagram/Images)
+    try {
+      const reply = await callGemini(finalPrompt, base64Images);
+      return NextResponse.json({ reply, provider: "gemini" }, { status: 200 });
+    } catch (e: any) {
+      errors.push(`Gemini: ${e.message}`);
     }
 
-    const diagnosticText = errorLogs.length > 0
-      ? errorLogs.join("\n• ")
-      : "All AI providers temporarily busy.";
+    // 4. OPENROUTER (Priority 4 - Final Fallback)
+    try {
+      const reply = await callOpenRouter(finalPrompt, hasImages, base64Images);
+      return NextResponse.json({ reply, provider: "openrouter" }, { status: 200 });
+    } catch (e: any) {
+      errors.push(`OpenRouter: ${e.message}`);
+    }
 
+    // If all fail
     return NextResponse.json(
       {
-        reply: `⚠️ AI Faculty Connection Issue:\n• ${diagnosticText}`,
+        reply: `⚠️ Sabhi AI Providers connect nahi ho paaye:\n• ${errors.join("\n• ")}`
       },
       { status: 200 }
     );
-  } catch (globalErr: any) {
+  } catch (err: any) {
     return NextResponse.json(
-      { reply: `Sawal samajhne mein dikkat aayi: ${globalErr?.message || String(globalErr)}` },
+      { reply: `Sawal process karne mein dikkat aayi: ${err?.message || String(err)}` },
       { status: 200 }
     );
   }
