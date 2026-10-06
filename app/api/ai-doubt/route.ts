@@ -26,17 +26,19 @@ export async function POST(req: NextRequest) {
 
     const examName = targetExam || studentContext?.targetExam || "JEE/NEET";
 
-    // System prompt guides AI to speak naturally in clear spoken English/Hindi
-    const systemPrompt = `You are the master AI Doubt Faculty for PrepWise (${examName}).
-You must answer in this EXACT JSON structure:
+    const systemPrompt = `You are the Master AI Doubt Faculty for PrepWise (${examName}).
+CRITICAL RULES:
+1. FORMULA FORMATTING: DO NOT output complex raw LaTeX code like \\frac{a}{b}, \\left(, \\right), or \\implies!
+   Write formulas in clean, readable textbook format:
+   - Use standard fractions: 1/f = (μ_rel - 1)(1/R₁ - 1/R₂)
+   - Use standard symbols: μ, θ, λ, Δ, π, ×, •, ⇒
+   - Subscripts: R₁, R₂, μ_rel
+2. DUAL RESPONSE (JSON): Return your answer in this exact JSON:
 {
-  "written": "Your detailed step-by-step solution formatted with Markdown and clear equations for the phone screen.",
-  "spoken": "A short, 2-to-3 sentence warm conversational voice explanation in simple everyday teacher language. No emojis, no markdown, no latex symbols, just clear spoken words."
+  "written": "Your clear, step-by-step solution formatted with clean textbook formulas for the phone screen.",
+  "spoken": "A short, 2 to 3 sentence conversational explanation in clear everyday Hindi/English without any formulas, symbols, or emojis."
 }
-
-Rules:
-1. GREETINGS: If user just greets, acknowledge warmly and ask for their doubt in 'spoken' and 'written'.
-2. If unable to return JSON, return the written solution directly.`;
+If unable to return JSON, return the written solution directly.`;
 
     const apiKey = isLive ? getActiveLiveKey() : getActiveChatKey();
     if (apiKey) {
@@ -74,7 +76,6 @@ Rules:
             const data = await res.json();
             const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-            // Try parsing JSON structure
             try {
               const cleanJson = textResponse.replace(/```json/g, "").replace(/```/g, "").trim();
               const parsed = JSON.parse(cleanJson);
@@ -98,10 +99,16 @@ Rules:
     }
 
     return NextResponse.json(
-      { reply: "Abhi sabhi faculties busy hain. 1 minute baad dobara puchiye!", spoken: "Kripya 1 minute baad dobara puchiye." },
+      {
+        reply: "Abhi sabhi faculties busy hain. 1 minute baad dobara puchiye!",
+        spoken: "Kripya 1 minute baad dobara puchiye.",
+      },
       { status: 503 }
     );
   } catch (err: any) {
-    return NextResponse.json({ reply: `Error: ${err.message}`, spoken: "Technical error." }, { status: 500 });
+    return NextResponse.json(
+      { reply: `Error: ${err.message}`, spoken: "Technical error." },
+      { status: 500 }
+    );
   }
 }
