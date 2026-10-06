@@ -71,7 +71,53 @@ function extractImages(body: any): ImageAttachment[] {
   return images.slice(0, 2);
 }
 
-// 1. Gemini Caller
+// 1. Groq Caller (Ultra-Fast for Pure Text)
+async function tryGroq(
+  groqKey: string,
+  model: string,
+  userText: string
+): Promise<string> {
+  const url = "https://api.groq.com/openai/v1/chat/completions";
+
+  const payload = {
+    model,
+    messages: [
+      {
+        role: "system",
+        content: SYSTEM_PROMPT,
+      },
+      {
+        role: "user",
+        content: userText || "Hello",
+      },
+    ],
+    temperature: 0.3,
+    max_tokens: 2048,
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      Authorization: `Bearer ${groqKey}`,
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(18000),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Groq ${model} ${res.status}: ${err.slice(0, 160)}`);
+  }
+
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error(`Groq ${model} returned empty text`);
+  return text;
+}
+
+// 2. Gemini Caller (Multimodal: Text + Image)
 async function tryGemini(
   key: string,
   modelName: string,
@@ -122,53 +168,7 @@ async function tryGemini(
   return text;
 }
 
-// 2. Groq Production Caller (Free & Working)
-async function tryGroq(
-  groqKey: string,
-  model: string,
-  userText: string
-): Promise<string> {
-  const url = "https://api.groq.com/openai/v1/chat/completions";
-
-  const payload = {
-    model,
-    messages: [
-      {
-        role: "system",
-        content: SYSTEM_PROMPT,
-      },
-      {
-        role: "user",
-        content: userText || "Hello",
-      },
-    ],
-    temperature: 0.3,
-    max_tokens: 2048,
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      Authorization: `Bearer ${groqKey}`,
-    },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(18000),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Groq ${model} ${res.status}: ${err.slice(0, 160)}`);
-  }
-
-  const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
-  if (!text) throw new Error(`Groq ${model} returned empty text`);
-  return text;
-}
-
-// 3. OpenRouter Free Caller
+// 3. OpenRouter Caller (Universal Backup)
 async function tryOpenRouter(
   orKey: string,
   model: string,
@@ -261,29 +261,34 @@ export async function POST(req: NextRequest) {
     // 1. Google Gemini Models
     const geminiModels = ["gemini-3.8-flash", "gemini-3.5-flash"];
 
-    // 2. Groq Production Active Free Models
-    const groqModels = ["llama-3.3-70b-versatile", "qwen-2.5-32b", "mistral-saba-24b"];
+    // 2. Groq Verified Active Production Free Models
+    const groqModels = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
 
-    // 3. OpenRouter Free Models (Traffic ones preserved + new fast free added)
-    const orTextModels = [
-      "google/gemma-4-31b-it:free",
-      "google/gemma-4-26b-a4b-it:free",
-      "liquid/lfm-2.5-2.6b:free",
-      "nvidia/nemotron-3.5-lightning:free",
-    ];
+    // 3. OpenRouter Free Models (Retained Traffic Models, Empty liquid removed)
+    const orTextModels = ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"];
     const orVisionModels = ["google/gemini-2.0-flash-exp:free"];
 
     const errorLogs: string[] = [];
 
     // ========================================================
-    // PATH A: PURE TEXT DOUBT
+    // PATH A: PURE TEXT DOUBT (Groq #1 ➔ Gemini #2 ➔ OpenRouter #3)
     // ========================================================
     if (!hasImages) {
-      // 1. Google Gemini with Smart 503 Skip Logic
-      let geminiHit503Spike = false;
+      // 🥇 #1: Groq First (0.4s Fastest)
+      if (groqKey) {
+        for (const model of groqModels) {
+          try {
+            const reply = await tryGroq(groqKey, model, userText);
+            return NextResponse.json({ reply, provider: `groq-${model}` });
+          } catch (err: any) {
+            errorLogs.push(err?.message || String(err));
+          }
+        }
+      }
 
+      // 🥈 #2: Google Gemini (Smart 503 Skip)
+      let geminiHit503Spike = false;
       for (let i = 0; i < geminiKeys.length; i++) {
-        // Agar 1st key ke dono models par 503 spike tha, toh 2nd key skip ho jayegi
         if (geminiHit503Spike) break;
 
         const key = geminiKeys[i];
@@ -314,19 +319,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 2. Groq Production Models (0.4s Ultra-Fast)
-      if (groqKey) {
-        for (const model of groqModels) {
-          try {
-            const reply = await tryGroq(groqKey, model, userText);
-            return NextResponse.json({ reply, provider: `groq-${model}` });
-          } catch (err: any) {
-            errorLogs.push(err?.message || String(err));
-          }
-        }
-      }
-
-      // 3. OpenRouter Free Models (Preserved + Expanded)
+      // 🥉 #3: OpenRouter Free Models
       if (orKey) {
         for (const model of orTextModels) {
           try {
