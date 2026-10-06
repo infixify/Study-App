@@ -37,15 +37,73 @@ function getTodayLimitKey(): string {
   return `pw_doubt_daily_quota_${today}`;
 }
 
-// ─── 1. SMART SPEECH FILTER (Removes emojis, cleans math & makes pronunciation fluent) ───
+// ─── 1. UNIVERSAL TEXTBOOK MATH NORMALIZER (Converts LaTeX to clean NCERT style) ───
+function normalizeMathToTextbook(raw: string): string {
+  if (!raw) return "";
+  let s = raw;
+
+  // 1. Remove LaTeX brackets & implies
+  s = s.replace(/\\left\(/g, "(")
+       .replace(/\\right\)/g, ")")
+       .replace(/\\left\[/g, "[")
+       .replace(/\\right\]/g, "]")
+       .replace(/\\implies/g, " ⇒ ")
+       .replace(/\\iff/g, " ⇔ ")
+       .replace(/\\to/g, " → ");
+
+  // 2. Fractions: \frac{a}{b} -> a/b
+  s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)");
+
+  // 3. Greek Letters to True Unicode
+  s = s.replace(/\\mu/g, "μ")
+       .replace(/\\phi/g, "Φ")
+       .replace(/\\theta/g, "θ")
+       .replace(/\\lambda/g, "λ")
+       .replace(/\\alpha/g, "α")
+       .replace(/\\beta/g, "β")
+       .replace(/\\Delta/g, "Δ")
+       .replace(/\\omega/g, "ω")
+       .replace(/\\pi/g, "π")
+       .replace(/\\sigma/g, "σ");
+
+  // 4. Subscripts & Superscripts
+  s = s.replace(/_\{1\}|_1/g, "₁")
+       .replace(/_\{2\}|_2/g, "₂")
+       .replace(/_\{3\}|_3/g, "₃")
+       .replace(/_\{0\}|_0/g, "₀")
+       .replace(/\^\{2\}|\^2/g, "²")
+       .replace(/\^\{3\}|\^3/g, "³")
+       .replace(/_\{([^}]+)\}/g, "_$1"); // \mu_{rel} -> μ_rel
+
+  // 5. Operators & Vectors
+  s = s.replace(/\\cdot/g, " • ")
+       .replace(/\\times/g, " × ")
+       .replace(/\\vec\{([^}]+)\}/g, "$1⃗")
+       .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
+       .replace(/\\approx/g, " ≈ ")
+       .replace(/\\neq/g, " ≠ ")
+       .replace(/\\pm/g, " ± ")
+       .replace(/\\infty/g, " ∞ ")
+       .replace(/\\degree/g, "°");
+
+  // 6. Clean stray dollar signs and backslashes
+  s = s.replace(/\$\$/g, "")
+       .replace(/\$/g, "")
+       .replace(/\\text\{([^}]+)\}/g, "$1")
+       .replace(/\\/g, "");
+
+  return s;
+}
+
+// ─── 2. SMART SPEECH FILTER (Removes emojis, code & speaks naturally) ───
 function cleanTextForSpeech(raw: string): string {
   if (!raw) return "";
   let s = raw;
 
-  // 1. Remove all emojis
+  // Remove emojis
   s = s.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "");
 
-  // 2. Natural phonetic math pronunciation
+  // Spoken math words
   s = s.replace(/\\phi/gi, " Phi ")
        .replace(/\\theta/gi, " Theta ")
        .replace(/\\vec\{([^}]+)\}/gi, " vector $1 ")
@@ -57,7 +115,6 @@ function cleanTextForSpeech(raw: string): string {
        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, " $1 divided by $2 ")
        .replace(/\\Delta/gi, " Delta ");
 
-  // 3. Strip Markdown & code markers
   s = s.replace(/\$\$/g, " ")
        .replace(/\$/g, " ")
        .replace(/[*_#`~=\-]/g, " ")
@@ -68,7 +125,7 @@ function cleanTextForSpeech(raw: string): string {
   return s.slice(0, 450);
 }
 
-// ─── 2. BEAUTIFUL TEXTBOOK MATH & SYMBOL FORMATTER ───
+// ─── 3. TEXTBOOK VISUAL COMPONENT ───
 function FormattedSolution({ text }: { text: string }) {
   const lines = text.split("\n");
 
@@ -78,42 +135,47 @@ function FormattedSolution({ text }: { text: string }) {
         const trimmed = line.trim();
         if (!trimmed) return <div key={idx} className="h-1" />;
 
-        // Display Equation Block $$ ... $$
-        if (trimmed.startsWith("$$") && trimmed.endsWith("$$")) {
-          const eq = trimmed.slice(2, -2).trim();
+        // Display Equation Card Block
+        if (
+          trimmed.startsWith("$$") ||
+          trimmed.includes("\\frac") ||
+          (trimmed.includes("=") && trimmed.includes("\\"))
+        ) {
+          const cleanEq = normalizeMathToTextbook(trimmed);
           return (
-            <div key={idx} className="my-2 p-2.5 bg-teal/5 border border-teal/20 rounded-xl text-center font-mono font-bold text-teal text-sm tracking-wide overflow-x-auto">
-              {eq.replace(/\\vec\{([^}]+)\}/g, "$1⃗")
-                 .replace(/\\cdot/g, " • ")
-                 .replace(/\\phi/g, "Φ")
-                 .replace(/\\theta/g, "θ")
-                 .replace(/\\cos/g, "cos")
-                 .replace(/\\sin/g, "sin")
-                 .replace(/\\times/g, "×")}
+            <div
+              key={idx}
+              className="my-2 p-2.5 bg-teal/5 border border-teal/20 rounded-xl text-center font-mono font-bold text-teal text-[13px] tracking-wide overflow-x-auto shadow-xs"
+            >
+              {cleanEq}
             </div>
           );
         }
 
-        // Section Heading ###
+        // Section Headings ###
         if (trimmed.startsWith("###")) {
           return (
-            <h4 key={idx} className="font-black text-ink text-[12.5px] mt-2 mb-0.5 border-b border-ink/8 pb-0.5">
-              {trimmed.replace(/^###\s*/, "")}
+            <h4
+              key={idx}
+              className="font-black text-ink text-[12.5px] mt-2.5 mb-1 border-b border-ink/8 pb-0.5"
+            >
+              {normalizeMathToTextbook(trimmed.replace(/^###\s*/, ""))}
             </h4>
           );
         }
 
-        // Inline math & bold formatting
-        const cleanLine = trimmed
-          .replace(/\$\$(.*?)\$\$/g, " $1 ")
-          .replace(/\$(.*?)\$/g, " $1 ")
-          .replace(/\\phi/g, "Φ")
-          .replace(/\\vec\{([^}]+)\}/g, "$1⃗")
-          .replace(/\\cdot/g, "•")
-          .replace(/\\theta/g, "θ");
+        // Normal Line with clean math symbols
+        const cleanLine = normalizeMathToTextbook(trimmed);
 
         return (
-          <p key={idx} className={trimmed.startsWith("**") ? "font-bold text-ink" : "text-ink/80"}>
+          <p
+            key={idx}
+            className={
+              trimmed.startsWith("**") || trimmed.startsWith("* **")
+                ? "font-bold text-ink"
+                : "text-ink/85"
+            }
+          >
             {cleanLine}
           </p>
         );
@@ -128,7 +190,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-  // 🛡️ VIP Dynamic Quota (Owner gets 999 doubts, others get studentContext/10)
+  // VIP Dynamic Quota (sarthaksinghyadav1@gmail.com gets 999 doubts)
   const isOwner = studentContext?.email === "sarthaksinghyadav1@gmail.com";
   const dailyLimit = isOwner ? 999 : (studentContext?.dailyDoubtLimit || 10);
   const [remainingQuota, setRemainingQuota] = useState(dailyLimit);
@@ -217,7 +279,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   }, [messages]);
 
-  // Preload voices for mobile browsers
   useEffect(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.getVoices();
@@ -227,7 +288,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     }
   }, []);
 
-  // ─── 3. NATURAL HD VOICE ENGINE (Anti-Freeze 15-second heartbeat) ───
+  // ─── 4. NATURAL HD VOICE ENGINE (Anti-Freeze 15-second heartbeat) ───
   const speakNaturalVoice = useCallback(
     (text: string) => {
       if (audioMuted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -240,10 +301,9 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         if (!cleanSpokenText) return;
 
         const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
-        utterance.rate = 0.95; // Steady conversational pace
+        utterance.rate = 0.95;
         utterance.pitch = 1.0;
 
-        // Select best available Google Indian English/Hindi voice
         const voices = window.speechSynthesis.getVoices();
         const hdVoice =
           voices.find(
@@ -262,7 +322,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
 
         utterance.onstart = () => {
           setIsSpeaking(true);
-          // 🛡️ CHROME 15-SECOND FREEZE BUG FIX (Heartbeat ping)
           keepAliveTimerRef.current = setInterval(() => {
             if (window.speechSynthesis.speaking) {
               window.speechSynthesis.pause();
@@ -299,7 +358,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     setIsSpeaking(false);
   };
 
-  // ─── 4. TRUE CONTINUOUS LIVE VIDEO CALL CONTROLS ───
+  // ─── 5. TRUE CONTINUOUS LIVE VIDEO CALL CONTROLS ───
   const startLiveCall = async (mode: "environment" | "user" = facingMode) => {
     setLiveCallOpen(true);
     setLiveSolution(null);
@@ -337,7 +396,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     startLiveCall(next);
   };
 
-  // END LIVE CALL: Camera closes & all doubts are saved to the Chat!
   const stopLiveCall = () => {
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -373,7 +431,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     return canvas.toDataURL("image/jpeg", 0.75);
   };
 
-  // Speak inside Live Video Call (Camera stays active!)
   const triggerLiveSpeechQuery = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -442,7 +499,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         setLiveSolution(replyText);
         setIsSolutionExpanded(true);
         setLiveSessionItems((prev) => [...prev, { query: promptText, reply: replyText }]);
-        speakNaturalVoice(speakText); // 🔊 Speaks in clean natural voice!
+        speakNaturalVoice(speakText);
       } else {
         setLiveSolution("Sawal samajhne mein dikkat aayi. Kripya dobara mic daba kar puchein!");
       }
@@ -537,9 +594,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end animate-in fade-in">
       <div className="w-full max-w-md mx-auto bg-white rounded-t-3xl shadow-2xl flex flex-col h-[85vh] border-t border-ink/10 relative overflow-hidden">
 
-        {/* ═════════════════════════════════════════════════════════════ */}
         {/* ── 1. TRUE FULLSCREEN CONTINUOUS LIVE VIDEO CALL OVERLAY ── */}
-        {/* ═════════════════════════════════════════════════════════════ */}
         {liveCallOpen && (
           <div className="absolute inset-0 z-50 bg-black flex flex-col justify-between animate-in fade-in">
             {/* Top Bar */}
@@ -569,7 +624,7 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               </div>
             </div>
 
-            {/* Continuous Video Feed (Camera NEVER closes) */}
+            {/* Continuous Video Feed */}
             <div className="absolute inset-0 z-0 bg-black flex items-center justify-center">
               <video
                 ref={(el) => {
@@ -586,11 +641,10 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               />
             </div>
 
-            {/* ── FLOATING EXPANDABLE / COLLAPSIBLE SOLUTION CARD ── */}
+            {/* Floating Expandable Solution Card */}
             {liveSolution && (
               <div className="mx-3.5 z-20 transition-all duration-300">
                 <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/40 overflow-hidden flex flex-col">
-                  {/* Floating Header with Toggle */}
                   <div
                     onClick={() => setIsSolutionExpanded(!isSolutionExpanded)}
                     className="p-2.5 px-3.5 bg-ink text-white flex items-center justify-between cursor-pointer select-none"
@@ -603,7 +657,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
                     </button>
                   </div>
 
-                  {/* Expandable Body */}
                   {isSolutionExpanded && (
                     <div className="p-3 max-h-48 overflow-y-auto">
                       <FormattedSolution text={liveSolution} />
@@ -613,13 +666,18 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               </div>
             )}
 
-            {/* Bottom Call Controls & Glowing AI Orb */}
+            {/* Bottom Call Controls & Glowing Orb */}
             <div className="p-4 pb-6 flex flex-col items-center gap-3 z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
-              {/* Glowing Pulse Ring during Voice */}
               <div className="flex items-center gap-2">
-                <div className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
-                  isSpeaking ? "bg-teal animate-ping scale-125" : isLiveListening ? "bg-rose-500 animate-pulse" : "bg-white/40"
-                }`} />
+                <div
+                  className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
+                    isSpeaking
+                      ? "bg-teal animate-ping scale-125"
+                      : isLiveListening
+                      ? "bg-rose-500 animate-pulse"
+                      : "bg-white/40"
+                  }`}
+                />
                 <span className="text-[11px] font-semibold text-white/90">
                   {loading
                     ? "Thinking & Solving…"
@@ -631,7 +689,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
                 </span>
               </div>
 
-              {/* Tap to Speak in Live Call */}
               <button
                 type="button"
                 onClick={triggerLiveSpeechQuery}
@@ -643,15 +700,15 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
                 }`}
               >
                 <span className="text-lg">🎙️</span>
-                <span>{isLiveListening ? "Listening... Speak now!" : "Tap to Speak Doubt (Live Video)"}</span>
+                <span>
+                  {isLiveListening ? "Listening... Speak now!" : "Tap to Speak Doubt (Live Video)"}
+                </span>
               </button>
             </div>
           </div>
         )}
 
-        {/* ═════════════════════════════════════════════════════════════ */}
-        {/* ── 2. NORMAL CHAT MODE HEADER ── */}
-        {/* ═════════════════════════════════════════════════════════════ */}
+        {/* ── 2. NORMAL CHAT HEADER ── */}
         <div className="p-3.5 border-b border-ink/8 flex items-center justify-between bg-paper/50 rounded-t-3xl">
           <div className="flex items-center gap-2">
             <span className="w-8 h-8 rounded-xl bg-teal text-white flex items-center justify-center text-sm font-bold shadow-xs">
@@ -666,9 +723,13 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
 
           <div className="flex items-center gap-2">
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-              remainingQuota > 2 ? "bg-teal/10 border-teal/20 text-teal" : "bg-rose-50 border-rose-200 text-rose-600"
-            }`}>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                remainingQuota > 2
+                  ? "bg-teal/10 border-teal/20 text-teal"
+                  : "bg-rose-50 border-rose-200 text-rose-600"
+              }`}
+            >
               {remainingQuota} / {dailyLimit} Doubts
             </span>
 
@@ -680,7 +741,9 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
               }}
               title={audioMuted ? "Unmute Voice" : "Mute Voice"}
               className={`p-1.5 rounded-lg border text-xs font-bold transition-all ${
-                audioMuted ? "bg-slate-100 text-slate-400 border-slate-200" : "bg-teal/15 text-teal border-teal/30"
+                audioMuted
+                  ? "bg-slate-100 text-slate-400 border-slate-200"
+                  : "bg-teal/15 text-teal border-teal/30"
               }`}
             >
               {audioMuted ? "🔇" : isSpeaking ? "🔊" : "🔈"}
@@ -696,17 +759,26 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
           </div>
         </div>
 
-        {/* ── CHAT MESSAGES WITH BEAUTIFUL MATH FORMATTER ── */}
+        {/* ── CHAT MESSAGES WITH TEXTBOOK MATH ── */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((m, idx) => (
-            <div key={idx} className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
-              <div className={`max-w-[88%] rounded-2xl p-3.5 text-xs leading-relaxed ${
-                m.role === "user"
-                  ? "bg-ink text-paper rounded-br-xs"
-                  : "bg-paper/80 border border-ink/8 text-ink rounded-bl-xs shadow-xs"
-              }`}>
+            <div
+              key={idx}
+              className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
+            >
+              <div
+                className={`max-w-[88%] rounded-2xl p-3.5 text-xs leading-relaxed ${
+                  m.role === "user"
+                    ? "bg-ink text-paper rounded-br-xs"
+                    : "bg-paper/80 border border-ink/8 text-ink rounded-bl-xs shadow-xs"
+                }`}
+              >
                 {m.image && (
-                  <img src={m.image} alt="Question" className="max-h-48 rounded-lg mb-2 object-contain bg-black/5" />
+                  <img
+                    src={m.image}
+                    alt="Question"
+                    className="max-h-48 rounded-lg mb-2 object-contain bg-black/5"
+                  />
                 )}
                 {m.isLiveSession && (
                   <span className="block text-[9.5px] font-bold text-teal mb-1">
@@ -734,10 +806,18 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
         {selectedImage && (
           <div className="px-4 py-2 bg-paper/60 border-t border-ink/5 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <img src={selectedImage} alt="Preview" className="w-10 h-10 object-cover rounded-lg" />
+              <img
+                src={selectedImage}
+                alt="Preview"
+                className="w-10 h-10 object-cover rounded-lg"
+              />
               <span className="text-[11px] font-bold text-ink">Photo attached</span>
             </div>
-            <button type="button" onClick={() => setSelectedImage(null)} className="text-xs text-rose-500 font-bold hover:underline">
+            <button
+              type="button"
+              onClick={() => setSelectedImage(null)}
+              className="text-xs text-rose-500 font-bold hover:underline"
+            >
               Remove
             </button>
           </div>
@@ -768,7 +848,13 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
             </button>
 
             {/* Gallery Upload */}
-            <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageSelect} className="hidden" />
+            <input
+              type="file"
+              accept="image/*"
+              ref={fileInputRef}
+              onChange={handleImageSelect}
+              className="hidden"
+            />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -795,7 +881,6 @@ export default function AiChatSheet({ open, onClose, studentContext }: AiChatShe
             </button>
           </form>
         </div>
-
       </div>
     </div>
   );
