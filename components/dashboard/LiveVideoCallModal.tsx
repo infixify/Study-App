@@ -22,22 +22,20 @@ interface LiveMessage {
   provider?: string;
 }
 
-// ─── PHONETIC TEACHER NORMALIZER (CLEANS MATH FOR SEAMLESS NATURAL SPEECH) ───
+// ─── PHONETIC TEACHER NORMALIZER (CLEANS MATH FOR NATURAL ACCENT & FLUIDITY) ───
 function cleanTextForNaturalSpeech(raw: string): string {
   if (!raw) return "";
   let text = raw;
 
-  // 1. Remove Markdown syntax, asterisks, brackets & headers
-  text = text.replace(/\*\*(.*?)\*\*/g, "$1");
-  text = text.replace(/\*(.*?)\*/g, "$1");
-  text = text.replace(/`([^`]+)`/g, "$1");
-  text = text.replace(/#+\s*/g, "");
-  text = text.replace(/[-*•]\s+/g, "");
+  // 1. Remove markdown symbols, asterisks, hashes, backticks
+  text = text.replace(/[*#`_~]/g, " ");
+  text = text.replace(/\$\$|\$/g, " ");
+  text = text.replace(/Step \d+:\s*/gi, "");
   text = text.replace(/\\\[|\\\]|\\\(|\\\)/g, "");
 
-  // 2. Phonetic Math Conversions into Natural Spoken Words
-  text = text.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1 divided by $2");
-  text = text.replace(/\\sqrt\{([^}]+)\}/g, "under-root $1");
+  // 2. Phonetic Scientific Replacements (Short & Crisp for natural speed)
+  text = text.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1 by $2");
+  text = text.replace(/\\sqrt\{([^}]+)\}/g, "under root $1");
   text = text.replace(/(\w+)\^2\b/g, "$1 square");
   text = text.replace(/(\w+)\^3\b/g, "$1 cube");
   text = text.replace(/x²/g, "x square");
@@ -45,14 +43,19 @@ function cleanTextForNaturalSpeech(raw: string): string {
   text = text.replace(/r²/g, "r square");
   text = text.replace(/v²/g, "v square");
   text = text.replace(/u²/g, "u square");
-  text = text.replace(/√/g, "under-root ");
+  text = text.replace(/√/g, "under root ");
 
+  // Common optics & physics subscripts in natural spoken words
   text = text.replace(/M_o/gi, "M objective");
   text = text.replace(/M_e/gi, "M eyepiece");
+  text = text.replace(/v_o\/u_o/gi, "v objective by u objective");
   text = text.replace(/v_o/gi, "v objective");
   text = text.replace(/u_o/gi, "u objective");
   text = text.replace(/f_o/gi, "f objective");
   text = text.replace(/f_e/gi, "f eyepiece");
+  text = text.replace(/L\/f_o/gi, "L by f objective");
+  text = text.replace(/D\/f_e/gi, "D by f eyepiece");
+  text = text.replace(/1\s*\+\s*D\/f_e/gi, "1 plus D by f eyepiece");
 
   text = text.replace(/m\/s²/g, "meter per second square");
   text = text.replace(/m\/s/g, "meter per second");
@@ -64,14 +67,61 @@ function cleanTextForNaturalSpeech(raw: string): string {
   text = text.replace(/μ/g, "mu");
   text = text.replace(/π/g, "pi");
   text = text.replace(/≠/g, "not equal to");
-  text = text.replace(/≈/g, "lagbhag");
+  text = text.replace(/≈/g, "approximately");
   text = text.replace(/±/g, "plus minus");
   text = text.replace(/°C/g, "degree celsius");
   text = text.replace(/×/g, " into ");
-  text = text.replace(/÷/g, " divided by ");
+  text = text.replace(/÷/g, " by ");
 
-  // Clean extra whitespace
-  return text.replace(/\s+/g, " ").trim();
+  // 3. Remove all multiple gaps & line breaks so voice never pauses awkwardly
+  text = text.replace(/[\r\n]+/g, ". ");
+  text = text.replace(/\s+/g, " ").trim();
+
+  return text;
+}
+
+// ─── CLEAN UI FORMATTER (TURNS RAW TEXT INTO CLEAN STUDY CARDS WITHOUT UGLY SYMBOLS) ───
+function formatSolutionText(raw: string) {
+  // Strip stray LaTeX delimiters and markdown symbols cleanly
+  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+
+  return lines.map((line, idx) => {
+    let clean = line
+      .replace(/\$\$|\$/g, "")
+      .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1 / $2")
+      .replace(/\\left|\\right/g, "")
+      .trim();
+
+    // Check if it's a heading
+    const isHeading = clean.startsWith("#") || clean.startsWith("**") && clean.endsWith("**");
+    clean = clean.replace(/[*#]/g, "").trim();
+
+    // Check if it's a bullet point
+    const isBullet = line.trim().startsWith("*") || line.trim().startsWith("-");
+
+    if (isHeading) {
+      return (
+        <h6 key={idx} className="font-bold text-teal-300 text-xs mt-1 mb-0.5">
+          {clean}
+        </h6>
+      );
+    }
+
+    if (isBullet) {
+      return (
+        <div key={idx} className="flex items-start gap-1.5 text-xs text-slate-200 my-0.5">
+          <span className="text-teal-400 font-bold">•</span>
+          <span>{clean}</span>
+        </div>
+      );
+    }
+
+    return (
+      <p key={idx} className="text-xs text-slate-200 my-1 leading-relaxed">
+        {clean}
+      </p>
+    );
+  });
 }
 
 // ─── SYNTHESIZED SOUND EFFECTS ───
@@ -120,10 +170,13 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
   const [isMuted, setIsMuted] = useState(false);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
   
+  // Voice Gender Selector: "female" (Swara/Neerja) vs "male" (Prabhat/Madhur)
+  const [voiceGender, setVoiceGender] = useState<"female" | "male">("female");
+
   // Floating HUD Modes: "compact" | "expanded"
   const [hudMode, setHudMode] = useState<"compact" | "expanded">("compact");
   
-  // Mic & Speech State
+  // Speech & UI State
   const [isHoldingMic, setIsHoldingMic] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [typedInput, setTypedInput] = useState("");
@@ -138,11 +191,11 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef<string>("");
   const holdStartTimeRef = useRef<number>(0);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   
-  // Sentence-by-Sentence Queue Refs to guarantee full speech without stopping
+  // High-Speed Continuous Speech Queue Refs
   const speechQueueRef = useRef<string[]>([]);
   const isSpeakingQueueRef = useRef<boolean>(false);
+  const ttsHeartbeatRef = useRef<any>(null);
 
   // 1. Preload Browser SpeechSynthesis Voices
   useEffect(() => {
@@ -168,7 +221,7 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
 
-  // 3. Camera Stream (audio: false ensures hardware mic is 100% free for SpeechRecognition)
+  // 3. Camera Stream (audio: false guarantees mic is 100% free for user speech)
   const startCamera = useCallback(async (mode: "environment" | "user") => {
     try {
       if (stream) {
@@ -227,26 +280,27 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     startCamera(nextMode);
   };
 
-  // 5. Cancel Speech & Queue (Barge-in)
+  // 5. Cancel Speech (Barge-in on tap/mic hold)
   const stopSpeaking = () => {
     speechQueueRef.current = [];
     isSpeakingQueueRef.current = false;
-    if (currentAudioRef.current) {
-      try {
-        currentAudioRef.current.pause();
-        currentAudioRef.current.currentTime = 0;
-      } catch (_) {}
-      currentAudioRef.current = null;
-    }
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    if (ttsHeartbeatRef.current) clearInterval(ttsHeartbeatRef.current);
     setIsAiSpeaking(false);
   };
 
-  // 6. Sentence-by-Sentence Queue Player (Prevents Cutoff & Plays Full Solution)
+  // 6. High-Speed Indian Faculty Speech Engine (Rate 1.15x, Zero Gaps, Crisp Accent)
   const speakNextSentence = () => {
     if (speechQueueRef.current.length === 0) {
+      isSpeakingQueueRef.current = false;
+      setIsAiSpeaking(false);
+      if (ttsHeartbeatRef.current) clearInterval(ttsHeartbeatRef.current);
+      return;
+    }
+
+    if (typeof window === "undefined" || !window.speechSynthesis || isMuted) {
       isSpeakingQueueRef.current = false;
       setIsAiSpeaking(false);
       return;
@@ -256,57 +310,30 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     setIsAiSpeaking(true);
     const sentence = speechQueueRef.current.shift()!;
 
-    // Layer 1: Online Neural Google Stream
-    const ttsUrl = `/api/ai-doubt/live/tts?text=${encodeURIComponent(sentence)}`;
-    const audio = new Audio(ttsUrl);
-    currentAudioRef.current = audio;
-
-    audio.onended = () => {
-      currentAudioRef.current = null;
-      setTimeout(speakNextSentence, 120); // 120ms gentle teacher pause
-    };
-
-    audio.onerror = () => {
-      currentAudioRef.current = null;
-      speakBrowserSentence(sentence, () => {
-        setTimeout(speakNextSentence, 120);
-      });
-    };
-
-    audio.play().catch(() => {
-      currentAudioRef.current = null;
-      speakBrowserSentence(sentence, () => {
-        setTimeout(speakNextSentence, 120);
-      });
-    });
-  };
-
-  const speakBrowserSentence = (text: string, onDone: () => void) => {
-    if (typeof window === "undefined" || !window.speechSynthesis || isMuted) {
-      onDone();
-      return;
-    }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.95; // Calm, respectful teacher pacing
+    const utterance = new SpeechSynthesisUtterance(sentence);
+    // Active, energetic Kota/Delhi faculty speaking speed (No dragging!)
+    utterance.rate = 1.15;
     utterance.pitch = 1.0;
 
     const voices = window.speechSynthesis.getVoices();
-    // Case-insensitive voice matcher (handles Android hi-in, en-in, Google, Natural)
+
+    // Pick top Indian teacher voice based on selected gender
     const preferredVoice =
-      voices.find((v) => {
-        const name = (v.name || "").toLowerCase();
-        const lang = (v.lang || "").toLowerCase();
-        return (name.includes("google") || name.includes("natural")) && (lang.startsWith("hi") || lang.startsWith("en-in"));
-      }) ||
-      voices.find((v) => {
-        const name = (v.name || "").toLowerCase();
-        return name.includes("swara") || name.includes("madhur") || name.includes("neerja") || name.includes("prabhat");
-      }) ||
-      voices.find((v) => {
-        const lang = (v.lang || "").toLowerCase();
-        return lang.startsWith("hi") || lang.startsWith("en-in");
-      });
+      voiceGender === "female"
+        ? voices.find((v) => {
+            const n = (v.name || "").toLowerCase();
+            const l = (v.lang || "").toLowerCase();
+            return (n.includes("neerja") || n.includes("swara") || n.includes("female") || n.includes("google")) &&
+              (l.startsWith("en-in") || l.startsWith("hi"));
+          }) ||
+          voices.find((v) => (v.lang || "").toLowerCase().startsWith("en-in"))
+        : voices.find((v) => {
+            const n = (v.name || "").toLowerCase();
+            const l = (v.lang || "").toLowerCase();
+            return (n.includes("prabhat") || n.includes("madhur") || n.includes("male") || n.includes("google")) &&
+              (l.startsWith("en-in") || l.startsWith("hi"));
+          }) ||
+          voices.find((v) => (v.lang || "").toLowerCase().startsWith("en-in"));
 
     if (preferredVoice) {
       utterance.voice = preferredVoice;
@@ -315,8 +342,27 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
       utterance.lang = "en-IN";
     }
 
-    utterance.onend = () => onDone();
-    utterance.onerror = () => onDone();
+    // Zero-Delay Continuous Speech Transition: as soon as sentence ends, speak next immediately!
+    utterance.onend = () => {
+      speakNextSentence();
+    };
+
+    utterance.onerror = () => {
+      speakNextSentence();
+    };
+
+    // Heartbeat to prevent Android Chrome silent cutoff
+    if (!ttsHeartbeatRef.current) {
+      ttsHeartbeatRef.current = setInterval(() => {
+        if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.pause();
+          window.speechSynthesis.resume();
+        } else {
+          clearInterval(ttsHeartbeatRef.current);
+          ttsHeartbeatRef.current = null;
+        }
+      }, 7000);
+    }
 
     window.speechSynthesis.speak(utterance);
   };
@@ -328,9 +374,9 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     const cleaned = cleanTextForNaturalSpeech(rawText);
     if (!cleaned) return;
 
-    // Split entire solution into individual sentences (never cuts off the full answer!)
+    // Split into sentences (by period, question mark, exclamation)
     const sentences = cleaned
-      .split(/(?<=[.!?\n])\s+/)
+      .split(/(?<=[.!?])\s+/)
       .map((s) => s.trim())
       .filter((s) => s.length > 2);
 
@@ -347,7 +393,6 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     setIsAnalyzing(true);
     setHudMode("compact");
 
-    // Camera flash effect on capture
     setFlashTrigger(true);
     setTimeout(() => setFlashTrigger(false), 120);
 
@@ -355,7 +400,6 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      // High-Definition capture (1280x960 @ 0.85) for razor-sharp reading of handwritten formulas & ray diagrams
       const w = Math.min(video.videoWidth || 1280, 1280);
       const h = Math.min(video.videoHeight || 960, 960);
       canvas.width = w;
@@ -367,7 +411,6 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
       }
     }
 
-    // Exact user query (No hardcoded strings)
     const queryText = (spokenTextParam ?? transcriptRef.current ?? typedInput ?? "").trim();
     const promptToSend = queryText || "Camera par jo handwritten notes aur ray diagram hai use step-by-step detail mein explain kijiye.";
 
@@ -422,7 +465,7 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     }
   };
 
-  // 8. Press & Hold Mic (en-IN captures "Explain this" in clean English)
+  // 8. Press & Hold Mic
   const handleHoldStart = (e: React.TouchEvent | React.MouseEvent) => {
     e.preventDefault();
     if (isAnalyzing) return;
@@ -432,10 +475,8 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     setTranscript("");
     transcriptRef.current = "";
 
-    // Barge-in: immediately cancel AI speaking
     stopSpeaking();
 
-    // Haptic feedback
     if (typeof navigator !== "undefined" && navigator.vibrate) {
       navigator.vibrate(40);
     }
@@ -450,7 +491,7 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
           try { recognitionRef.current.stop(); } catch (_) {}
         }
         const recognition = new SpeechRecognition();
-        recognition.lang = "en-IN"; // English script captures "Explain this", "Solve this derivation" cleanly
+        recognition.lang = "en-IN"; // Clean English text ("Explain this", "Solve this derivation")
         recognition.continuous = false;
         recognition.interimResults = true;
 
@@ -490,8 +531,6 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     }
 
     const holdDuration = Date.now() - holdStartTimeRef.current;
-
-    // Immediately clear transcript display from top pill so analyzing pill takes over!
     setTranscript("");
 
     setTimeout(() => {
@@ -527,7 +566,7 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
       {/* Dark Vignette Overlay */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/85 via-transparent to-black/95 pointer-events-none" />
 
-      {/* TOP HEADER: Status, Timer, AI Speaking & Camera Switch */}
+      {/* TOP HEADER: Status, Timer, Voice Switcher & Camera Switch */}
       <div className="relative z-20 flex items-center justify-between p-4 pt-6">
         <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 shadow-md">
           <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
@@ -535,13 +574,18 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
           <span className="text-[11px] font-mono font-bold text-slate-300">· {formatTime(callDuration)}</span>
         </div>
 
-        {/* Live Speaking Indicator */}
-        {isAiSpeaking && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs font-bold shadow-md animate-pulse">
-            <span>🔊</span>
-            <span className="text-[10px] tracking-wide">Faculty Speaking...</span>
-          </div>
-        )}
+        {/* Center: Live Voice Gender Switcher */}
+        <button
+          type="button"
+          onClick={() => setVoiceGender(voiceGender === "female" ? "male" : "female")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-xs font-bold text-white shadow-md active:scale-95 transition"
+          title="Switch Faculty Voice (Female / Male)"
+        >
+          <span>{voiceGender === "female" ? "👩‍🏫" : "👨‍🏫"}</span>
+          <span className="text-[10.5px] font-semibold">
+            {voiceGender === "female" ? "Mam" : "Sir"}
+          </span>
+        </button>
 
         {/* Camera Switch */}
         <button
@@ -556,10 +600,10 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
       </div>
 
       {/* ───────────────────────────────────────────────────────────── */}
-      {/* CENTER STATUS PILL: ANALYZING SCANNER vs LIVE MIC TRANSCRIPT */}
+      {/* CENTER STATUS PILL: ANALYZING SCANNER vs LIVE MIC PREVIEW */}
       {/* ───────────────────────────────────────────────────────────── */}
       {isAnalyzing ? (
-        /* 1. WHILE SOLVING: PROMINENT ANALYZING SCANNER PILL (FIX FOR POINT 1) */
+        /* While Solving: Prominent Scanner Pill */
         <div className="relative z-30 mx-auto max-w-xs px-4 py-2 rounded-full bg-slate-900/90 backdrop-blur-md border border-teal-400/60 text-center shadow-2xl flex items-center justify-center gap-2.5 animate-pulse">
           <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-ping" />
           <p className="text-xs font-black text-teal-200 tracking-wide">
@@ -567,16 +611,24 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
           </p>
         </div>
       ) : isHoldingMic && transcript ? (
-        /* 2. WHILE HOLDING MIC: REAL-TIME CLEAN ENGLISH PREVIEW */
+        /* While Holding Mic: Live English Words Preview */
         <div className="relative z-30 mx-auto max-w-xs px-4 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-emerald-500/40 text-center shadow-lg">
           <p className="text-[11.5px] font-semibold text-emerald-300 truncate">
             🎙️ "{transcript}"
           </p>
         </div>
+      ) : isAiSpeaking ? (
+        /* While Speaking: Animated Voice Pill */
+        <div className="relative z-30 mx-auto max-w-xs px-3.5 py-1.5 rounded-full bg-emerald-950/85 backdrop-blur-md border border-emerald-500/40 text-center shadow-lg flex items-center justify-center gap-2 animate-pulse">
+          <span className="text-xs">🔊</span>
+          <p className="text-[11px] font-bold text-emerald-300">
+            Faculty Explaining... (Tap to pause)
+          </p>
+        </div>
       ) : null}
 
       {/* ───────────────────────────────────────────────────────────── */}
-      {/* BOTTOM-ALIGNED FLOATING HUD (COMPACT & FULL EXPANDED SOLUTION) */}
+      {/* BOTTOM-ALIGNED FLOATING HUD (COMPACT & EXPANDED STUDY CARDS) */}
       {/* ───────────────────────────────────────────────────────────── */}
       <div className="relative z-20 max-w-sm mx-auto w-full px-4 mb-2 mt-auto">
         {hudMode === "expanded" ? (
@@ -599,7 +651,7 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
               </button>
             </div>
 
-            {/* Scrollable Message History with Full Paragraphs */}
+            {/* Scrollable Message History with Clean Whiteboard Study Cards */}
             <div className="space-y-2.5 overflow-y-auto pr-1 flex-1">
               {messages.length === 0 ? (
                 <div className="py-4 text-center">
@@ -621,7 +673,8 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
                     <div className="text-[9px] font-mono text-slate-400 mb-1">
                       {m.sender === "user" ? "You" : m.provider || "AI Faculty"} · {m.time}
                     </div>
-                    <p className="whitespace-pre-wrap">{m.text}</p>
+                    {/* Render Clean Text without ugly symbols */}
+                    <div>{formatSolutionText(m.text)}</div>
                   </div>
                 ))
               )}
@@ -673,7 +726,9 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
                   Latest Solution
                 </span>
               </div>
-              <p className="text-xs text-white truncate font-medium">{latestAiMessage.text}</p>
+              <p className="text-xs text-white truncate font-medium">
+                {latestAiMessage.text.replace(/[*#`_~$]/g, "").slice(0, 80)}...
+              </p>
             </div>
             <div className="flex items-center gap-1 text-[11px] text-teal-300 bg-teal-500/20 border border-teal-500/30 px-2.5 py-1.5 rounded-xl shrink-0 font-bold group-hover:bg-teal-500/30">
               <span>View Full</span>
