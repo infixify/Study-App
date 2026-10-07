@@ -150,7 +150,6 @@ export default function GroupsListPage() {
     if (!trimmedName) return;
     if (newGroupHasPassword && !newGroupPasscode.trim()) return;
 
-    // 1. Check if group with same name already exists in memory
     const nameExistsLocally = groups.some(
       (g) => g.name.trim().toLowerCase() === trimmedName.toLowerCase()
     );
@@ -161,7 +160,6 @@ export default function GroupsListPage() {
 
     setCreating(true);
 
-    // 2. Double check directly in database (case-insensitive ilike)
     try {
       const { data: existingGroup } = await supabase
         .from("study_groups")
@@ -280,69 +278,54 @@ export default function GroupsListPage() {
         {loading ? (
           <p className="text-center py-10 text-xs text-slate">Loading groups…</p>
         ) : (
-          <>
-            {(myGroups.length > 0 || pendingRequests.length > 0) && (
-              <div>
-                <p className="text-xs font-bold text-slate mb-2 px-1">My Groups</p>
-                <div className="space-y-2.5">
-                  {pendingRequests.map((p) => (
-                    <PendingGroupCard
-                      key={p.request_id}
-                      pending={p}
-                      onOpen={() => router.push(`/groups/${p.group_id}`)}
-                      onCancel={() => handleCancelPending(p.group_id)}
-                    />
-                  ))}
-                  {myGroups.map((grp) => (
-                    <GroupCard key={grp.id} grp={grp} joined onOpen={() => router.push(`/groups/${grp.id}`)} />
-                  ))}
-                </div>
-              </div>
-            )}
+          <div>
+            <p className="text-xs font-bold text-slate mb-2 px-1">My Groups</p>
 
-            <div>
-              <p className="text-xs font-bold text-slate mb-2 px-1">All Groups</p>
-              {otherGroups.length === 0 ? (
-                <p className="text-xs text-slate px-1">No other groups yet — create one!</p>
-              ) : (
-                <div className="space-y-2.5">
-                  {otherGroups.map((grp) => (
-                    <GroupCard
-                      key={grp.id}
-                      grp={grp}
-                      joined={false}
-                      onOpen={() => router.push(`/groups/${grp.id}`)}
-                    />
-                  ))}
-                </div>
+            <div className="space-y-2.5">
+              {pendingRequests.map((p) => (
+                <PendingGroupCard
+                  key={p.request_id}
+                  pending={p}
+                  onOpen={() => router.push(`/groups/${p.group_id}`)}
+                  onCancel={() => handleCancelPending(p.group_id)}
+                />
+              ))}
+
+              {myGroups.map((grp) => (
+                <GroupCard key={grp.id} grp={grp} joined onOpen={() => router.push(`/groups/${grp.id}`)} />
+              ))}
+
+              {myGroups.length === 0 && pendingRequests.length === 0 && (
+                <p className="text-xs text-slate px-1 py-2">You haven't joined any groups yet.</p>
               )}
             </div>
-          </>
-        )}
 
-        <div className="flex gap-2 pt-2">
-          <button
-            onClick={() => {
-              setJoinTargetId(otherGroups[0]?.id ?? "");
-              setEnteredPasscode("");
-              setJoinError(null);
-              setJoinNotice(null);
-              setShowJoinModal(true);
-            }}
-            className="flex-1 py-3 rounded-xl border border-ink/15 text-ink font-bold text-xs hover:bg-ink/5"
-          >
-            🔑 Join Group
-          </button>
-          <button
-            onClick={() => {
-              setCreateError(null);
-              setShowCreateModal(true);
-            }}
-            className="flex-1 py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-xs hover:bg-teal/90"
-          >
-            + Create Group
-          </button>
-        </div>
+            {/* Join & Create buttons — right below the last group card */}
+            <div className="flex gap-2 pt-3">
+              <button
+                onClick={() => {
+                  setJoinTargetId(otherGroups[0]?.id ?? "");
+                  setEnteredPasscode("");
+                  setJoinError(null);
+                  setJoinNotice(null);
+                  setShowJoinModal(true);
+                }}
+                className="flex-1 py-3 rounded-xl border border-ink/15 text-ink font-bold text-xs hover:bg-ink/5"
+              >
+                🔑 Join Group
+              </button>
+              <button
+                onClick={() => {
+                  setCreateError(null);
+                  setShowCreateModal(true);
+                }}
+                className="flex-1 py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-xs hover:bg-teal/90"
+              >
+                + Create Group
+              </button>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* CREATE MODAL */}
