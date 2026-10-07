@@ -30,6 +30,7 @@ interface ChatMessage {
 
 const STORAGE_KEY = "pw_doubt_chat_session_v3";
 
+// ─── SVG ICONS ───
 function SvgX({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -55,10 +56,42 @@ function SvgMagic({ className }: { className?: string }) {
   );
 }
 
-function SvgPaperclip({ className }: { className?: string }) {
+function SvgCamera({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4-4a3 3 0 014 0l4 4m-2-2l2-2a3 3 0 014 0l2 2m-16 4h18" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  );
+}
+
+function SvgGallery({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+      />
+    </svg>
+  );
+}
+
+function SvgMic({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+      />
     </svg>
   );
 }
@@ -71,6 +104,48 @@ function SvgTrash({ className }: { className?: string }) {
   );
 }
 
+// ─── CLIENT-SIDE CANVAS IMAGE COMPRESSOR (1080px JPEG 0.75) ───
+function compressImage(file: File, maxWidth = 1080, quality = 0.75): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth || height > maxWidth) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxWidth) / height);
+            height = maxWidth;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(e.target?.result as string);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL("image/jpeg", quality);
+        resolve(compressed);
+      };
+      img.onerror = () => resolve(e.target?.result as string);
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
+}
+
+// ─── PURE REACT RICH TEXT FORMATTER ───
 function RenderFormattedMessage({ text }: { text: string }) {
   const lines = text.split("\n");
 
@@ -161,9 +236,12 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [doubtCount, setDoubtCount] = useState(1);
   const [sessionRestored, setSessionRestored] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     try {
@@ -204,6 +282,14 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
+
   if (!visible) return null;
 
   const handleClearHistory = () => {
@@ -221,26 +307,85 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
     ]);
   };
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Image Selection with Canvas Downscale Compression
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files) return;
+    if (!files || files.length === 0) return;
 
-    Array.from(files).slice(0, 2).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const base64 = ev.target?.result as string;
-        if (base64) {
-          setSelectedImages((prev) => [...prev, base64].slice(0, 2));
+    const fileList = Array.from(files).slice(0, 2);
+    for (const file of fileList) {
+      try {
+        const compressedBase64 = await compressImage(file, 1080, 0.75);
+        if (compressedBase64) {
+          setSelectedImages((prev) => [...prev, compressedBase64].slice(0, 2));
+        }
+      } catch (_) {}
+    }
+    e.target.value = "";
+  };
+
+  // Toggle Voice-to-Text Microphone
+  const toggleListening = () => {
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert("Aapke browser mein Speech-to-Text supported nahi hai. Kripya type karein.");
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-IN"; // English & Indian Hinglish speech support
+      recognition.continuous = false;
+      recognition.interimResults = true;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        let transcript = "";
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript) {
+          setInput((prev) => (prev ? `${prev} ${transcript}`.trim() : transcript));
         }
       };
-      reader.readAsDataURL(file);
-    });
+
+      recognition.onerror = () => {
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (_) {
+      setIsListening(false);
+    }
   };
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!input.trim() && selectedImages.length === 0) return;
     if (loading) return;
+
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    }
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -298,113 +443,121 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-2 sm:p-4">
-      <div className="relative flex flex-col w-full max-w-2xl h-[92vh] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+      <div className="flex flex-col w-full max-w-xl h-[92vh] sm:h-[86vh] bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden">
         
-        {/* Header Bar */}
-        <div className="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 bg-slate-950 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-teal-400 shadow-md">
               <SvgMagic className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                AI Doubt Faculty
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
-                  {studentContext?.targetExam || "JEE / NEET"}
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-white text-base">PrepWise AI Mentor</h3>
+                <span className="text-[10px] font-black uppercase tracking-wider text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded-full border border-teal-500/30">
+                  {studentContext?.targetExam || "JEE/NEET"} 24×7
                 </span>
-              </h3>
-              <p className="text-xs text-slate-400">
-                {studentContext?.daysToExam ? `${studentContext.daysToExam} Days Remaining` : "24x7 Academic Mentor"}
-              </p>
+              </div>
+              <p className="text-xs text-slate-400">NCERT · Formulas · Fast Step-by-Step Solutions</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-              {doubtCount} / 10 Doubts
-            </span>
+          <div className="flex items-center gap-1.5">
+            {messages.length > 1 && (
+              <button
+                type="button"
+                onClick={handleClearHistory}
+                className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                title="Clear Chat History"
+              >
+                <SvgTrash className="w-4 h-4" />
+              </button>
+            )}
             <button
-              onClick={handleClearHistory}
-              title="Clear Chat History"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
-            >
-              <SvgTrash className="w-4 h-4" />
-            </button>
-            <button
+              type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              title="Close"
             >
               <SvgX className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Restored Session Banner */}
-        {sessionRestored && (
-          <div className="bg-teal-950/40 border-b border-teal-800/40 px-4 py-1.5 flex items-center justify-between text-xs text-teal-300">
-            <span>Pichli chat restore kar li gayi hai.</span>
-            <button onClick={handleClearHistory} className="underline text-teal-400 hover:text-teal-200">
-              Nayi Chat Shuru Karein
-            </button>
+        {/* Student Context Diagnostic Pill */}
+        {studentContext && (
+          <div className="px-4 py-1.5 bg-slate-950/60 border-b border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 overflow-x-auto">
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-teal-400 font-semibold">🎯 {studentContext.targetExam || "Target Exam"}</span>
+              {studentContext.daysToExam !== undefined && (
+                <span className="text-slate-500">· {studentContext.daysToExam} days left</span>
+              )}
+            </div>
+            {studentContext.weakSubjects && studentContext.weakSubjects.length > 0 && (
+              <div className="text-[10px] text-amber-400/90 font-medium truncate ml-2">
+                Priority: {studentContext.weakSubjects.join(", ")}
+              </div>
+            )}
           </div>
         )}
 
-        {/* Chat List */}
+        {/* Chat Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {sessionRestored && (
+            <div className="text-center my-1">
+              <span className="text-[10px] bg-slate-800/80 text-slate-400 px-2.5 py-0.5 rounded-full border border-slate-700/60">
+                ↺ Continuing previous session
+              </span>
+            </div>
+          )}
+
           {messages.map((msg) => (
             <div
               key={msg.id}
               className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
             >
-              {msg.images && msg.images.length > 0 && (
-                <div className="flex gap-2 mb-2">
-                  {msg.images.map((img, i) => (
-                    <img
-                      key={i}
-                      src={img}
-                      alt="Question Attachment"
-                      className="w-28 h-28 object-cover rounded-xl border border-slate-700"
-                    />
-                  ))}
-                </div>
-              )}
-
               <div
-                className={`max-w-[88%] p-3.5 rounded-2xl ${
+                className={`max-w-[88%] rounded-2xl p-3.5 shadow-sm ${
                   msg.sender === "user"
-                    ? "bg-teal-600 text-white rounded-br-none shadow-md"
-                    : "bg-slate-950/70 border border-slate-800 text-slate-100 rounded-bl-none shadow-lg"
+                    ? "bg-teal-600 text-white rounded-br-xs"
+                    : "bg-slate-800/90 border border-slate-700/60 text-slate-100 rounded-bl-xs"
                 }`}
               >
-                {msg.sender === "user" ? (
-                  <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
-                ) : (
+                {/* Images in User Bubble */}
+                {msg.images && msg.images.length > 0 && (
+                  <div className="flex gap-2 mb-2 flex-wrap">
+                    {msg.images.map((img, i) => (
+                      <img
+                        key={i}
+                        src={img}
+                        alt="Question attachment"
+                        className="w-28 h-28 object-cover rounded-xl border border-white/20"
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {msg.sender === "ai" ? (
                   <RenderFormattedMessage text={msg.text} />
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
                 )}
               </div>
 
-              {/* Real-time Diagnostics Pill */}
-              {msg.sender === "ai" && msg.provider && (
-                <div className="mt-1 px-1 flex flex-col gap-0.5 text-[10px]">
-                  <span className="text-teal-400 font-medium">
-                    ✓ Solved via: {msg.provider.toUpperCase()} {msg.model ? `(${msg.model})` : ""}
-                  </span>
-                  {msg.debugTrace && msg.debugTrace.length > 1 && (
-                    <span className="text-slate-500 text-[9px] truncate max-w-sm">
-                      Path: {msg.debugTrace.join(" ➔ ")}
-                    </span>
-                  )}
+              {/* AI Metadata Footer */}
+              {msg.sender === "ai" && (msg.provider || msg.model) && (
+                <div className="flex items-center gap-2 mt-1 px-1 text-[9.5px] text-slate-500 font-mono">
+                  <span>⚡ {msg.provider || "AI Engine"}</span>
+                  {msg.model && <span>· {msg.model}</span>}
                 </div>
               )}
             </div>
           ))}
 
           {loading && (
-            <div className="flex items-center gap-2 p-3 bg-slate-950/60 border border-slate-800 rounded-2xl w-fit">
-              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
-              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse delay-150"></span>
-              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse delay-300"></span>
-              <span className="text-xs text-teal-300 ml-1">AI Teacher photo inspect karke step-by-step solution likh raha hai...</span>
+            <div className="flex items-center gap-2 text-slate-400 text-xs py-2 px-3 bg-slate-800/40 rounded-2xl w-fit border border-slate-700/40">
+              <div className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />
+              <span>NCERT concept analyze kar rahe hain...</span>
             </div>
           )}
 
@@ -433,11 +586,22 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
           </div>
         )}
 
-        {/* Input Bar */}
+        {/* Input Bar with Camera, Gallery & Mic */}
         <form
           onSubmit={handleSend}
-          className="flex items-center gap-2 p-3 bg-slate-950 border-t border-slate-800"
+          className="flex items-center gap-1.5 sm:gap-2 p-3 bg-slate-950 border-t border-slate-800"
         >
+          {/* Hidden Direct Camera Capture Input */}
+          <input
+            type="file"
+            ref={cameraInputRef}
+            onChange={handleImageSelect}
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+          />
+
+          {/* Hidden Gallery / File Picker Input */}
           <input
             type="file"
             ref={fileInputRef}
@@ -447,27 +611,54 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
             multiple
           />
 
+          {/* 1. Camera Button (Left) */}
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="p-2.5 rounded-xl text-slate-400 hover:text-teal-400 hover:bg-slate-800/80 transition"
+            title="Snap Photo with Camera"
+          >
+            <SvgCamera className="w-5 h-5" />
+          </button>
+
+          {/* 2. Gallery Button (Center) */}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="p-2.5 rounded-xl text-slate-400 hover:text-teal-400 hover:bg-slate-800/80 transition"
-            title="Attach Question Photo"
+            title="Choose from Gallery"
           >
-            <SvgPaperclip className="w-5 h-5" />
+            <SvgGallery className="w-5 h-5" />
           </button>
 
+          {/* 3. Mic Voice-to-Text Button (Right of Gallery) */}
+          <button
+            type="button"
+            onClick={toggleListening}
+            className={`p-2.5 rounded-xl transition ${
+              isListening
+                ? "text-rose-400 bg-rose-500/20 ring-2 ring-rose-500 animate-pulse"
+                : "text-slate-400 hover:text-teal-400 hover:bg-slate-800/80"
+            }`}
+            title={isListening ? "Listening... (Tap to stop)" : "Speech to Text (Mic)"}
+          >
+            <SvgMic className="w-5 h-5" />
+          </button>
+
+          {/* 4. Text Input */}
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Sawal likhein ya photo attach karein..."
-            className="flex-1 bg-slate-900 border border-slate-700 focus:border-teal-500 focus:outline-none text-white text-sm px-4 py-2.5 rounded-xl transition placeholder:text-slate-500"
+            placeholder={isListening ? "Bolte rahiye, text yahan aayega..." : "Sawal likhein ya photo lein..."}
+            className="flex-1 bg-slate-900 border border-slate-700 focus:border-teal-500 focus:outline-none text-white text-sm px-3.5 py-2.5 rounded-xl transition placeholder:text-slate-500"
           />
 
+          {/* 5. Submit Button */}
           <button
             type="submit"
             disabled={loading || (!input.trim() && selectedImages.length === 0)}
-            className="p-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white font-medium transition shadow-md"
+            className="p-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white font-medium transition shadow-md shrink-0"
           >
             <SvgAirplane className="w-5 h-5" />
           </button>
