@@ -20,13 +20,13 @@ export async function GET(req: NextRequest) {
       .slice(0, 300);
 
     // ─────────────────────────────────────────────────────────────
-    // TIER 1: GOOGLE NEURAL TTS (0.2s ultra-fast, 99.99% uptime)
+    // TIER 1: GOOGLE NEURAL TTS (Free, 0.2s ultra-fast, 99.99% uptime)
     // ─────────────────────────────────────────────────────────────
     if (provider !== "sarvam") {
       try {
         const encoded = encodeURIComponent(cleanText);
         const googleUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=hi&client=tw-ob`;
-        
+
         const googleController = new AbortController();
         const timeout = setTimeout(() => googleController.abort(), 2000);
 
@@ -55,7 +55,8 @@ export async function GET(req: NextRequest) {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // TIER 2: SARVAM AI (BULBUL TTS) FAILOVER
+    // TIER 2: SARVAM AI (BULBUL:V3 TTS) FAILOVER
+    // Model: "bulbul:v3", Speaker: "shubh" (Active Male Faculty)
     // ─────────────────────────────────────────────────────────────
     const sarvamApiKey = process.env.SARVAM_API_KEY?.replace(/["'\r\n]/g, "").trim();
     if (sarvamApiKey) {
@@ -73,13 +74,13 @@ export async function GET(req: NextRequest) {
           body: JSON.stringify({
             inputs: [cleanText],
             target_language_code: "hi-IN",
-            speaker: "arvind", // Male Indian Faculty Voice
+            speaker: "shubh", // Active Male Voice on bulbul:v3
             pitch: 0,
-            pace: 1.1,
+            pace: 1.05,
             loudness: 1.5,
             speech_sample_rate: 22050,
             enable_preprocessing: true,
-            model: "bulbul:v1",
+            model: "bulbul:v3",
           }),
         });
         clearTimeout(timeout);
@@ -96,7 +97,7 @@ export async function GET(req: NextRequest) {
             return new NextResponse(bytes.buffer, {
               headers: {
                 "Content-Type": "audio/wav",
-                "X-TTS-Provider": "sarvam-bulbul",
+                "X-TTS-Provider": "sarvam-bulbul-v3",
               },
             });
           }
