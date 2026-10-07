@@ -10,16 +10,19 @@ IMPORTANT TEACHER GUIDELINES:
 1. DYNAMIC LENGTH & COMPLETE SOLUTIONS (NO ARTIFICIAL RESTRICTIONS):
    - Agar student ne koi bada derivation (jaise Compound Microscope, Astronomical Telescope), optics ray diagram, physics numerical problem, ya derivation dikhaya hai, toh pura PROPER, REASONABLE aur STEP-BY-STEP complete solution samjhao.
    - Har zaroori formula (jaise objective lens magnification Mo = vo/uo, eyepiece Me = 1 + D/fe, total magnification M, cases for near point D aur infinity), steps aur ray diagram ka significance clearly explain karo.
-   - Agar chhota factual sawal hai, toh 2-3 lines mein crisp explain karo.
-   - Solution ko zabardasti aadha ya cut-off mat karo. Student ko pura concept samajh aana chahiye.
+   - Har step ko clean 'Step 1:', 'Step 2:' format mein likho taaki student ko padhne mein bilkul aasani ho.
+   - Agar chhota sawal hai, toh 2-3 lines mein crisp explain karo.
 2. NATURAL INDIAN FACULTY TONE:
-   - Ek experienced, supportive Kota/Delhi top faculty ki tarah natural Hinglish mein explain karo (jaise: "Dekhiye bacchon, is page par Compound Microscope ka derivation hai...").
+   - Ek experienced, supportive Kota/Delhi top faculty ki tarah natural Hinglish mein explain karo (jaise: "Dekhiye bacchon, is derivation mein...").
 3. SPOKEN MATH PHONETICS:
-   - Formulas ko natural readable words mein likho taaki bolne aur sunne mein bilkul clear ho (jaise: "M barabar L upon fo into 1 plus D upon fe", "vo upon uo", "v equals u plus a t", "under-root").
-4. CLEAN PARAGRAPH FORMATTING:
-   - Bold asterisks (**), bullets (*), ya raw LaTeX delimiters ($) ki jagah clean paragraphs aur step-by-step readable text use karo.`;
+   - Formulas ko natural readable words aur clean Unicode mein likho (jaise: "Mo = vo / uo", "M = Mo * Me", "under-root", "v = u + a*t").
+4. CLEAN FORMATTING:
+   - Equations aur steps ko separate lines par likho taaki UI mein clean cards ban sakein.`;
 
 export async function POST(req: NextRequest) {
+  const startTime = Date.now();
+  let lastGoogleError = "";
+
   try {
     const { frame, message, studentContext } = await req.json();
 
@@ -42,119 +45,186 @@ export async function POST(req: NextRequest) {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // TIER 1: GOOGLE 5-KEY POOL + 2-MODEL SAME-KEY CIRCUIT BREAKER
+    // 2 KEYS SELECTION: Key 1 & Key 2
     // ─────────────────────────────────────────────────────────────
-    let keys = getLiveGeminiKeys();
-    if (keys.length === 0) {
-      keys = getImageGeminiKeys();
+    let allKeys = getLiveGeminiKeys();
+    if (allKeys.length === 0) {
+      allKeys = getImageGeminiKeys();
+    }
+    const envGemini = process.env.GEMINI_API_KEY?.replace(/["'\r\n]/g, "").trim();
+    if (envGemini && !allKeys.includes(envGemini)) {
+      allKeys.push(envGemini);
     }
 
-    let lastGoogleError = "";
-    let googleCircuitBroken = false;
+    const key1 = allKeys[0] || null;
+    const key2 = allKeys[1] || null;
 
-    if (keys.length > 0) {
-      for (let i = 0; i < keys.length; i++) {
-        const key = keys[i];
-        const controller1 = new AbortController();
-        const timeout1 = setTimeout(() => controller1.abort(), 6500);
+    // Active Models: Image Doubt models (working in production)
+    const MODEL_A = "gemini-3.8-flash";
+    const MODEL_B = "gemini-3.5-flash-lite";
 
-        try {
-          const parts: any[] = [{ text: promptText }];
-          if (rawBase64) {
-            parts.push({
-              inlineData: {
-                mimeType: "image/jpeg",
-                data: rawBase64,
-              },
-            });
-          }
-
-          const url1 = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${key}`;
-          const res1 = await fetch(url1, {
-            method: "POST",
-            signal: controller1.signal,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: LIVE_FACULTY_PROMPT }] },
-              contents: [{ parts }],
-              generationConfig: {
-                temperature: 0.35,
-                maxOutputTokens: 1200, // Reasonable capacity for full derivations
-              },
-            }),
+    // Helper to call Google Gemini
+    async function tryGemini(key: string, model: string): Promise<{ ok: boolean; status: number; text?: string; err?: string }> {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3800);
+      try {
+        const parts: any[] = [{ text: promptText }];
+        if (rawBase64) {
+          parts.push({
+            inlineData: {
+              mimeType: "image/jpeg",
+              data: rawBase64,
+            },
           });
-          clearTimeout(timeout1);
-
-          if (res1.ok) {
-            const data1 = await res1.json();
-            const reply = data1?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-            if (reply) {
-              return NextResponse.json({
-                reply,
-                model: "Gemini Live (gemini-3.8-flash)",
-                provider: "google",
-                success: true,
-              });
-            }
-          }
-
-          if (res1.status === 429) {
-            lastGoogleError = `Key ${i + 1} Quota Exhausted`;
-            continue;
-          }
-
-          if (res1.status === 503 || res1.status === 500 || res1.status === 502) {
-            lastGoogleError = `Model 1 Spike (${res1.status})`;
-            const controller2 = new AbortController();
-            const timeout2 = setTimeout(() => controller2.abort(), 4500);
-            try {
-              const url2 = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${key}`;
-              const res2 = await fetch(url2, {
-                method: "POST",
-                signal: controller2.signal,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  systemInstruction: { parts: [{ text: LIVE_FACULTY_PROMPT }] },
-                  contents: [{ parts }],
-                  generationConfig: {
-                    temperature: 0.35,
-                    maxOutputTokens: 1200,
-                  },
-                }),
-              });
-              clearTimeout(timeout2);
-              if (res2.ok) {
-                const data2 = await res2.json();
-                const reply2 = data2?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-                if (reply2) {
-                  return NextResponse.json({
-                    reply: reply2,
-                    model: "Gemini Live (gemini-3.5-flash-lite)",
-                    provider: "google",
-                    success: true,
-                  });
-                }
-              }
-              if (res2.status === 503 || res2.status === 500 || res2.status === 502) {
-                googleCircuitBroken = true;
-                break;
-              }
-            } catch (err2: any) {
-              clearTimeout(timeout2);
-              googleCircuitBroken = true;
-              break;
-            }
-          }
-        } catch (e1: any) {
-          clearTimeout(timeout1);
-          lastGoogleError = e1?.message || "Model 1 Timeout";
         }
-        if (googleCircuitBroken) break;
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+        const res = await fetch(url, {
+          method: "POST",
+          signal: controller.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: LIVE_FACULTY_PROMPT }] },
+            contents: [{ parts }],
+            generationConfig: {
+              temperature: 0.35,
+              maxOutputTokens: 1200,
+            },
+          }),
+        });
+        clearTimeout(timeout);
+
+        if (res.ok) {
+          const data = await res.json();
+          const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          if (reply) return { ok: true, status: 200, text: reply };
+        }
+
+        let errDetail = "";
+        try {
+          const errJson = await res.json();
+          errDetail = errJson?.error?.message || "";
+        } catch (_) {
+          errDetail = res.statusText;
+        }
+        return { ok: false, status: res.status, err: `${model} HTTP ${res.status}: ${errDetail.slice(0, 90)}` };
+      } catch (e: any) {
+        clearTimeout(timeout);
+        const isTimeout = e?.name === "AbortError";
+        return {
+          ok: false,
+          status: isTimeout ? 408 : 500,
+          err: isTimeout ? `${model} Timeout (>3.8s)` : (e?.message || `${model} Connection failed`),
+        };
       }
     }
 
+    function isTrafficSpike(status: number): boolean {
+      return status === 503 || status === 500 || status === 502 || status === 504 || status === 408;
+    }
+
+    function isRateLimit(status: number): boolean {
+      return status === 429;
+    }
+
     // ─────────────────────────────────────────────────────────────
-    // TIER 2: GROQ MULTIMODAL LPU FAILOVER
+    // DUAL-KEY / DUAL-MODEL SMART CIRCUIT-BREAKER LOGIC
+    // ─────────────────────────────────────────────────────────────
+    if (key1) {
+      // 1. Try Model A on Key 1
+      const resA1 = await tryGemini(key1, MODEL_A);
+      if (resA1.ok && resA1.text) {
+        return NextResponse.json({
+          reply: resA1.text,
+          model: `Google Gemini (${MODEL_A})`,
+          provider: "google",
+          success: true,
+          latencyMs: Date.now() - startTime,
+        });
+      }
+      lastGoogleError = resA1.err || "Model A failed on Key 1";
+
+      if (isRateLimit(resA1.status)) {
+        // Model A got Rate Limited (429) on Key 1: Try Model B on Key 1
+        const resB1 = await tryGemini(key1, MODEL_B);
+        if (resB1.ok && resB1.text) {
+          return NextResponse.json({
+            reply: resB1.text,
+            model: `Google Gemini (${MODEL_B})`,
+            provider: "google",
+            success: true,
+            latencyMs: Date.now() - startTime,
+          });
+        }
+        lastGoogleError = resB1.err || "Model B failed on Key 1";
+
+        if (isRateLimit(resB1.status)) {
+          // Rule 1: BOTH MODELS RATE LIMIT ON KEY 1 -> TRY BOTH ON KEY 2
+          if (key2) {
+            const resA2 = await tryGemini(key2, MODEL_A);
+            if (resA2.ok && resA2.text) {
+              return NextResponse.json({
+                reply: resA2.text,
+                model: `Google Gemini (${MODEL_A} - Key 2)`,
+                provider: "google",
+                success: true,
+                latencyMs: Date.now() - startTime,
+              });
+            }
+            lastGoogleError = resA2.err || "Key 2 Model A failed";
+
+            const resB2 = await tryGemini(key2, MODEL_B);
+            if (resB2.ok && resB2.text) {
+              return NextResponse.json({
+                reply: resB2.text,
+                model: `Google Gemini (${MODEL_B} - Key 2)`,
+                provider: "google",
+                success: true,
+                latencyMs: Date.now() - startTime,
+              });
+            }
+            lastGoogleError = resB2.err || "Key 2 Model B failed";
+          }
+        }
+      } else if (isTrafficSpike(resA1.status)) {
+        // Model A had Traffic Spike on Key 1 -> TRY MODEL B
+        const resB1 = await tryGemini(key1, MODEL_B);
+        if (resB1.ok && resB1.text) {
+          return NextResponse.json({
+            reply: resB1.text,
+            model: `Google Gemini (${MODEL_B})`,
+            provider: "google",
+            success: true,
+            latencyMs: Date.now() - startTime,
+          });
+        }
+        lastGoogleError = resB1.err || "Model B failed on Key 1";
+
+        if (isTrafficSpike(resB1.status)) {
+          // Rule 2: ANY 1 MODEL TRAFFIC ON KEY 1 -> TRY ANOTHER -> IF BOTH TRAFFIC THEN DON'T USE KEY 2!
+        } else if (isRateLimit(resB1.status)) {
+          // Rule 3: 1st MODEL TRAFFIC ON KEY 1 AND 2nd MODEL RATE LIMIT -> TRY RATE LIMITED MODEL ON KEY 2!
+          if (key2) {
+            const resB2 = await tryGemini(key2, MODEL_B);
+            if (resB2.ok && resB2.text) {
+              return NextResponse.json({
+                reply: resB2.text,
+                model: `Google Gemini (${MODEL_B} - Key 2)`,
+                provider: "google",
+                success: true,
+                latencyMs: Date.now() - startTime,
+              });
+            }
+            lastGoogleError = resB2.err || "Key 2 Model B rate-limit fallback failed";
+          }
+        }
+      }
+    } else {
+      lastGoogleError = "No Gemini API keys configured in environment";
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // TIER 2: GROQ MULTIMODAL LPU FAILOVER (~1.2s response)
     // ─────────────────────────────────────────────────────────────
     const groqKey =
       process.env.GROQ_API_KEY_LIVE?.replace(/["'\r\n]/g, "").trim() ||
@@ -162,7 +232,8 @@ export async function POST(req: NextRequest) {
 
     if (groqKey) {
       const groqController = new AbortController();
-      const groqTimeout = setTimeout(() => groqController.abort(), 6000);
+      const groqTimeout = setTimeout(() => groqController.abort(), 4500);
+
       try {
         const groqContent: any[] = [{ type: "text", text: promptText }];
         if (rawBase64) {
@@ -202,18 +273,22 @@ export async function POST(req: NextRequest) {
               model: "Groq Live LPU (qwen3.8-27b)",
               provider: "groq",
               success: true,
+              failoverReason: lastGoogleError ? `Google Failover: ${lastGoogleError}` : undefined,
+              latencyMs: Date.now() - startTime,
             });
           }
         }
-      } catch (_) {
+      } catch (err: any) {
         clearTimeout(groqTimeout);
       }
     }
 
     return NextResponse.json(
       {
-        reply: `Network connection slow hai. Kripya sawal dubara puchiye (${lastGoogleError || "Server busy"}).`,
+        reply: `Network connection slow hai ya provider unavailable hai. Kripya dubara puchiye. (${lastGoogleError || "Server busy"}).`,
         success: false,
+        failoverReason: lastGoogleError,
+        latencyMs: Date.now() - startTime,
       },
       { status: 200 }
     );
