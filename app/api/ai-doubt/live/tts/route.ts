@@ -31,6 +31,51 @@ async function generateSecMsGec(clientToken: string): Promise<string> {
 }
 
 /**
+ * Normalizes text for continuous, natural faculty speech:
+ * - Eliminates artificial long pauses caused by duplicate punctuation or ellipses
+ * - Expands Hinglish / Physics & Maths abbreviations into natural spoken sounds
+ */
+function normalizeForFastSmoothSpeech(raw: string): string {
+  if (!raw) return "";
+  let text = raw;
+
+  // 1. Remove markdown, latex wrappers, bullet hashes
+  text = text.replace(/[*#`_~\[\](){}]/g, " ");
+  text = text.replace(/Step \d+:\s*/gi, "");
+
+  // 2. Reduce multiple commas, dots, dashes, colons to a single light pause
+  text = text.replace(/\.{2,}/g, ".");
+  text = text.replace(/,{2,}/g, ",");
+  text = text.replace(/[:;-]{2,}/g, " ");
+  text = text.replace(/[:;]/g, ",");
+
+  // 3. Spoken Indian Faculty Academic Pronunciation Dictionaries
+  text = text.replace(/\bapprox\b/gi, "lagbhag");
+  text = text.replace(/\beqn\b|\beq\b/gi, "equation");
+  text = text.replace(/\bw\.r\.t\b/gi, "with respect to");
+  text = text.replace(/\bi\.e\b/gi, "yaani ki");
+  text = text.replace(/\be\.g\b/gi, "for example");
+  text = text.replace(/\bfig\b/gi, "figure");
+  text = text.replace(/\bconst\b/gi, "constant");
+  text = text.replace(/\bmag\b/gi, "magnification");
+  text = text.replace(/\bdiff\b/gi, "differentiation");
+  text = text.replace(/\bint\b/gi, "integration");
+
+  // Math & Physics notation pronunciation fixes
+  text = text.replace(/\bvo\b/gi, "v objective");
+  text = text.replace(/\buo\b/gi, "u objective");
+  text = text.replace(/\bfo\b/gi, "f objective");
+  text = text.replace(/\bfe\b/gi, "f eyepiece");
+  text = text.replace(/\bMo\b/gi, "M objective");
+  text = text.replace(/\bMe\b/gi, "M eyepiece");
+
+  // 4. Smooth out awkward commas between small words (avoids robotic stutter)
+  text = text.replace(/,\s*(hai|ki|toh|aur|se|mein|ka|ke|ko)\b/gi, " $1");
+  text = text.replace(/\s+/g, " ").trim();
+  return text.slice(0, 220);
+}
+
+/**
  * Edge Runtime synthesis for Microsoft Edge Neural TTS (hi-IN-MadhurNeural)
  * Works in Cloudflare Workers / Pages & Edge runtimes via native WebSocket / fetch Upgrade.
  */
@@ -110,7 +155,8 @@ async function synthesizeEdgeTTS(
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&apos;");
 
-          const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="hi-IN"><voice name="hi-IN-MadhurNeural"><prosody pitch="+0Hz" rate="+5%">${escapedText}</prosody></voice></speak>`;
+          // Prosody tuning: rate +10% ensures energetic faculty flow without robotic trailing pauses
+          const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="hi-IN"><voice name="hi-IN-MadhurNeural"><prosody pitch="+0Hz" rate="+10%">${escapedText}</prosody></voice></speak>`;
           const speechMsg = `X-RequestId:${reqId}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n${ssml}`;
           ws.send(speechMsg);
         };
@@ -209,11 +255,8 @@ export async function GET(req: NextRequest) {
       return new NextResponse("Missing text parameter", { status: 400 });
     }
 
-    const cleanText = text
-      .replace(/[*#`_~\[\]()]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 200);
+    // Normalizing text for smooth spoken tempo without stutter pauses
+    const cleanText = normalizeForFastSmoothSpeech(text);
 
     // ─────────────────────────────────────────────────────────────
     // TIER 1: MICROSOFT EDGE NEURAL TTS (hi-IN-MadhurNeural Male)
@@ -257,7 +300,7 @@ export async function GET(req: NextRequest) {
             target_language_code: "hi-IN",
             speaker: "shubh",
             pitch: 0,
-            pace: 1.05,
+            pace: 1.1,
             loudness: 1.5,
             speech_sample_rate: 22050,
             enable_preprocessing: true,
