@@ -37,13 +37,13 @@ async function generateSecMsGec(clientToken: string): Promise<string> {
 async function synthesizeEdgeTTS(
   cleanText: string,
   timeoutMs = 2800
-): Promise<Uint8Array | null> {
+): Promise<Blob | null> {
   try {
     const secMsGec = await generateSecMsGec(TRUSTED_CLIENT_TOKEN);
     const connectionId = crypto.randomUUID().replace(/-/g, "");
     const wssUrl = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=1-${CHROMIUM_VERSION}&ConnectionId=${connectionId}`;
 
-    return await new Promise<Uint8Array | null>(async (resolve) => {
+    return await new Promise<Blob | null>(async (resolve) => {
       let finished = false;
       const audioChunks: Uint8Array[] = [];
 
@@ -136,7 +136,7 @@ async function synthesizeEdgeTTS(
                   merged.set(chunk, offset);
                   offset += chunk.length;
                 }
-                resolve(merged);
+                resolve(new Blob([merged], { type: "audio/mpeg" }));
               }
             }
           } else if (event.data instanceof ArrayBuffer) {
@@ -180,7 +180,7 @@ async function synthesizeEdgeTTS(
                 merged.set(chunk, offset);
                 offset += chunk.length;
               }
-              resolve(merged);
+              resolve(new Blob([merged], { type: "audio/mpeg" }));
             } else {
               resolve(null);
             }
@@ -220,9 +220,10 @@ export async function GET(req: NextRequest) {
     // ─────────────────────────────────────────────────────────────
     if (provider !== "sarvam") {
       try {
-        const edgeAudio = await synthesizeEdgeTTS(cleanText, 2500);
-        if (edgeAudio && edgeAudio.length > 0) {
-          return new NextResponse(edgeAudio, {
+        const edgeBlob = await synthesizeEdgeTTS(cleanText, 2500);
+        if (edgeBlob && edgeBlob.size > 0) {
+          return new Response(edgeBlob, {
+            status: 200,
             headers: {
               "Content-Type": "audio/mpeg",
               "Cache-Control": "public, max-age=86400, s-maxage=86400, immutable",
@@ -275,7 +276,9 @@ export async function GET(req: NextRequest) {
               bytes[i] = binaryString.charCodeAt(i);
             }
 
-            return new NextResponse(bytes, {
+            const sarvamBlob = new Blob([bytes], { type: "audio/wav" });
+            return new Response(sarvamBlob, {
+              status: 200,
               headers: {
                 "Content-Type": "audio/wav",
                 "Cache-Control": "public, max-age=86400, s-maxage=86400, immutable",
@@ -302,7 +305,9 @@ export async function GET(req: NextRequest) {
       });
       if (googleRes.ok) {
         const audioBuffer = await googleRes.arrayBuffer();
-        return new NextResponse(audioBuffer, {
+        const googleBlob = new Blob([audioBuffer], { type: "audio/mpeg" });
+        return new Response(googleBlob, {
+          status: 200,
           headers: {
             "Content-Type": "audio/mpeg",
             "Cache-Control": "public, max-age=86400, s-maxage=86400, immutable",
