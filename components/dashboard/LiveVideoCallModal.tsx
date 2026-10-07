@@ -2,12 +2,14 @@
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 
-export interface LiveVideoCallModalProps {
+interface LiveVideoCallModalProps {
   open: boolean;
   onClose: () => void;
   studentContext?: {
-    studentName?: string;
     targetExam?: string;
+    studentClass?: string;
+    recentWeakTopics?: string[];
+    studyStreakDays?: number;
   };
 }
 
@@ -16,6 +18,7 @@ interface LiveMessage {
   sender: "user" | "ai";
   text: string;
   time: string;
+  modelUsed?: string;
   provider?: string;
 }
 
@@ -24,15 +27,18 @@ function cleanTextForNaturalSpeech(raw: string): string {
   if (!raw) return "";
   let text = raw;
 
-  // 1. Remove Markdown syntax & asterisks
+  // 1. Remove Markdown syntax, asterisks, brackets
   text = text.replace(/\*\*(.*?)\*\*/g, "$1");
   text = text.replace(/\*(.*?)\*/g, "$1");
   text = text.replace(/`([^`]+)`/g, "$1");
   text = text.replace(/#+\s*/g, "");
   text = text.replace(/Step \d+:\s*/gi, "");
   text = text.replace(/[-*•]\s+/g, "");
+  text = text.replace(/\\\[|\\\]|\\\(|\\\)/g, "");
 
-  // 2. Phonetic Math & Science Symbol Replacements
+  // 2. Phonetic Math & Science Conversions
+  text = text.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1 divided by $2");
+  text = text.replace(/\\sqrt\{([^}]+)\}/g, "under-root $1");
   text = text.replace(/(\w+)\^2\b/g, "$1 square");
   text = text.replace(/(\w+)\^3\b/g, "$1 cube");
   text = text.replace(/x²/g, "x square");
@@ -40,9 +46,10 @@ function cleanTextForNaturalSpeech(raw: string): string {
   text = text.replace(/r²/g, "r square");
   text = text.replace(/v²/g, "v square");
   text = text.replace(/u²/g, "u square");
-  text = text.replace(/√(\w+|\([^)]+\))/g, "under-root $1");
   text = text.replace(/√/g, "under-root ");
 
+  text = text.replace(/m\/s²/g, "meter per second square");
+  text = text.replace(/m\/s/g, "meter per second");
   text = text.replace(/ΔT/g, "delta T");
   text = text.replace(/Δ/g, "delta ");
   text = text.replace(/θ/g, "theta");
@@ -54,13 +61,26 @@ function cleanTextForNaturalSpeech(raw: string): string {
   text = text.replace(/≈/g, "lagbhag");
   text = text.replace(/±/g, "plus minus");
   text = text.replace(/°C/g, "degree celsius");
+  text = text.replace(/×/g, " into ");
+  text = text.replace(/÷/g, " divided by ");
 
-  // Common physics equations spoken rhythm
+  // 3. Spoken rhythm for common formulas
   text = text.replace(/v\s*=\s*u\s*\+\s*at/gi, "v equals u plus a t");
-  text = text.replace(/F\s*=\s*ma/gi, "F equals m a");
+  text = text.replace(/F\s*=\s*ma/gi, "force equals mass into acceleration");
 
-  // Clean trailing spaces and limit spoken length to 350 chars for swift pacing
-  return text.trim().slice(0, 350);
+  // 4. Natural Sentence Boundary Cut (Don't cut words abruptly)
+  text = text.replace(/\s+/g, " ").trim();
+  if (text.length > 260) {
+    const slice = text.slice(0, 260);
+    const lastPunct = Math.max(slice.lastIndexOf("."), slice.lastIndexOf("?"), slice.lastIndexOf("!"));
+    if (lastPunct > 120) {
+      text = slice.slice(0, lastPunct + 1);
+    } else {
+      text = slice + "...";
+    }
+  }
+
+  return text;
 }
 
 // ─── SYNTHESIZED SOUND EFFECTS (WEB AUDIO EARCONS) ───
@@ -78,7 +98,6 @@ function playUiTone(type: "press" | "send" | "ai") {
 
     const now = ctx.currentTime;
     if (type === "press") {
-      // Soft high-tech pop
       osc.type = "sine";
       osc.frequency.setValueAtTime(440, now);
       osc.frequency.exponentialRampToValueAtTime(880, now + 0.06);
@@ -87,7 +106,6 @@ function playUiTone(type: "press" | "send" | "ai") {
       osc.start(now);
       osc.stop(now + 0.06);
     } else if (type === "send") {
-      // Crisp confirmation swoosh
       osc.type = "sine";
       osc.frequency.setValueAtTime(600, now);
       osc.frequency.exponentialRampToValueAtTime(1200, now + 0.1);
@@ -96,7 +114,6 @@ function playUiTone(type: "press" | "send" | "ai") {
       osc.start(now);
       osc.stop(now + 0.1);
     } else {
-      // AI response bell
       osc.type = "triangle";
       osc.frequency.setValueAtTime(880, now);
       gain.gain.setValueAtTime(0.06, now);
@@ -112,12 +129,13 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
   const [isMuted, setIsMuted] = useState(false);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
   
-  // Floating HUD View Modes: "compact" (bottom preview) | "expanded" (full sheet) | "hidden"
-  const [hudMode, setHudMode] = useState<"compact" | "expanded" | "hidden">("compact");
+  // Floating HUD View Modes: "compact" (bottom preview) | "expanded" (full sheet)
+  const [hudMode, setHudMode] = useState<"compact" | "expanded">("compact");
   
   // Press & Hold State
   const [isHoldingMic, setIsHoldingMic] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [typedInput, setTypedInput] = useState("");
   const [messages, setMessages] = useState<LiveMessage[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
@@ -127,10 +145,23 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const recognitionRef = useRef<any>(null);
+  const transcriptRef = useRef<string>("");
   const holdStartTimeRef = useRef<number>(0);
   const ttsHeartbeatRef = useRef<any>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 1. Call Duration Timer
+  // 1. Preload Browser SpeechSynthesis Voices
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      const load = () => {
+        window.speechSynthesis.getVoices();
+      };
+      load();
+      window.speechSynthesis.onvoiceschanged = load;
+    }
+  }, []);
+
+  // 2. Call Duration Timer
   useEffect(() => {
     if (!open) return;
     const interval = setInterval(() => setCallDuration((d) => d + 1), 1000);
@@ -143,15 +174,16 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
 
-  // 2. Camera Stream Handler
+  // 3. Camera Stream Handler (CRITICAL FIX: audio: false to prevent mic locking!)
   const startCamera = useCallback(async (mode: "environment" | "user") => {
     try {
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());
       }
+      // audio: false frees the device mic exclusively for SpeechRecognition!
       const media = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: mode, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: true,
+        audio: false,
       });
       setStream(media);
       if (videoRef.current) {
@@ -171,6 +203,13 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch (_) {}
     }
+    if (currentAudioRef.current) {
+      try {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      } catch (_) {}
+      currentAudioRef.current = null;
+    }
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
@@ -181,6 +220,7 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     setIsHoldingMic(false);
     setCallDuration(0);
     setTranscript("");
+    transcriptRef.current = "";
     setMessages([]);
     setHudMode("compact");
   }, [stream]);
@@ -196,17 +236,6 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     };
   }, [open, facingMode]);
 
-  // 3. Mute / Unmute Microphone
-  const toggleMic = () => {
-    if (stream) {
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = isMuted;
-        setIsMuted(!isMuted);
-      }
-    }
-  };
-
   // 4. Flip Camera Switch (Rear <-> Front)
   const toggleCameraSwitch = () => {
     const nextMode = facingMode === "environment" ? "user" : "environment";
@@ -214,32 +243,78 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     startCamera(nextMode);
   };
 
-  // 5. Natural Indian Teacher Speech Engine with 8s Heartbeat Keep-Alive (Rule 15)
-  const speakResponse = (rawText: string) => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
+  // 5. Natural Indian Teacher Speech Engine (Layer 1: Online Neural MP3, Layer 2: Browser Fallback)
+  const speakResponse = async (rawText: string) => {
+    if (!rawText || isMuted) return;
 
-    window.speechSynthesis.cancel();
+    // Barge-in: cancel previous audio
+    if (currentAudioRef.current) {
+      try {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      } catch (_) {}
+      currentAudioRef.current = null;
+    }
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
     if (ttsHeartbeatRef.current) clearInterval(ttsHeartbeatRef.current);
 
     const speechText = cleanTextForNaturalSpeech(rawText);
     if (!speechText) return;
 
-    const utterance = new SpeechSynthesisUtterance(speechText);
-    utterance.rate = 1.05;
-    utterance.pitch = 1.0;
+    // Layer 1: Online Google Neural Teacher Voice (0.2s ultra-clear natural speech)
+    try {
+      playUiTone("ai");
+      setIsAiSpeaking(true);
 
-    // Pick Indian Teacher Neural / Standard Voice
+      const ttsUrl = `/api/ai-doubt/live/tts?text=${encodeURIComponent(speechText.slice(0, 200))}`;
+      const audio = new Audio(ttsUrl);
+      currentAudioRef.current = audio;
+
+      audio.onplay = () => {
+        setIsAiSpeaking(true);
+      };
+      audio.onended = () => {
+        setIsAiSpeaking(false);
+        currentAudioRef.current = null;
+      };
+      audio.onerror = () => {
+        // Fallback to browser SpeechSynthesis if network issue
+        fallbackBrowserSpeech(speechText);
+      };
+
+      await audio.play();
+      return;
+    } catch (_) {
+      fallbackBrowserSpeech(speechText);
+    }
+  };
+
+  const fallbackBrowserSpeech = (speechText: string) => {
+    if (typeof window === "undefined" || !window.speechSynthesis || isMuted) {
+      setIsAiSpeaking(false);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(speechText);
+    utterance.rate = 0.96; // Calm natural teacher pacing
+    utterance.pitch = 1.02; // Warm teacher pitch
+
     const voices = window.speechSynthesis.getVoices();
     const preferredVoice =
-      voices.find((v) => v.name.includes("Google") && (v.lang === "hi-IN" || v.lang === "en-IN")) ||
-      voices.find((v) => v.name.includes("Neerja") || v.name.includes("Heera") || v.name.includes("Prabhat")) ||
-      voices.find((v) => v.lang === "hi-IN") ||
-      voices.find((v) => v.lang === "en-IN");
+      voices.find((v) => (v.name.includes("Google") || v.name.includes("Natural")) && (v.lang === "hi-IN" || v.lang === "hi_IN")) ||
+      voices.find((v) => (v.name.includes("Google") || v.name.includes("Natural")) && (v.lang === "en-IN" || v.lang === "en_IN")) ||
+      voices.find((v) => v.name.includes("Swara") || v.name.includes("Madhur") || v.name.includes("Neerja") || v.name.includes("Prabhat")) ||
+      voices.find((v) => v.lang === "hi-IN" || v.lang === "hi_IN") ||
+      voices.find((v) => v.lang === "en-IN" || v.lang === "en_IN");
 
     if (preferredVoice) {
       utterance.voice = preferredVoice;
+      utterance.lang = preferredVoice.lang;
+    } else {
+      utterance.lang = "hi-IN";
     }
-    utterance.lang = preferredVoice?.lang || "hi-IN";
 
     utterance.onstart = () => {
       setIsAiSpeaking(true);
@@ -264,17 +339,16 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
       if (ttsHeartbeatRef.current) clearInterval(ttsHeartbeatRef.current);
     };
 
-    playUiTone("ai");
     window.speechSynthesis.speak(utterance);
   };
 
-  // 6. Send Frame Snapshot & Spoken Transcript to Backend Pool
-  const sendLiveDoubt = async (spokenText?: string) => {
+  // 6. Send Frame Snapshot & Real Spoken Input to Backend Pool
+  const sendLiveDoubt = async (spokenTextParam?: string) => {
     if (isAnalyzing) return;
     setIsAnalyzing(true);
     setHudMode("compact");
 
-    // Flash animation on send
+    // Camera flash effect on capture
     setFlashTrigger(true);
     setTimeout(() => setFlashTrigger(false), 120);
 
@@ -291,16 +365,23 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
       }
     }
 
-    const userQuery = spokenText?.trim() || transcript.trim() || "Camera par jo question hai use step-by-step samjha do.";
+    // Capture exact user speech with zero hardcoding!
+    const queryText = (spokenTextParam ?? transcriptRef.current ?? typedInput ?? "").trim();
+    const promptToSend = queryText || "Camera par jo question hai use step-by-step samjhaiye.";
+
+    // Show what user actually asked in chat UI
+    const displayBubbleText = queryText ? `🎙️ "${queryText}"` : "📸 [Question Scan]";
 
     const userMsg: LiveMessage = {
       id: Date.now().toString(),
       sender: "user",
-      text: userQuery,
+      text: displayBubbleText,
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
     setMessages((prev) => [...prev, userMsg]);
     setTranscript("");
+    setTypedInput("");
+    transcriptRef.current = "";
 
     try {
       const res = await fetch("/api/ai-doubt/live", {
@@ -308,37 +389,39 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           frame: frameBase64,
-          message: userQuery,
+          message: promptToSend,
           studentContext,
         }),
       });
 
       const data = await res.json();
-      const aiReply = data?.reply || "Sawal clear nahi dikha, camera thoda nazdeek laayein.";
+      const reply = data?.reply || "Sawal clear nahi dikh raha. Kripya camera question par focus karein.";
 
       const aiMsg: LiveMessage = {
         id: (Date.now() + 1).toString(),
         sender: "ai",
-        text: aiReply,
+        text: reply,
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        provider: data?.model || "AI Faculty",
+        modelUsed: data?.model,
+        provider: data?.provider,
       };
+
       setMessages((prev) => [...prev, aiMsg]);
-      speakResponse(aiReply);
-    } catch {
-      const errMsg: LiveMessage = {
+      speakResponse(reply);
+    } catch (err: any) {
+      const errorMsg: LiveMessage = {
         id: (Date.now() + 1).toString(),
         sender: "ai",
-        text: "Network slow hai. Kripya sawal dobara puchiye.",
+        text: "Network issue aagaya. Kripya dubara puchiye.",
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
-      setMessages((prev) => [...prev, errMsg]);
+      setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // 7. Push-To-Talk (Walkie-Talkie Press & Hold) Handlers
+  // 7. PUSH-TO-TALK (PRESS & HOLD MIC ENGINE)
   const handleHoldStart = (e: React.TouchEvent | React.MouseEvent) => {
     e.preventDefault();
     if (isAnalyzing) return;
@@ -346,20 +429,28 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
     holdStartTimeRef.current = Date.now();
     setIsHoldingMic(true);
     setTranscript("");
+    transcriptRef.current = "";
 
     // Barge-in: immediately cancel ongoing speech
+    if (currentAudioRef.current) {
+      try {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      } catch (_) {}
+      currentAudioRef.current = null;
+    }
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
-      setIsAiSpeaking(false);
     }
+    setIsAiSpeaking(false);
 
-    // Haptic & Sound Earcon
+    // Haptic vibration feedback
     if (typeof navigator !== "undefined" && navigator.vibrate) {
       navigator.vibrate(40);
     }
     playUiTone("press");
 
-    // Start Web Speech listener (Rule 14: continuous=false for Android mobile chrome)
+    // Initialize Web Speech API with bilingual Hindi/English support
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -369,22 +460,31 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
           try { recognitionRef.current.stop(); } catch (_) {}
         }
         const recognition = new SpeechRecognition();
-        recognition.lang = "en-IN";
+        recognition.lang = "hi-IN"; // Google Hindi model is bilingual (captures Hindi + English terms)
         recognition.continuous = false;
         recognition.interimResults = true;
 
         recognition.onresult = (event: any) => {
-          let curr = "";
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            curr += event.results[i][0].transcript;
+          let full = "";
+          for (let i = 0; i < event.results.length; i++) {
+            full += event.results[i][0].transcript;
           }
-          if (curr) setTranscript(curr);
+          const cleaned = full.trim();
+          if (cleaned) {
+            transcriptRef.current = cleaned;
+            setTranscript(cleaned);
+          }
         };
 
-        recognition.onerror = () => {};
+        recognition.onerror = (err: any) => {
+          console.warn("Speech recognition warning:", err?.error);
+        };
+
         recognitionRef.current = recognition;
         recognition.start();
-      } catch (_) {}
+      } catch (e) {
+        console.warn("SpeechRecognition start error:", e);
+      }
     }
   };
 
@@ -399,10 +499,17 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
       try { recognitionRef.current.stop(); } catch (_) {}
     }
 
-    // Small delay to capture final speech result buffer
+    const holdDuration = Date.now() - holdStartTimeRef.current;
+
+    // Allow 150ms for speech buffer to catch the final spoken word
     setTimeout(() => {
-      sendLiveDoubt();
-    }, 250);
+      const finalSpoken = transcriptRef.current.trim();
+      if (holdDuration < 300 && !finalSpoken) {
+        // Accidental brief tap
+        return;
+      }
+      sendLiveDoubt(finalSpoken);
+    }, 150);
   };
 
   if (!open) return null;
@@ -441,7 +548,7 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
         {isAiSpeaking && (
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs font-bold shadow-md animate-pulse">
             <span>🔊</span>
-            <span className="text-[10px] tracking-wide">Speaking...</span>
+            <span className="text-[10px] tracking-wide">Faculty Speaking...</span>
           </div>
         )}
 
@@ -459,7 +566,7 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
 
       {/* REAL-TIME SPEECH TRANSCRIPT FLOATING PILL */}
       {transcript && (
-        <div className="relative z-20 mx-auto max-w-xs px-4 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-emerald-500/40 text-center shadow-lg">
+        <div className="relative z-20 mx-auto max-w-xs px-4 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-emerald-500/40 text-center shadow-lg animate-fade-in">
           <p className="text-[11.5px] font-semibold text-emerald-300 truncate">🎙️ "{transcript}"</p>
         </div>
       )}
@@ -469,9 +576,9 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
       {/* ───────────────────────────────────────────────────────────── */}
       <div className="relative z-20 max-w-sm mx-auto w-full px-4 mb-2 mt-auto">
         {hudMode === "expanded" ? (
-          /* EXPANDED FULL SHEET DRAWER (PULLED UP OR TOGGLED BY CHAT BUTTON) */
+          /* EXPANDED FULL SHEET DRAWER */
           <div className="bg-slate-900/90 backdrop-blur-xl border border-teal-500/40 rounded-3xl p-4 shadow-2xl space-y-2.5 transition-all max-h-[55vh] flex flex-col">
-            {/* Drag Handle & Minimize Header */}
+            {/* Header */}
             <div className="flex items-center justify-between border-b border-white/10 pb-2 shrink-0">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-teal-400" />
@@ -522,9 +629,35 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
                 </div>
               )}
             </div>
+
+            {/* Optional Type/Edit Doubt Box in Drawer */}
+            <div className="pt-2 border-t border-white/10 flex items-center gap-2 shrink-0">
+              <input
+                type="text"
+                value={typedInput}
+                onChange={(e) => setTypedInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && typedInput.trim()) {
+                    sendLiveDoubt(typedInput.trim());
+                  }
+                }}
+                placeholder="Ya type karke puchein..."
+                className="flex-1 bg-black/50 border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-teal-400"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (typedInput.trim()) sendLiveDoubt(typedInput.trim());
+                }}
+                disabled={!typedInput.trim() || isAnalyzing}
+                className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white font-bold text-xs"
+              >
+                Send
+              </button>
+            </div>
           </div>
         ) : hudMode === "compact" && latestAiMessage ? (
-          /* COMPACT BOTTOM PREVIEW CARD (LEAVES SCREEN CLEAR FOR CAMERA) */
+          /* COMPACT BOTTOM PREVIEW CARD */
           <div
             onClick={() => setHudMode("expanded")}
             className="w-full bg-slate-900/85 backdrop-blur-md border border-teal-500/30 rounded-2xl p-3 text-left shadow-xl active:scale-98 transition cursor-pointer flex items-center justify-between group"
@@ -556,7 +689,7 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
       {/* BOTTOM CONTROLS DOCK & PUSH-TO-TALK (HOLD MIC) */}
       {/* ───────────────────────────────────────────────────────────── */}
       <div className="relative z-20 p-4 pb-8 flex flex-col items-center gap-2.5 bg-gradient-to-t from-black via-black/90 to-transparent">
-        {/* Dynamic Context Helper Badge (Requested by user) */}
+        {/* Dynamic Context Helper Badge */}
         <div className="px-3.5 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-center shadow-md">
           <p className="text-[10px] font-semibold text-slate-300">
             {isHoldingMic ? (
@@ -574,13 +707,13 @@ export function LiveVideoCallModal({ open, onClose, studentContext }: LiveVideoC
           {/* 1. Mute/Unmute Audio Toggle */}
           <button
             type="button"
-            onClick={toggleMic}
+            onClick={() => setIsMuted(!isMuted)}
             className={`p-3.5 rounded-full transition-all active:scale-95 shadow-xl ${
               isMuted
                 ? "bg-rose-600 text-white border border-rose-400"
                 : "bg-slate-800/90 text-slate-300 border border-slate-700 hover:bg-slate-700"
             }`}
-            title={isMuted ? "Unmute Mic" : "Mute Mic"}
+            title={isMuted ? "Unmute Voice" : "Mute Voice"}
           >
             {isMuted ? "🔇" : "🔈"}
           </button>
