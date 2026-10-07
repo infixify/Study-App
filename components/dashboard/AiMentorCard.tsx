@@ -9,7 +9,7 @@ interface AiMentorCardProps {
   report: any;
   loading: boolean;
   onRefresh: () => void;
-  onOpenDoubtSolver?: () => void;
+  onOpenAiTalk?: () => void;
 }
 
 export default function AiMentorCard({
@@ -17,7 +17,7 @@ export default function AiMentorCard({
   report,
   loading,
   onRefresh,
-  onOpenDoubtSolver,
+  onOpenAiTalk,
 }: AiMentorCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"daily" | "subjects" | "swot" | "rank">("daily");
@@ -122,32 +122,24 @@ export default function AiMentorCard({
           </div>
         </div>
 
-        {/* Prediction Summary Strip */}
-        <div className="bg-black/30 backdrop-blur-md rounded-xl p-2.5 border border-white/10 mb-3 relative z-10">
-          <div className="text-[11px] font-black text-amber-300 tracking-tight flex items-center gap-1.5">
-            <span>🎯</span> {prediction}
-          </div>
-          <p className="text-[10px] text-slate-300 line-clamp-2 mt-0.5 leading-relaxed font-medium">
-            {summary}
-          </p>
-        </div>
-
         {/* Action Buttons */}
         <div className="grid grid-cols-2 gap-2 relative z-10">
           <button
             type="button"
             onClick={() => setModalOpen(true)}
-            className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-[0.98] transition-all tracking-wide"
+            className="py-4 px-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-black text-sm flex flex-col items-center justify-center gap-1 shadow-md active:scale-[0.98] transition-all tracking-wide"
           >
-            <span>📋</span> GET MENTORSHIP
+            <span className="text-lg">📋</span>
+            <span>GET MENTORSHIP</span>
           </button>
 
           <button
             type="button"
-            onClick={onOpenDoubtSolver}
-            className="py-2.5 px-3 rounded-xl bg-white/10 hover:bg-white/15 text-white font-black text-xs border border-white/20 flex items-center justify-center gap-1.5 backdrop-blur-md shadow-xs active:scale-[0.98] transition-all tracking-wide"
+            onClick={onOpenAiTalk}
+            className="py-4 px-3 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-black text-sm flex flex-col items-center justify-center gap-1 shadow-md active:scale-[0.98] transition-all tracking-wide"
           >
-            <span className="text-amber-400">✨</span> Ask Doubt Solver
+            <span className="text-lg">🎙️</span>
+            <span>AI TALK</span>
           </button>
         </div>
       </div>
