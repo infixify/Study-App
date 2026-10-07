@@ -72,16 +72,25 @@ export async function POST(req: Request) {
     if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 });
     if (!apiKey) return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
 
+    // ── STRICT MANUAL-ONLY GENERATION ──────────────────────────────────────
+    // AI generation ONLY triggers when user explicitly clicks "Update & Refresh".
+    // On every other load (page refresh, app restart, navigation) we ONLY read
+    // from DB and return whatever is there — null included.  The card handles
+    // null by showing its built-in default/placeholder UI.
+    // ────────────────────────────────────────────────────────────────────────
     if (!forceRefresh) {
       const { data: existingUser } = await supabase
         .from("users")
-        .select("ai_mentor_report")
+        .select("ai_mentor_report, ai_student_context")
         .eq("uid", userId)
         .maybeSingle();
 
-      if (existingUser?.ai_mentor_report) {
-        return NextResponse.json({ report: existingUser.ai_mentor_report, cached: true });
-      }
+      // Return cached report (or null) — never auto-generate
+      return NextResponse.json({
+        report: existingUser?.ai_mentor_report ?? null,
+        studentContext: existingUser?.ai_student_context ?? null,
+        cached: true,
+      });
     }
 
     // Fetch profile first so target_exam is available for exam schedule query
