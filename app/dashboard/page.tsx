@@ -21,8 +21,8 @@ declare global {
   }
 }
 
-// ─── HIGH-SPEED SWR IN-MEMORY CACHE (Eliminates Request Storms on Tab Switch) ───
-const CACHE_TTL_MS = 1 * 60 * 1000; // 1 min memory, 3 min localStorage
+// ─── HIGH-SPEED SWR IN-MEMORY CACHE ───
+const CACHE_TTL_MS = 1 * 60 * 1000;
 const globalMemoryCache: Record<string, { timestamp: number; data: any }> = {};
 
 function getMemCache<T>(key: string): T | null {
@@ -133,6 +133,7 @@ interface QuestionLogEntry {
 interface ContentCardItem {
   id: string;
   quote: string;
+  quote_source?: "human" | "anime";
   character: string;
   show: string;
   icon_or_sticker: string;
@@ -155,6 +156,12 @@ const MEME_LIMIT = 2;
 
 function getTodayKey(): string {
   return `pw_content_state_${new Date().toISOString().split("T")[0]}`;
+}
+
+// Odd Days = Human, Even Days = Anime
+function getTodayQuoteSource(): "human" | "anime" {
+  const day = new Date().getDate();
+  return day % 2 === 1 ? "human" : "anime";
 }
 
 interface DailyContentState {
@@ -195,6 +202,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   {
     id: "m-1",
     quote: "Dream is not that which you see while sleeping, it is something that does not let you sleep.",
+    quote_source: "human",
     character: "Dr. A.P.J. Abdul Kalam",
     show: "Wings of Fire",
     icon_or_sticker: "🚀",
@@ -207,6 +215,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   {
     id: "m-2",
     quote: "Arise, awake, and stop not until the goal is reached. Strength is life, weakness is death.",
+    quote_source: "human",
     character: "Swami Vivekananda",
     show: "Rousing Call to Youth",
     icon_or_sticker: "⚡",
@@ -222,6 +231,7 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
   {
     id: "meme-1",
     quote: "PAKAD PAKAD PAKAD... Isne aaj tak numericals solve nahi kiye! Daya, iska phone tod do! 😂",
+    quote_source: "human",
     character: "ACP Pradyuman",
     show: "CID (Meme Edition)",
     icon_or_sticker: "👮",
@@ -279,6 +289,13 @@ function timeRangesOverlap(
   return af < bt && bf < at;
 }
 
+// Media renderer helper that bypasses Cloudinary for relative paths like /Qanime/
+function renderMediaSource(url: string): string {
+  if (!url) return "";
+  if (url.startsWith("/")) return url; // Relative local public folder
+  return optimizeMediaUrl(url, 180);
+}
+
 function HeroWidget({
   name,
   streak,
@@ -318,7 +335,6 @@ function HeroWidget({
   useEffect(() => {
     async function fetchDynamicContent() {
       try {
-        // Step 1: Fetch only the latest updated_at — tiny query, saves DB reads
         const { data: tsData } = await supabase
           .from("daily_content")
           .select("updated_at")
@@ -330,7 +346,6 @@ function HeroWidget({
         const latestTs = tsData?.updated_at ?? null;
         const cachedTs = localStorage.getItem("pw_content_ts");
 
-        // Step 2: If timestamp matches → use cache, no full fetch needed
         if (latestTs && cachedTs === latestTs) {
           const cached = getMemCache<Record<string, ContentCardItem[]>>("daily_content_deck");
           if (cached) {
@@ -339,7 +354,6 @@ function HeroWidget({
           }
         }
 
-        // Step 3: Timestamp changed or no cache → full fetch
         const { data, error } = await supabase.from("daily_content").select("*").eq("is_active", true);
         if (!error && data && data.length > 0) {
           const mList: ContentCardItem[] = [];
@@ -368,7 +382,6 @@ function HeroWidget({
           };
           setDbItems(deck);
           setMemCache("daily_content_deck", deck);
-          // Save latest timestamp so next open skips full fetch
           if (latestTs) localStorage.setItem("pw_content_ts", latestTs);
         }
       } catch (_) {}
@@ -377,7 +390,7 @@ function HeroWidget({
   }, []);
 
   useEffect(() => {
-    const motDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
+    const rawMotDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
     const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
     const saved = loadDailyContentState();
 
@@ -385,9 +398,14 @@ function HeroWidget({
     setLimitHit(false);
 
     if (mode === "motivation") {
+      // Human vs Anime Daily Alternation
+      const todaySource = getTodayQuoteSource();
+      const filteredBySource = rawMotDeck.filter((c) => c.quote_source === todaySource);
+      const motDeck = filteredBySource.length > 0 ? filteredBySource : rawMotDeck;
+
       let item = motDeck.find((c) => c.id === saved.selectedMotivationId);
       if (!item) {
-        const idx = getDailyIndex(motDeck.length, "motivation");
+        const idx = getDailyIndex(motDeck.length, `motivation_${todaySource}`);
         item = motDeck[idx] || motDeck[0];
         const next: DailyContentState = { ...saved, motivationIndex: idx, selectedMotivationId: item.id };
         setDailyState(next);
@@ -410,7 +428,7 @@ function HeroWidget({
   }, [dbItems, mode]);
 
   const handleTapCard = useCallback(() => {
-    const motDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
+    const rawMotDeck = dbItems.motivation.length > 0 ? dbItems.motivation : FALLBACK_MOTIVATION_QUOTES;
     const memDeck = dbItems.meme.length > 0 ? dbItems.meme : FALLBACK_MEME_QUOTES;
     const saved = loadDailyContentState();
 
@@ -421,6 +439,10 @@ function HeroWidget({
     };
 
     if (mode === "motivation") {
+      const todaySource = getTodayQuoteSource();
+      const filteredBySource = rawMotDeck.filter((c) => c.quote_source === todaySource);
+      const motDeck = filteredBySource.length > 0 ? filteredBySource : rawMotDeck;
+
       if (saved.motivationCount >= QUOTE_LIMIT) { showLimit(); return; }
       const newCount = saved.motivationCount + 1;
       const nextIdx = (saved.motivationIndex + 1) % motDeck.length;
@@ -481,7 +503,7 @@ function HeroWidget({
           </div>
         </div>
 
-        {/* RESTORED: Today + Goal Side-by-Side Boxes */}
+        {/* Today + Goal Side-by-Side Boxes */}
         <div className="flex items-center gap-2 mb-2">
           <div
             className={`flex-1 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 ${
@@ -519,7 +541,7 @@ function HeroWidget({
           </div>
         </div>
 
-        {/* RESTORED: 24-Hour Grid Goal Edit Popup */}
+        {/* Goal Edit Popup */}
         {showGoalPopup && (
           <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
             <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 w-full max-w-xs">
@@ -597,7 +619,7 @@ function HeroWidget({
                 (currentItem.icon_or_sticker.startsWith("http") || currentItem.icon_or_sticker.startsWith("/")) ? (
                   <img
                     key={imgKey}
-                    src={optimizeMediaUrl(currentItem.icon_or_sticker, 180)}
+                    src={renderMediaSource(currentItem.icon_or_sticker)}
                     alt=""
                     loading="lazy"
                     decoding="async"
@@ -637,7 +659,7 @@ function HeroWidget({
   );
 }
 
-// ─── 6. SYLLABUS COMPLETION WIDGET ───────────────────────────────────────────
+// ─── SYLLABUS COMPLETION WIDGET ───
 function SyllabusCompletionWidget({
   subjects,
   chapters,
@@ -761,7 +783,7 @@ function SyllabusCompletionWidget({
   );
 }
 
-// ─── 7. COMBINED ACTION ITEMS WIDGET ─────────────────────────────────────────
+// ─── ACTION ITEMS WIDGET ───
 function ActionItemsWidget({
   tasks,
   scheduledTests,
@@ -867,7 +889,7 @@ function ActionItemsWidget({
   );
 }
 
-// ─── MAIN DASHBOARD PAGE ─────────────────────────────────────────────────────
+// ─── MAIN DASHBOARD PAGE ───
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -882,7 +904,6 @@ export default function DashboardPage() {
   const [todayStudyMins, setTodayStudyMins] = useState(0);
   const [dailyGoalMins, setDailyGoalMins] = useState(480);
 
-  // Single Source of Truth: question_logs
   const [todayQuestions, setTodayQuestions] = useState(0);
   const [totalQuestionsAllTime, setTotalQuestionsAllTime] = useState(0);
   const [todayAvgQPerHr, setTodayAvgQPerHr] = useState(0);
@@ -904,7 +925,6 @@ export default function DashboardPage() {
   const [shiftsMap, setShiftsMap] = useState<Record<string, ExamShift[]>>({});
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
 
-  // Question logging modal state
   const [showAddQuestionModal, setShowAddQuestionModal] = useState(false);
   const [todayQuestionEntries, setTodayQuestionEntries] = useState<QuestionLogEntry[]>([]);
   const [selectedDistinctSubject, setSelectedDistinctSubject] = useState<string>("");
@@ -932,7 +952,6 @@ export default function DashboardPage() {
     let isCancelled = false;
 
     async function loadData() {
-      // 1. SWR Memory Cache Instant Hydration (0ms latency)
       const cached = getMemCache<any>("full_dashboard_state");
       if (cached && !isCancelled) {
         setProfile(cached.profile);
@@ -959,7 +978,6 @@ export default function DashboardPage() {
         setLoading(false);
       }
 
-      // 2. Auth Session Check
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -985,7 +1003,6 @@ export default function DashboardPage() {
       const wantsBoards = uProf.class_level !== "Dropper" && Boolean(uProf.wants_boards);
       const isDropper = uProf?.class_level === "Dropper";
 
-      // 3. Parallel Batch Fetching (Eliminates Waterfall Network Storms)
       const [
         subjectsRes,
         schedulesRes,
@@ -1043,7 +1060,6 @@ export default function DashboardPage() {
 
       if (isCancelled) return;
 
-      // Process Subjects & Chapters
       let cleanedSubs: SubjectItem[] = [];
       let chapsData: ChapterItem[] = [];
       let distinctSub = "";
@@ -1090,7 +1106,6 @@ export default function DashboardPage() {
         }
       }
 
-      // Process Exam Schedules & Shifts
       let studentSchedules: ExamScheduleItem[] = [];
       let sMap: Record<string, ExamShift[]> = {};
       if (schedulesRes.data && schedulesRes.data.length > 0) {
@@ -1111,7 +1126,6 @@ export default function DashboardPage() {
       }
       setExamSchedules(studentSchedules);
 
-      // Process Daily Logs
       let calculatedTodayMins = 0;
       let calculatedSplit = { theory: 0, practice: 0, revision: 0, verified: 0 };
       if (pastLogsRes.data) {
@@ -1128,7 +1142,6 @@ export default function DashboardPage() {
         setSplitRatio(calculatedSplit);
       }
 
-      // Process Question Logs (Single Source of Truth)
       const allEntries = (qLogsRes.data || []) as QuestionLogEntry[];
       const totalQ = allEntries.reduce((acc, q) => acc + (q.question_count || 0), 0);
       setTotalQuestionsAllTime(totalQ);
@@ -1140,7 +1153,6 @@ export default function DashboardPage() {
       const calculatedAvg = computeTodayAvgQPerHr(todayEntries);
       setTodayAvgQPerHr(calculatedAvg);
 
-      // Reconcile Streak
       let reconciledStreak = uProf?.current_streak || 0;
       try {
         const sInfo = await loadAndReconcileStreak(uid);
@@ -1158,7 +1170,6 @@ export default function DashboardPage() {
       setScheduledTests(schedTestsData);
       setRecentTests(recentTestsData);
 
-      // Save to SWR Cache for 0ms next load
       setMemCache("full_dashboard_state", {
         user: currentUser,
         profile: uProf,
@@ -1185,7 +1196,6 @@ export default function DashboardPage() {
 
       setLoading(false);
 
-      // Load AI Mentor Report (cached first, then generate if missing)
       try {
         const cachedReport = uProf?.ai_mentor_report;
         const cachedContext = uProf?.ai_student_context;
@@ -1206,7 +1216,6 @@ export default function DashboardPage() {
           }
         }
       } catch (_) {
-        // Mentor report is non-critical, silently fail
       } finally {
         if (!isCancelled) setMentorLoading(false);
       }
@@ -1513,7 +1522,6 @@ export default function DashboardPage() {
 
         {/* 4. METRICS ROW */}
         <div className="grid grid-cols-3 gap-2">
-          {/* Today Study */}
           <button
             type="button"
             onClick={() => router.push("/focus")}
@@ -1527,7 +1535,6 @@ export default function DashboardPage() {
             <span className="text-[10px] font-bold text-teal block mt-0.5">Study Timer →</span>
           </button>
 
-          {/* Redesigned Questions Box */}
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 flex flex-col justify-between shadow-2xs">
             <div>
               <div className="flex items-center justify-between mb-0.5">
@@ -1556,7 +1563,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Tasks */}
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Tasks</span>
             <div className="text-lg font-black text-slate-900 tracking-tight">{allTasks.length}</div>
@@ -1699,7 +1705,7 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* 10. QUESTION LOGGING MODAL WITH LIVE TIME RANGE & CONFLICT DETECTION */}
+      {/* 10. QUESTION LOGGING MODAL */}
       {showAddQuestionModal && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-sm w-full border border-slate-300 overflow-hidden flex flex-col max-h-[92vh] shadow-xl">
