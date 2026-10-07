@@ -21,6 +21,8 @@ interface LiveMessage {
   time: string;
   modelUsed?: string;
   provider?: string;
+  failoverReason?: string;
+  latencyMs?: number;
 }
 
 // ─── PHONETIC TEACHER NORMALIZER (CLEANS MATH FOR NATURAL ACCENT & FLUIDITY) ───
@@ -28,13 +30,11 @@ function cleanTextForNaturalSpeech(raw: string): string {
   if (!raw) return "";
   let text = raw;
 
-  // 1. Remove markdown symbols, asterisks, hashes, backticks
   text = text.replace(/[*#`_~]/g, " ");
   text = text.replace(/\$\$|\$/g, " ");
   text = text.replace(/Step \d+:\s*/gi, "");
   text = text.replace(/\\\[|\\\]|\\\(|\\\)/g, "");
 
-  // 2. Expand LaTeX math into natural spoken Hindi/English teacher phrases
   text = text.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1 divided by $2");
   text = text.replace(/\\sqrt\{([^}]+)\}/g, "square root of $1");
   text = text.replace(/\^2/g, " squared");
@@ -54,7 +54,6 @@ function cleanTextForNaturalSpeech(raw: string): string {
   text = text.replace(/\\infty/g, " infinity ");
   text = text.replace(/\\rightarrow/g, " gives ");
 
-  // 3. Remove leftover brackets, hyphens, and multi-spaces
   text = text.replace(/[\[\]{}()]/g, " ");
   text = text.replace(/[-–—]/g, " ");
   text = text.replace(/\s+/g, " ");
@@ -62,8 +61,8 @@ function cleanTextForNaturalSpeech(raw: string): string {
   return text.trim();
 }
 
-// ─── CLEAN FORMATTER FOR WRITTEN STEP-BY-STEP SOLUTION ───
-function formatSolutionText(raw: string): string {
+// ─── CLEAN FORMATTER FOR COPIED / PLAIN TEXT ───
+function cleanFormulaSymbols(raw: string): string {
   if (!raw) return "";
   return raw
     .replace(/[*#`_~]/g, "")
@@ -75,6 +74,179 @@ function formatSolutionText(raw: string): string {
     .replace(/\\div/g, " ÷ ")
     .replace(/\\rightarrow/g, " → ")
     .trim();
+}
+
+// ─── RICH STRUCTURED SOLUTION CARD COMPONENT ───
+function FormattedSolutionCard({
+  message,
+  onReplay,
+  isSpeakingThis,
+  onStopSpeech,
+}: {
+  message: LiveMessage;
+  onReplay: (text: string) => void;
+  isSpeakingThis: boolean;
+  onStopSpeech: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    const textToCopy = cleanFormulaSymbols(message.text);
+    if (navigator?.clipboard) {
+      navigator.clipboard.writeText(textToCopy);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const rawLines = message.text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  return (
+    <div className="bg-slate-900/95 border border-teal-500/30 rounded-2xl p-3.5 text-slate-100 shadow-xl space-y-2.5 transition-all">
+      {/* Header: Provider Badge, Latency, and Timestamps */}
+      <div className="flex items-center justify-between border-b border-white/10 pb-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {message.provider === "google" ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/40">
+              ✨ Gemini Vision AI
+            </span>
+          ) : message.provider === "groq" ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+              ⚡ Groq LPU (Fast Failover)
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+              👨‍🏫 AI Faculty
+            </span>
+          )}
+
+          {message.latencyMs && (
+            <span className="text-[9px] font-mono text-slate-400">
+              ⚡ {(message.latencyMs / 1000).toFixed(1)}s
+            </span>
+          )}
+          <span className="text-[9px] font-mono text-slate-500">· {message.time}</span>
+        </div>
+
+        {/* Quick Actions: Audio & Copy */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => (isSpeakingThis ? onStopSpeech() : onReplay(message.text))}
+            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1 ${
+              isSpeakingThis
+                ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse"
+                : "bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 border border-teal-500/30"
+            }`}
+            title={isSpeakingThis ? "Stop Voice" : "Replay Voice"}
+          >
+            <span>{isSpeakingThis ? "⏹️ Stop" : "🔊 Listen"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 transition"
+            title="Copy Solution"
+          >
+            {copied ? "✓ Copied" : "📋 Copy"}
+          </button>
+        </div>
+      </div>
+
+      {/* Failover Alert if Gemini had quota / network trouble */}
+      {message.failoverReason && (
+        <div className="text-[9px] text-amber-300/90 bg-amber-950/40 border border-amber-500/30 rounded-lg px-2.5 py-1 leading-normal font-mono">
+          ℹ️ {message.failoverReason}
+        </div>
+      )}
+
+      {/* Structured Solution Content with Steps & Formulas */}
+      <div className="space-y-2 text-xs leading-relaxed">
+        {rawLines.map((line, idx) => {
+          const cleanLine = cleanFormulaSymbols(line);
+          const lower = cleanLine.toLowerCase();
+
+          // Step / Heading detection
+          const isStepHeader =
+            lower.startsWith("step") ||
+            lower.startsWith("case") ||
+            lower.startsWith("formula:") ||
+            lower.startsWith("derivation:") ||
+            lower.startsWith("given:") ||
+            lower.startsWith("calculation:") ||
+            lower.startsWith("final answer:") ||
+            lower.startsWith("conclusion:");
+
+          if (isStepHeader) {
+            return (
+              <div key={idx} className="pt-1.5 pb-0.5">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-teal-500/20 border border-teal-500/40 text-teal-300 text-[10.5px] font-bold uppercase tracking-wide">
+                  <span>✦</span>
+                  <span>{cleanLine}</span>
+                </div>
+              </div>
+            );
+          }
+
+          // Math Formula detection
+          const isFormula =
+            (cleanLine.includes("=") ||
+              cleanLine.includes("×") ||
+              cleanLine.includes("÷") ||
+              cleanLine.includes("√") ||
+              cleanLine.includes("Mo =") ||
+              cleanLine.includes("Me =") ||
+              cleanLine.includes("M =")) &&
+            !cleanLine.includes(" ") &&
+            cleanLine.length < 90;
+
+          const isMathLine =
+            (cleanLine.includes("=") || cleanLine.includes(" → ")) &&
+            (cleanLine.includes("/") ||
+              cleanLine.includes("+") ||
+              cleanLine.includes("-") ||
+              cleanLine.includes("×") ||
+              cleanLine.includes("√") ||
+              cleanLine.length < 80);
+
+          if (isFormula || isMathLine) {
+            return (
+              <div
+                key={idx}
+                className="my-1.5 p-2.5 rounded-xl bg-black/60 border border-teal-500/40 text-teal-200 font-mono text-[11.5px] flex items-center justify-between shadow-inner"
+              >
+                <span className="font-semibold select-all tracking-wide">{cleanLine}</span>
+                <span className="text-[8.5px] text-teal-400/60 font-sans uppercase font-bold tracking-wider">
+                  Formula
+                </span>
+              </div>
+            );
+          }
+
+          // Bullet points
+          if (cleanLine.startsWith("-") || cleanLine.startsWith("•") || cleanLine.startsWith("*")) {
+            return (
+              <div key={idx} className="flex items-start gap-2 pl-1 text-slate-200">
+                <span className="text-teal-400 font-bold">•</span>
+                <span className="flex-1">{cleanLine.replace(/^[-•*]\s*/, "")}</span>
+              </div>
+            );
+          }
+
+          // Standard explanatory paragraph
+          return (
+            <p key={idx} className="text-slate-100 leading-relaxed font-normal">
+              {cleanLine}
+            </p>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function LiveVideoCallModal({
@@ -98,12 +270,13 @@ export function LiveVideoCallModal({
   const [transcript, setTranscript] = useState("");
   const [typedInput, setTypedInput] = useState("");
   const [isMuted, setIsMuted] = useState(false);
-  const [voiceGender, setVoiceGender] = useState<"female" | "male">("male");
 
   // Call & HUD State
   const [callDuration, setCallDuration] = useState(0);
   const [hudMode, setHudMode] = useState<"compact" | "expanded">("compact");
   const [messages, setMessages] = useState<LiveMessage[]>([]);
+  const [isTorchOn, setIsTorchOn] = useState(false);
+  const [activeSpeechMessageId, setActiveSpeechMessageId] = useState<string | null>(null);
 
   // Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -111,15 +284,17 @@ export function LiveVideoCallModal({
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef<string>("");
   const audioContextRef = useRef<AudioContext | null>(null);
-  const speechQueueRef = useRef<string[]>([]);
-  const isSpeakingQueueRef = useRef<boolean>(false);
-  const ttsHeartbeatRef = useRef<any>(null);
-  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 1. Play Soft Auditory Feedback Beep
+  // Continuous Sentence Queue Refs
+  const audioQueueRef = useRef<string[]>([]);
+  const isAudioQueuePlayingRef = useRef<boolean>(false);
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const nextAudioPreloadRef = useRef<HTMLAudioElement | null>(null);
+  const ttsHeartbeatRef = useRef<any>(null);
+
+  // Sound FX synthesizer
   const playUiTone = (type: "start" | "stop" | "ai") => {
     try {
-      if (typeof window === "undefined") return;
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
       if (!audioContextRef.current) audioContextRef.current = new AudioCtx();
@@ -135,97 +310,84 @@ export function LiveVideoCallModal({
       if (type === "start") {
         osc.frequency.setValueAtTime(440, now);
         osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
-        gain.gain.setValueAtTime(0.12, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+        gain.gain.setValueAtTime(0.08, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
         osc.start(now);
-        osc.stop(now + 0.08);
+        osc.stop(now + 0.1);
       } else if (type === "stop") {
         osc.frequency.setValueAtTime(880, now);
         osc.frequency.exponentialRampToValueAtTime(440, now + 0.08);
-        gain.gain.setValueAtTime(0.12, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+        gain.gain.setValueAtTime(0.08, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
         osc.start(now);
-        osc.stop(now + 0.08);
+        osc.stop(now + 0.1);
       } else if (type === "ai") {
         osc.frequency.setValueAtTime(587.33, now);
         osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+        gain.gain.setValueAtTime(0.09, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
         osc.start(now);
-        osc.stop(now + 0.12);
+        osc.stop(now + 0.15);
       }
     } catch (_) {}
   };
 
-  // 2. Call Timer
+  // Timer Hook
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (isModalOpen) {
-      timer = setInterval(() => setCallDuration((d) => d + 1), 1000);
+    if (!isModalOpen) {
+      setCallDuration(0);
+      return;
     }
-    return () => clearInterval(timer);
+    const interval = setInterval(() => {
+      setCallDuration((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
   }, [isModalOpen]);
 
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  // 3. Camera Start & Stream Management
-  const startCamera = async (mode: "environment" | "user") => {
-    try {
-      setCameraError(null);
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
-
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: mode,
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
-
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
-    } catch (err: any) {
-      console.warn("Camera start failed, falling back to basic video:", err);
+  // Camera Initializer & Stream Manager
+  const startCamera = useCallback(
+    async (mode: "environment" | "user") => {
       try {
-        const fallbackStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
-        setStream(fallbackStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = fallbackStream;
+        if (stream) {
+          stream.getTracks().forEach((track) => track.stop());
         }
-      } catch (err2: any) {
-        setCameraError("Camera permission denied. Please enable camera access.");
-      }
-    }
-  };
+        setCameraError(null);
 
-  const stopAll = useCallback(() => {
-    if (stream) {
-      stream.getTracks().forEach((t) => t.stop());
-      setStream(null);
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (_) {}
-    }
-    stopSpeaking();
-    setIsHoldingMic(false);
-    setCallDuration(0);
-    setTranscript("");
-    transcriptRef.current = "";
-    setMessages([]);
-    setHudMode("compact");
-  }, [stream]);
+        let mediaStream: MediaStream;
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: mode },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          });
+        } catch (_) {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
+
+        setStream(mediaStream);
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+        }
+      } catch (err: any) {
+        setCameraError(
+          "Camera access allow karein taaki handwritten notes aur book scan ho sakein."
+        );
+      }
+    },
+    [stream]
+  );
 
   useEffect(() => {
     if (isModalOpen) {
@@ -238,144 +400,211 @@ export function LiveVideoCallModal({
     };
   }, [isModalOpen, facingMode]);
 
-  // 4. Flip Camera Switch
+  const stopAll = () => {
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      setStream(null);
+    }
+    stopSpeaking();
+    setIsTorchOn(false);
+    setHudMode("compact");
+  };
+
+  // Torch / Flashlight Toggle
+  const toggleTorch = async () => {
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    if (track && typeof (track as any).applyConstraints === "function") {
+      try {
+        const nextTorch = !isTorchOn;
+        await (track as any).applyConstraints({
+          advanced: [{ torch: nextTorch }],
+        });
+        setIsTorchOn(nextTorch);
+      } catch (_) {
+        setIsTorchOn(false);
+      }
+    }
+  };
+
+  // Flip Camera
   const toggleCameraSwitch = () => {
     const nextMode = facingMode === "environment" ? "user" : "environment";
     setFacingMode(nextMode);
-    startCamera(nextMode);
   };
 
-  // 5. Cancel Speech (Barge-in on tap/mic hold)
+  // ─── CONTINUOUS, MULTI-SENTENCE STREAMING SPEECH ENGINE ───
   const stopSpeaking = () => {
     if (activeAudioRef.current) {
-      try {
-        activeAudioRef.current.pause();
-        activeAudioRef.current.currentTime = 0;
-      } catch (_) {}
+      activeAudioRef.current.pause();
+      activeAudioRef.current.currentTime = 0;
       activeAudioRef.current = null;
     }
-    speechQueueRef.current = [];
-    isSpeakingQueueRef.current = false;
+    if (nextAudioPreloadRef.current) {
+      nextAudioPreloadRef.current.src = "";
+      nextAudioPreloadRef.current = null;
+    }
+    audioQueueRef.current = [];
+    isAudioQueuePlayingRef.current = false;
+
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
-    if (ttsHeartbeatRef.current) clearInterval(ttsHeartbeatRef.current);
+    if (ttsHeartbeatRef.current) {
+      clearInterval(ttsHeartbeatRef.current);
+      ttsHeartbeatRef.current = null;
+    }
     setIsAiSpeaking(false);
+    setActiveSpeechMessageId(null);
   };
 
-  // 6. High-Speed Indian Faculty Speech Engine (Rate 1.15x, Zero Gaps, Crisp Accent)
-  const speakNextSentence = () => {
-    if (speechQueueRef.current.length === 0) {
-      isSpeakingQueueRef.current = false;
-      setIsAiSpeaking(false);
-      if (ttsHeartbeatRef.current) clearInterval(ttsHeartbeatRef.current);
-      return;
-    }
-
+  const fallbackClientChunk = (chunkText: string, onDone: () => void) => {
     if (typeof window === "undefined" || !window.speechSynthesis || isMuted) {
-      isSpeakingQueueRef.current = false;
+      onDone();
+      return;
+    }
+    try {
+      const utterance = new SpeechSynthesisUtterance(chunkText);
+      utterance.rate = 1.15;
+      utterance.pitch = 1.0;
+
+      const voices = window.speechSynthesis.getVoices();
+      const preferred =
+        voices.find((v) => {
+          const n = (v.name || "").toLowerCase();
+          const l = (v.lang || "").toLowerCase();
+          return (
+            (n.includes("prabhat") ||
+              n.includes("madhur") ||
+              n.includes("male") ||
+              n.includes("google") ||
+              n.includes("indian")) &&
+            (l.startsWith("en-in") || l.startsWith("hi"))
+          );
+        }) ||
+        voices.find((v) => (v.lang || "").toLowerCase().startsWith("hi")) ||
+        voices.find((v) => (v.lang || "").toLowerCase().startsWith("en-in"));
+
+      if (preferred) {
+        utterance.voice = preferred;
+        utterance.lang = preferred.lang;
+      } else {
+        utterance.lang = "en-IN";
+      }
+
+      utterance.onend = () => onDone();
+      utterance.onerror = () => onDone();
+
+      if (!ttsHeartbeatRef.current) {
+        ttsHeartbeatRef.current = setInterval(() => {
+          if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.pause();
+            window.speechSynthesis.resume();
+          } else {
+            clearInterval(ttsHeartbeatRef.current);
+            ttsHeartbeatRef.current = null;
+          }
+        }, 6000);
+      }
+
+      window.speechSynthesis.speak(utterance);
+    } catch (_) {
+      onDone();
+    }
+  };
+
+  const playNextInQueue = () => {
+    if (audioQueueRef.current.length === 0) {
       setIsAiSpeaking(false);
+      isAudioQueuePlayingRef.current = false;
+      setActiveSpeechMessageId(null);
       return;
     }
 
-    isSpeakingQueueRef.current = true;
+    if (isMuted) {
+      stopSpeaking();
+      return;
+    }
+
+    const chunk = audioQueueRef.current.shift()!;
+    if (!chunk || chunk.trim().length === 0) {
+      playNextInQueue();
+      return;
+    }
+
     setIsAiSpeaking(true);
-    const sentence = speechQueueRef.current.shift()!;
+    isAudioQueuePlayingRef.current = true;
 
-    const utterance = new SpeechSynthesisUtterance(sentence);
-    utterance.rate = 1.15;
-    utterance.pitch = 1.0;
-
-    const voices = window.speechSynthesis.getVoices();
-    const preferredVoice =
-      voices.find((v) => {
-        const n = (v.name || "").toLowerCase();
-        const l = (v.lang || "").toLowerCase();
-        return (
-          (n.includes("prabhat") || n.includes("madhur") || n.includes("male") || n.includes("google")) &&
-          (l.startsWith("en-in") || l.startsWith("hi"))
-        );
-      }) ||
-      voices.find((v) => (v.lang || "").toLowerCase().startsWith("en-in")) ||
-      voices.find((v) => (v.lang || "").toLowerCase().startsWith("hi"));
-
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
-      utterance.lang = preferredVoice.lang;
-    } else {
-      utterance.lang = "en-IN";
+    if (audioQueueRef.current.length > 0) {
+      const nextChunk = audioQueueRef.current[0];
+      const preload = new Audio(
+        `/api/ai-doubt/live/tts?text=${encodeURIComponent(nextChunk.slice(0, 180))}`
+      );
+      preload.preload = "auto";
+      nextAudioPreloadRef.current = preload;
     }
 
-    utterance.onend = () => {
-      speakNextSentence();
+    const audioUrl = `/api/ai-doubt/live/tts?text=${encodeURIComponent(chunk.slice(0, 180))}`;
+    const audio =
+      nextAudioPreloadRef.current &&
+      nextAudioPreloadRef.current.src.includes(encodeURIComponent(chunk.slice(0, 180)))
+        ? nextAudioPreloadRef.current
+        : new Audio(audioUrl);
+
+    activeAudioRef.current = audio;
+
+    let advanced = false;
+    const advance = () => {
+      if (advanced) return;
+      advanced = true;
+      activeAudioRef.current = null;
+      playNextInQueue();
     };
 
-    utterance.onerror = () => {
-      speakNextSentence();
+    audio.onended = advance;
+    audio.onerror = () => {
+      fallbackClientChunk(chunk, advance);
     };
 
-    if (!ttsHeartbeatRef.current) {
-      ttsHeartbeatRef.current = setInterval(() => {
-        if (window.speechSynthesis.speaking) {
-          window.speechSynthesis.pause();
-          window.speechSynthesis.resume();
-        } else {
-          clearInterval(ttsHeartbeatRef.current);
-          ttsHeartbeatRef.current = null;
-        }
-      }, 7000);
-    }
-
-    window.speechSynthesis.speak(utterance);
+    audio.play().catch(() => {
+      fallbackClientChunk(chunk, advance);
+    });
   };
 
-  const fallbackClientSpeech = (cleaned: string) => {
-    const sentences = cleaned
-      .split(/(?<=[.!?])\s+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 2);
-
-    if (sentences.length === 0) {
-      setIsAiSpeaking(false);
-      return;
-    }
-
-    speechQueueRef.current = sentences;
-    speakNextSentence();
-  };
-
-  const speakResponse = async (rawText: string) => {
+  const speakFullResponse = (rawText: string, messageId?: string) => {
     if (!rawText || isMuted) return;
     stopSpeaking();
 
     const cleaned = cleanTextForNaturalSpeech(rawText);
     if (!cleaned) return;
 
-    playUiTone("ai");
-    setIsAiSpeaking(true);
+    const rawChunks = cleaned
+      .split(/(?<=[.?!।\n])\s+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 1);
 
-    // 3-Tier Cascade: Remote Google/Sarvam bulbul:v3 audio stream -> Local fallback
-    try {
-      const audioUrl = `/api/ai-doubt/live/tts?text=${encodeURIComponent(cleaned.slice(0, 320))}`;
-      const audio = new Audio(audioUrl);
-      activeAudioRef.current = audio;
-
-      audio.onended = () => {
-        setIsAiSpeaking(false);
-        activeAudioRef.current = null;
-      };
-
-      audio.onerror = () => {
-        fallbackClientSpeech(cleaned);
-      };
-
-      await audio.play();
-    } catch (_) {
-      fallbackClientSpeech(cleaned);
+    const fineChunks: string[] = [];
+    for (const c of rawChunks) {
+      if (c.length <= 150) {
+        fineChunks.push(c);
+      } else {
+        const sub = c
+          .split(/(?<=[,;])\s+/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 1);
+        fineChunks.push(...sub);
+      }
     }
+
+    if (fineChunks.length === 0) return;
+
+    playUiTone("ai");
+    if (messageId) setActiveSpeechMessageId(messageId);
+    audioQueueRef.current = fineChunks;
+    playNextInQueue();
   };
 
-  // 7. Send High-Definition Frame & Real Spoken Query
+  // Send Doubt with Camera Snapshot
   const sendLiveDoubt = async (spokenTextParam?: string) => {
     if (isAnalyzing) return;
     setIsAnalyzing(true);
@@ -400,7 +629,9 @@ export function LiveVideoCallModal({
     }
 
     const queryText = (spokenTextParam ?? transcriptRef.current ?? typedInput ?? "").trim();
-    const promptToSend = queryText || "Camera par jo handwritten notes aur ray diagram hai use step-by-step detail mein explain kijiye.";
+    const promptToSend =
+      queryText ||
+      "Camera par jo handwritten notes aur ray diagram hai use step-by-step detail mein explain kijiye.";
 
     const displayBubbleText = queryText ? `🎙️ "${queryText}"` : "📸 [Question Photo Scan]";
 
@@ -427,19 +658,23 @@ export function LiveVideoCallModal({
       });
 
       const data = await res.json();
-      const reply = data?.reply || "Sawal clear nahi dikh raha. Kripya camera notes par focus karein.";
+      const reply =
+        data?.reply || "Sawal clear nahi dikh raha. Kripya camera notes par focus karein.";
 
+      const aiMsgId = (Date.now() + 1).toString();
       const aiMsg: LiveMessage = {
-        id: (Date.now() + 1).toString(),
+        id: aiMsgId,
         sender: "ai",
         text: reply,
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         modelUsed: data?.model,
         provider: data?.provider,
+        failoverReason: data?.failoverReason,
+        latencyMs: data?.latencyMs,
       };
 
       setMessages((prev) => [...prev, aiMsg]);
-      speakResponse(reply);
+      speakFullResponse(reply, aiMsgId);
     } catch (err: any) {
       const errorMsg: LiveMessage = {
         id: (Date.now() + 1).toString(),
@@ -453,51 +688,42 @@ export function LiveVideoCallModal({
     }
   };
 
-  // 8. Press & Hold Mic
+  // Push-to-Talk (Hold Mic)
   const handleHoldStart = (e: React.TouchEvent | React.MouseEvent) => {
     e.preventDefault();
     if (isAnalyzing) return;
 
     stopSpeaking();
-    playUiTone("start");
-
     setIsHoldingMic(true);
+    playUiTone("start");
     setTranscript("");
     transcriptRef.current = "";
 
-    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRec =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
     if (SpeechRec) {
       try {
         const rec = new SpeechRec();
         rec.continuous = true;
         rec.interimResults = true;
-        rec.lang = "en-IN";
+        rec.lang = "hi-IN";
 
         rec.onresult = (event: any) => {
-          let currentTranscript = "";
-          for (let i = 0; i < event.results.length; i++) {
-            currentTranscript += event.results[i][0].transcript + " ";
+          let current = "";
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            current += event.results[i][0].transcript;
           }
-          const cleanText = currentTranscript.trim();
-          setTranscript(cleanText);
-          transcriptRef.current = cleanText;
-        };
-
-        rec.onerror = (err: any) => {
-          console.warn("Speech recognition error:", err);
-        };
-
-        rec.onend = () => {
-          if (isHoldingMic && recognitionRef.current) {
-            try { recognitionRef.current.start(); } catch (_) {}
+          if (current) {
+            setTranscript(current);
+            transcriptRef.current = current;
           }
         };
 
-        recognitionRef.current = rec;
+        rec.onerror = () => {};
         rec.start();
-      } catch (err) {
-        console.warn("Speech init failed:", err);
-      }
+        recognitionRef.current = rec;
+      } catch (_) {}
     }
   };
 
@@ -505,18 +731,18 @@ export function LiveVideoCallModal({
     e.preventDefault();
     if (!isHoldingMic) return;
 
-    playUiTone("stop");
     setIsHoldingMic(false);
+    playUiTone("stop");
 
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (_) {}
+      try {
+        recognitionRef.current.stop();
+      } catch (_) {}
       recognitionRef.current = null;
     }
 
-    setTimeout(() => {
-      const finalSpoken = transcriptRef.current.trim();
-      sendLiveDoubt(finalSpoken);
-    }, 150);
+    const captured = transcriptRef.current.trim();
+    sendLiveDoubt(captured);
   };
 
   if (!isModalOpen) return null;
@@ -524,85 +750,122 @@ export function LiveVideoCallModal({
   const latestAiMessage = [...messages].reverse().find((m) => m.sender === "ai");
 
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col justify-between overflow-hidden select-none">
-      {/* Background Live Video Feed */}
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        className="absolute inset-0 w-full h-full object-cover"
-      />
+    <div className="fixed inset-0 z-50 bg-black flex flex-col justify-between overflow-hidden select-none font-sans">
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Screen White Flash Effect */}
-      {flashTrigger && (
-        <div className="absolute inset-0 bg-white/40 z-30 pointer-events-none transition-opacity duration-150 animate-pulse" />
-      )}
+      {/* CAMERA FULLSCREEN FEED */}
+      <div className="absolute inset-0 z-0 bg-slate-950 flex items-center justify-center overflow-hidden">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className={`w-full h-full object-cover transition-opacity duration-300 ${
+            facingMode === "user" ? "scale-x-[-1]" : ""
+          }`}
+        />
 
-      {/* Dark Vignette Overlay */}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/85 via-transparent to-black/95 pointer-events-none" />
+        {/* Optical Scanning Target Crosshair */}
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center p-8">
+          <div className="w-full max-w-sm aspect-[4/3] border-2 border-teal-400/40 rounded-3xl relative">
+            <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-teal-300 rounded-tl-lg" />
+            <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-teal-300 rounded-tr-lg" />
+            <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-teal-300 rounded-bl-lg" />
+            <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-teal-300 rounded-br-lg" />
 
-      {/* TOP HEADER: Status, Timer, Faculty Badge & Camera Switch */}
-      <div className="relative z-20 flex items-center justify-between p-4 pt-6">
-        <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 shadow-md">
-          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
-          <span className="text-xs font-black text-white tracking-wide">LIVE AI FACULTY</span>
-          <span className="text-[11px] font-mono font-bold text-slate-300">· {formatTime(callDuration)}</span>
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur-sm px-2.5 py-0.5 rounded-full border border-teal-400/30 text-[9px] font-bold text-teal-300">
+              Align derivation / diagram here
+            </div>
+          </div>
         </div>
 
-        {/* Center: Indian Faculty Badge */}
-        <div
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-xs font-bold text-white shadow-md"
-        >
-          <span>👨‍🏫</span>
-          <span className="text-[10.5px] font-semibold tracking-wide text-emerald-300">
-            Indian Faculty
-          </span>
-        </div>
+        {/* Shutter White Flash effect */}
+        {flashTrigger && (
+          <div className="absolute inset-0 bg-white/70 pointer-events-none z-30 transition-opacity duration-150 animate-out fade-out" />
+        )}
 
-        {/* Camera Switch */}
-        <button
-          type="button"
-          onClick={toggleCameraSwitch}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white border border-white/20 text-xs font-bold transition active:scale-95 shadow-md"
-          title="Switch Camera (Back/Front)"
-        >
-          <span>🔄</span>
-          <span className="text-[11px] font-semibold">{facingMode === "environment" ? "Back" : "Front"}</span>
-        </button>
+        {/* Camera Permission Alert */}
+        {cameraError && (
+          <div className="absolute z-20 max-w-xs bg-slate-900/90 backdrop-blur-md p-4 rounded-2xl border border-rose-500/50 text-center text-xs text-white">
+            <p className="font-bold text-rose-400 mb-1">Camera Permission Required</p>
+            <p className="text-slate-300">{cameraError}</p>
+            <button
+              onClick={() => startCamera(facingMode)}
+              className="mt-3 px-4 py-1.5 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs"
+            >
+              Retry
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* CENTER STATUS PILL: ANALYZING SCANNER vs LIVE MIC PREVIEW */}
-      {isAnalyzing ? (
-        <div className="relative z-30 mx-auto max-w-xs px-4 py-2 rounded-full bg-slate-900/90 backdrop-blur-md border border-teal-400/60 text-center shadow-2xl flex items-center justify-center gap-2.5 animate-pulse">
-          <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-ping" />
-          <p className="text-xs font-black text-teal-200 tracking-wide">
-            ⚡ Analyzing notes & solving...
-          </p>
+      {/* TOP FLOATING HEADER (Call Info & Controls) */}
+      <div className="relative z-20 flex items-center justify-between p-4 pt-6 bg-gradient-to-b from-black/80 via-black/40 to-transparent">
+        <div className="flex items-center gap-2.5 bg-black/40 backdrop-blur-md border border-white/10 px-3.5 py-1.5 rounded-full shadow-lg">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+          <div className="flex flex-col">
+            <span className="text-xs font-black tracking-wide text-white">
+              LIVE FACULTY AI
+            </span>
+            <span className="text-[10px] font-mono text-teal-300 font-bold">
+              {formatTime(callDuration)}
+            </span>
+          </div>
         </div>
-      ) : isHoldingMic && transcript ? (
-        <div className="relative z-30 mx-auto max-w-xs px-4 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-emerald-500/40 text-center shadow-lg">
-          <p className="text-[11.5px] font-semibold text-emerald-300 truncate">
-            🎙️ "{transcript}"
-          </p>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleTorch}
+            className={`w-10 h-10 rounded-full flex items-center justify-center border text-sm backdrop-blur-md transition-all shadow-md ${
+              isTorchOn
+                ? "bg-amber-400 border-amber-300 text-black font-bold scale-105"
+                : "bg-black/40 border-white/15 text-white hover:bg-black/60"
+            }`}
+            title="Toggle Flashlight"
+          >
+            🔦
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleCameraSwitch}
+            className="w-10 h-10 rounded-full flex items-center justify-center bg-black/40 border border-white/15 text-white backdrop-blur-md hover:bg-black/60 text-sm shadow-md"
+            title="Flip Camera"
+          >
+            🔄
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-10 h-10 rounded-full flex items-center justify-center bg-rose-600/90 border border-rose-500 text-white backdrop-blur-md hover:bg-rose-700 text-sm font-bold shadow-md"
+            title="End Video Call"
+          >
+            ✕
+          </button>
         </div>
-      ) : isAiSpeaking ? (
-        <div className="relative z-30 mx-auto max-w-xs px-3.5 py-1.5 rounded-full bg-emerald-950/85 backdrop-blur-md border border-emerald-500/40 text-center shadow-lg flex items-center justify-center gap-2 animate-pulse">
-          <span className="text-xs">🔊</span>
-          <p className="text-[11px] font-bold text-emerald-300">
-            Faculty Explaining... (Tap to pause)
-          </p>
+      </div>
+
+      {/* REAL-TIME SPEECH BUBBLE OVERLAY */}
+      {isHoldingMic && transcript && (
+        <div className="relative z-20 max-w-sm mx-auto px-4 w-full">
+          <div className="bg-emerald-950/90 backdrop-blur-md border border-emerald-500/40 rounded-2xl p-3 text-center shadow-xl animate-pulse">
+            <span className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider block mb-1">
+              🎙️ Listening to your question...
+            </span>
+            <p className="text-xs text-white font-medium italic">"{transcript}"</p>
+          </div>
         </div>
-      ) : null}
+      )}
 
       {/* BOTTOM-ALIGNED FLOATING HUD */}
-      <div className="relative z-20 max-w-sm mx-auto w-full px-4 mb-2 mt-auto">
+      <div className="relative z-20 max-w-md mx-auto w-full px-4 mb-2 mt-auto">
         {hudMode === "expanded" ? (
-          <div className="bg-slate-900/95 backdrop-blur-xl border border-teal-500/40 rounded-3xl p-4 shadow-2xl space-y-2.5 transition-all max-h-[60vh] flex flex-col">
+          <div className="bg-slate-900/95 backdrop-blur-2xl border border-teal-500/40 rounded-3xl p-4 shadow-2xl space-y-3 transition-all max-h-[65vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-white/10 pb-2 shrink-0">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-teal-400" />
+                <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse" />
                 <h5 className="text-xs font-black text-teal-300 uppercase tracking-wider">
                   Live Solution & Derivation Notes
                 </h5>
@@ -616,40 +879,54 @@ export function LiveVideoCallModal({
               </button>
             </div>
 
-            <div className="space-y-2.5 overflow-y-auto pr-1 flex-1">
+            <div className="space-y-3 overflow-y-auto pr-1 flex-1">
               {messages.length === 0 ? (
-                <div className="py-4 text-center">
-                  <p className="text-xs font-bold text-white">Book ya handwritten notes camera ke samne rakhein</p>
+                <div className="py-6 text-center">
+                  <p className="text-xs font-bold text-white">
+                    Book ya handwritten notes camera ke samne rakhein
+                  </p>
                   <p className="text-[11px] text-slate-300 mt-1">
                     Niche <span className="text-emerald-400 font-bold">Mic daba kar</span> sawal puchein.
                   </p>
                 </div>
               ) : (
-                messages.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`p-3 rounded-2xl text-xs leading-relaxed ${
-                      m.sender === "user"
-                        ? "bg-teal-950/70 border border-teal-500/30 text-teal-100 ml-4 text-right"
-                        : "bg-slate-800/95 border border-slate-700/60 text-slate-100"
-                    }`}
-                  >
-                    <div className="text-[9px] font-mono text-slate-400 mb-1">
-                      {m.sender === "user" ? "You" : m.provider || "AI Faculty"} · {m.time}
-                    </div>
-                    <div>{formatSolutionText(m.text)}</div>
-                  </div>
-                ))
+                messages.map((m) => {
+                  if (m.sender === "user") {
+                    return (
+                      <div
+                        key={m.id}
+                        className="p-3 rounded-2xl text-xs leading-relaxed bg-teal-950/70 border border-teal-500/30 text-teal-100 ml-6 text-right"
+                      >
+                        <div className="text-[9px] font-mono text-teal-400/80 mb-0.5">
+                          You · {m.time}
+                        </div>
+                        <div>{m.text}</div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <FormattedSolutionCard
+                      key={m.id}
+                      message={m}
+                      onReplay={(txt) => speakFullResponse(txt, m.id)}
+                      isSpeakingThis={isAiSpeaking && activeSpeechMessageId === m.id}
+                      onStopSpeech={stopSpeaking}
+                    />
+                  );
+                })
               )}
 
               {isAnalyzing && (
-                <div className="p-3 rounded-2xl bg-teal-950/40 border border-teal-500/30 flex items-center gap-2.5 animate-pulse">
-                  <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />
-                  <span className="text-[11px] font-bold text-teal-200">Reading formulas & solving derivation...</span>
+                <div className="p-3.5 rounded-2xl bg-teal-950/60 border border-teal-500/40 flex items-center gap-3 animate-pulse">
+                  <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-ping" />
+                  <span className="text-xs font-bold text-teal-200">
+                    Reading handwritten formulas & diagram...
+                  </span>
                 </div>
               )}
             </div>
 
+            {/* Quick Typed Query Bar */}
             <div className="pt-2 border-t border-white/10 flex items-center gap-2 shrink-0">
               <input
                 type="text"
@@ -661,7 +938,7 @@ export function LiveVideoCallModal({
                   }
                 }}
                 placeholder="Ya type karke puchein..."
-                className="flex-1 bg-black/50 border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-teal-400"
+                className="flex-1 bg-black/60 border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-teal-400"
               />
               <button
                 type="button"
@@ -669,7 +946,7 @@ export function LiveVideoCallModal({
                   if (typedInput.trim()) sendLiveDoubt(typedInput.trim());
                 }}
                 disabled={!typedInput.trim() || isAnalyzing}
-                className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white font-bold text-xs"
+                className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white font-bold text-xs"
               >
                 Send
               </button>
@@ -678,20 +955,30 @@ export function LiveVideoCallModal({
         ) : hudMode === "compact" && latestAiMessage ? (
           <div
             onClick={() => setHudMode("expanded")}
-            className="w-full bg-slate-900/90 backdrop-blur-md border border-teal-500/30 rounded-2xl p-3 text-left shadow-xl active:scale-98 transition cursor-pointer flex items-center justify-between group"
+            className="w-full bg-slate-900/90 backdrop-blur-md border border-teal-500/40 rounded-2xl p-3 text-left shadow-xl active:scale-98 transition cursor-pointer flex items-center justify-between group"
           >
             <div className="truncate mr-2.5 flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="w-2 h-2 rounded-full bg-teal-400" />
                 <span className="text-[9.5px] font-mono font-bold text-teal-300 uppercase tracking-wide">
-                  Latest Solution
+                  {latestAiMessage.provider === "google"
+                    ? "✨ Gemini Solution"
+                    : latestAiMessage.provider === "groq"
+                    ? "⚡ Groq Solution"
+                    : "Latest Solution"}
                 </span>
+                {isAiSpeaking && (
+                  <span className="text-[9px] font-bold text-emerald-400 animate-pulse flex items-center gap-1">
+                    <span>🔊</span>
+                    <span>Speaking...</span>
+                  </span>
+                )}
               </div>
               <p className="text-xs text-white truncate font-medium">
-                {latestAiMessage.text.replace(/[*#`_~$]/g, "").slice(0, 80)}...
+                {cleanFormulaSymbols(latestAiMessage.text).slice(0, 85)}...
               </p>
             </div>
-            <div className="flex items-center gap-1 text-[11px] text-teal-300 bg-teal-500/20 border border-teal-500/30 px-2.5 py-1.5 rounded-xl shrink-0 font-bold group-hover:bg-teal-500/30">
+            <div className="flex items-center gap-1 text-[11px] text-teal-300 bg-teal-500/20 border border-teal-500/30 px-3 py-1.5 rounded-xl shrink-0 font-bold group-hover:bg-teal-500/30">
               <span>View Full</span>
               <span>💬</span>
             </div>
@@ -699,7 +986,9 @@ export function LiveVideoCallModal({
         ) : isAnalyzing ? (
           <div className="mx-auto w-fit flex items-center gap-2 bg-slate-900/85 backdrop-blur-md border border-teal-500/30 rounded-full px-4 py-2 shadow-xl">
             <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />
-            <span className="text-xs font-bold text-teal-200">Scanning handwritten formulas & diagram...</span>
+            <span className="text-xs font-bold text-teal-200">
+              Scanning handwritten formulas & diagram...
+            </span>
           </div>
         ) : null}
       </div>
@@ -714,7 +1003,18 @@ export function LiveVideoCallModal({
               </span>
             ) : isAnalyzing ? (
               <span className="text-teal-300 font-bold">
-                ⚡ Faculty analyzing question...
+                ⚡ Reading notes & formulating solution...
+              </span>
+            ) : isAiSpeaking ? (
+              <span className="text-emerald-300 font-bold flex items-center justify-center gap-1">
+                <span>🔊 AI Faculty is speaking...</span>
+                <button
+                  type="button"
+                  onClick={stopSpeaking}
+                  className="underline ml-1 text-rose-400 font-bold"
+                >
+                  (Stop)
+                </button>
               </span>
             ) : (
               <span>🎙️ Hold mic to speak · Chhodte hi AI solve karega</span>
@@ -722,25 +1022,26 @@ export function LiveVideoCallModal({
           </p>
         </div>
 
-        <div className="flex items-center justify-center gap-4 w-full max-w-xs">
-          {/* Mute/Unmute */}
+        <div className="flex items-center gap-5">
+          {/* Mute/Unmute AI Voice Button */}
           <button
             type="button"
             onClick={() => {
-              if (!isMuted) stopSpeaking();
-              setIsMuted(!isMuted);
+              const nextMute = !isMuted;
+              setIsMuted(nextMute);
+              if (!nextMute) stopSpeaking();
             }}
-            className={`p-3.5 rounded-full transition-all active:scale-95 shadow-xl ${
+            className={`p-3 rounded-full border transition-all ${
               isMuted
-                ? "bg-rose-600 text-white border border-rose-400"
-                : "bg-slate-800/90 text-slate-300 border border-slate-700 hover:bg-slate-700"
+                ? "bg-rose-500/20 border-rose-500/40 text-rose-300"
+                : "bg-black/50 border-white/15 text-slate-300 hover:text-white"
             }`}
-            title={isMuted ? "Unmute Voice" : "Mute Voice"}
+            title={isMuted ? "Unmute AI Voice" : "Mute AI Voice"}
           >
-            {isMuted ? "🔇" : "🔈"}
+            {isMuted ? "🔇" : "🔊"}
           </button>
 
-          {/* PUSH-TO-TALK */}
+          {/* MAIN PUSH-TO-TALK MIC BUTTON (HOLD TO TALK) */}
           <button
             type="button"
             onMouseDown={handleHoldStart}
@@ -748,47 +1049,30 @@ export function LiveVideoCallModal({
             onTouchStart={handleHoldStart}
             onTouchEnd={handleHoldEnd}
             disabled={isAnalyzing}
-            className={`px-6 py-4 rounded-full font-black text-sm tracking-wide shadow-2xl transition-all flex items-center gap-2.5 select-none ${
+            className={`w-20 h-20 rounded-full flex items-center justify-center text-3xl shadow-2xl transition-all duration-200 select-none ${
               isHoldingMic
-                ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white scale-105 ring-4 ring-emerald-400/50 shadow-emerald-500/50"
-                : "bg-gradient-to-r from-teal-500 via-teal-600 to-emerald-600 text-white hover:from-teal-400 hover:to-emerald-500 active:scale-95 shadow-teal-500/30"
-            } ${isAnalyzing ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                ? "bg-emerald-500 scale-110 shadow-emerald-500/50 ring-4 ring-emerald-300"
+                : isAnalyzing
+                ? "bg-slate-700 opacity-60 scale-95"
+                : "bg-gradient-to-tr from-teal-600 to-emerald-500 hover:scale-105 active:scale-95 shadow-teal-500/30"
+            }`}
+            title="Press and Hold to Speak"
           >
-            {isHoldingMic ? (
-              <>
-                <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping" />
-                <span className="tracking-wide">Release to Solve</span>
-              </>
-            ) : (
-              <>
-                <span className="text-base">🎙️</span>
-                <span>{isAnalyzing ? "Solving..." : "Hold to Ask"}</span>
-              </>
-            )}
+            {isHoldingMic ? "🔴" : isAnalyzing ? "⏳" : "🎙️"}
           </button>
 
-          {/* Toggle Full Chat Drawer */}
+          {/* Toggle HUD Solution Drawer */}
           <button
             type="button"
             onClick={() => setHudMode(hudMode === "expanded" ? "compact" : "expanded")}
-            className={`p-3.5 rounded-full transition-all active:scale-95 shadow-xl ${
+            className={`p-3 rounded-full border transition-all ${
               hudMode === "expanded"
-                ? "bg-indigo-600 text-white border border-indigo-400"
-                : "bg-slate-800/90 text-slate-300 border border-slate-700 hover:bg-slate-700"
+                ? "bg-teal-500/20 border-teal-500/40 text-teal-300"
+                : "bg-black/50 border-white/15 text-slate-300 hover:text-white"
             }`}
-            title="Toggle Solution Steps & Chat"
+            title="Toggle Solution Notes Drawer"
           >
             💬
-          </button>
-
-          {/* End Call */}
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-3.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white shadow-xl active:scale-95 transition-all border border-rose-500"
-            title="End Video Call"
-          >
-            🔴
           </button>
         </div>
       </div>
