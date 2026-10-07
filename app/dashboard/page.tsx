@@ -158,10 +158,29 @@ function getTodayKey(): string {
   return `pw_content_state_${new Date().toISOString().split("T")[0]}`;
 }
 
-// Odd Days = Human, Even Days = Anime
+// Odd Days = Human first, Even Days = Anime first
 function getTodayQuoteSource(): "human" | "anime" {
   const day = new Date().getDate();
   return day % 2 === 1 ? "human" : "anime";
+}
+
+// Interleave Human and Anime quotes so every card alternates (Human -> Anime -> Human -> Anime)
+function getAlternatingDeck(deck: ContentCardItem[], startWith: "human" | "anime" = "human"): ContentCardItem[] {
+  const humans = deck.filter((c) => c.quote_source === "human");
+  const animes = deck.filter((c) => c.quote_source === "anime");
+  if (humans.length === 0) return animes;
+  if (animes.length === 0) return humans;
+
+  const result: ContentCardItem[] = [];
+  const primary = startWith === "human" ? humans : animes;
+  const secondary = startWith === "human" ? animes : humans;
+  const maxLen = Math.max(primary.length, secondary.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    if (i < primary.length) result.push(primary[i]);
+    if (i < secondary.length) result.push(secondary[i]);
+  }
+  return result;
 }
 
 interface DailyContentState {
@@ -205,7 +224,7 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
     quote_source: "human",
     character: "Dr. A.P.J. Abdul Kalam",
     show: "Wings of Fire",
-    icon_or_sticker: "🚀",
+    icon_or_sticker: "/Qamine/images.jpeg",
     color: "from-sky-500 to-indigo-600",
     bg: "bg-sky-50",
     border: "border-sky-200",
@@ -214,11 +233,11 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
   },
   {
     id: "m-2",
-    quote: "Arise, awake, and stop not until the goal is reached. Strength is life, weakness is death.",
-    quote_source: "human",
-    character: "Swami Vivekananda",
-    show: "Rousing Call to Youth",
-    icon_or_sticker: "⚡",
+    quote: "Hard work is worthless for those that don't believe in themselves.",
+    quote_source: "anime",
+    character: "Naruto Uzumaki",
+    show: "Naruto Shippuden",
+    icon_or_sticker: "/Qamine/naruto-naruto-shippuden.gif",
     color: "from-amber-500 to-orange-600",
     bg: "bg-amber-50",
     border: "border-amber-200",
@@ -289,11 +308,15 @@ function timeRangesOverlap(
   return af < bt && bf < at;
 }
 
-// Media renderer helper that bypasses Cloudinary for relative paths like /Qanime/
+// Media renderer helper with auto-correction for /Qanime/ -> /Qamine/
 function renderMediaSource(url: string): string {
   if (!url) return "";
-  if (url.startsWith("/")) return url; // Relative local public folder
-  return optimizeMediaUrl(url, 180);
+  let cleanUrl = url;
+  if (cleanUrl.startsWith("/Qanime/")) {
+    cleanUrl = cleanUrl.replace("/Qanime/", "/Qamine/");
+  }
+  if (cleanUrl.startsWith("/")) return cleanUrl; // Relative local public folder
+  return optimizeMediaUrl(cleanUrl, 180);
 }
 
 function HeroWidget({
@@ -337,13 +360,13 @@ function HeroWidget({
       try {
         const { data: tsData } = await supabase
           .from("daily_content")
-          .select("updated_at")
+          .select("created_at")
           .eq("is_active", true)
-          .order("updated_at", { ascending: false })
+          .order("created_at", { ascending: false })
           .limit(1)
           .single();
 
-        const latestTs = tsData?.updated_at ?? null;
+        const latestTs = tsData?.created_at ?? null;
         const cachedTs = localStorage.getItem("pw_content_ts");
 
         if (latestTs && cachedTs === latestTs) {
@@ -398,10 +421,9 @@ function HeroWidget({
     setLimitHit(false);
 
     if (mode === "motivation") {
-      // Human vs Anime Daily Alternation
+      // Interleaved Alternation: Guaranteed alternating sequence on every tap
       const todaySource = getTodayQuoteSource();
-      const filteredBySource = rawMotDeck.filter((c) => c.quote_source === todaySource);
-      const motDeck = filteredBySource.length > 0 ? filteredBySource : rawMotDeck;
+      const motDeck = getAlternatingDeck(rawMotDeck, todaySource);
 
       let item = motDeck.find((c) => c.id === saved.selectedMotivationId);
       if (!item) {
@@ -440,8 +462,7 @@ function HeroWidget({
 
     if (mode === "motivation") {
       const todaySource = getTodayQuoteSource();
-      const filteredBySource = rawMotDeck.filter((c) => c.quote_source === todaySource);
-      const motDeck = filteredBySource.length > 0 ? filteredBySource : rawMotDeck;
+      const motDeck = getAlternatingDeck(rawMotDeck, todaySource);
 
       if (saved.motivationCount >= QUOTE_LIMIT) { showLimit(); return; }
       const newCount = saved.motivationCount + 1;
