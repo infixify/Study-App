@@ -1382,16 +1382,6 @@ export default function DashboardPage() {
     }
   };
 
-  const handleOpenMentorshipPopup = () => {
-    const buttons = Array.from(document.querySelectorAll("button"));
-    const mentorBtn = buttons.find((b) => {
-      const txt = (b.textContent || b.innerText || "").toUpperCase();
-      return txt.includes("GET MENTORSHIP");
-    });
-    if (mentorBtn) mentorBtn.click();
-    else router.push("/mentor");
-  };
-
   const calculateDaysLeft = (targetDate: string) => {
     const diff = new Date(targetDate).getTime() - new Date().getTime();
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
@@ -1515,27 +1505,67 @@ export default function DashboardPage() {
             }}
             onOpenDoubtSolver={() => setDoubtOpen(true)}
           />
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={handleOpenMentorshipPopup}
-              className="flex items-center gap-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all"
-            >
-              <span className="text-lg">🧠</span>
-              <div className="text-left">
-                <div className="text-xs font-black leading-none">AI Mentorship</div>
-                <div className="text-[9px] font-semibold text-indigo-200 leading-tight mt-0.5">7-day plan & analysis</div>
-              </div>
-            </button>
+
+          {/* AI Doubt Solver & Live Video Call Dual Launchpad */}
+          <div className="grid grid-cols-2 gap-2.5">
+            {/* Box 1: Text & Photo AI Doubt Solver */}
             <button
               type="button"
               onClick={() => setDoubtOpen(true)}
-              className="flex items-center gap-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl px-3 py-2.5 shadow-md active:scale-[0.98] transition-all"
+              className="relative p-3.5 bg-gradient-to-br from-slate-900 via-slate-800 to-teal-950 hover:to-teal-900 text-white rounded-2xl border border-teal-500/30 shadow-md active:scale-[0.98] transition-all text-left flex flex-col justify-between group overflow-hidden"
             >
-              <span className="text-lg">✨</span>
-              <div className="text-left">
-                <div className="text-xs font-black leading-none">Doubt Solver</div>
-                <div className="text-[9px] font-semibold text-slate-400 leading-tight mt-0.5">Ask anything instantly</div>
+              <div className="absolute -right-6 -bottom-6 w-20 h-20 bg-teal-500/10 rounded-full blur-xl pointer-events-none" />
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-8 h-8 rounded-xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-sm shadow-inner">
+                    ✨
+                  </div>
+                  <span className="text-[8.5px] font-black uppercase tracking-wider text-teal-300 bg-teal-500/20 px-2 py-0.5 rounded-full border border-teal-400/30">
+                    Text / Photo
+                  </span>
+                </div>
+                <h4 className="text-xs font-black text-white leading-tight mb-1 group-hover:text-teal-200 transition-colors">
+                  AI Doubt Solver
+                </h4>
+                <p className="text-[9.5px] font-medium text-slate-300 leading-relaxed line-clamp-2">
+                  Photo upload karo ya type karo — step-by-step NCERT formula & concept solutions pao.
+                </p>
+              </div>
+              <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-bold text-teal-300">
+                <span>Ask Doubts</span>
+                <span className="transition-transform group-hover:translate-x-0.5">→</span>
+              </div>
+            </button>
+
+            {/* Box 2: Live Video AI Doubt Solver (Video Call) */}
+            <button
+              type="button"
+              onClick={() => {
+                setDoubtOpen(true);
+              }}
+              className="relative p-3.5 bg-gradient-to-br from-[#0F172A] via-[#1E1B4B] to-[#312E81] hover:to-[#3730A3] text-white rounded-2xl border border-indigo-500/40 shadow-md active:scale-[0.98] transition-all text-left flex flex-col justify-between group overflow-hidden"
+            >
+              <div className="absolute -right-6 -bottom-6 w-20 h-20 bg-indigo-500/20 rounded-full blur-xl pointer-events-none" />
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-sm shadow-inner">
+                    📹
+                  </div>
+                  <span className="flex items-center gap-1 text-[8.5px] font-black uppercase tracking-wider text-rose-300 bg-rose-500/20 px-2 py-0.5 rounded-full border border-rose-400/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                    Live 1-on-1
+                  </span>
+                </div>
+                <h4 className="text-xs font-black text-white leading-tight mb-1 group-hover:text-indigo-200 transition-colors">
+                  Live Video Call
+                </h4>
+                <p className="text-[9.5px] font-medium text-indigo-200/90 leading-relaxed line-clamp-2">
+                  Hands-free camera on karke book dikhao — AI teacher live aawaz mein real-time samjhaye.
+                </p>
+              </div>
+              <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-bold text-indigo-300">
+                <span>Start Video Call</span>
+                <span className="transition-transform group-hover:translate-x-0.5">→</span>
               </div>
             </button>
           </div>
