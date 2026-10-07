@@ -3,14 +3,21 @@ import { getLiveGeminiKeys, getImageGeminiKeys, getGroqKey } from "@/lib/ai-key-
 
 export const runtime = "edge";
 
-const LIVE_FACULTY_PROMPT = `Tu PrepWise ka real-time Live Video AI Faculty hai for JEE, NEET aur Board exams.
-Student ne live video call par camera se apna textbook/notes dikhaya hai aur bol kar doubt pucha hai.
+const LIVE_FACULTY_PROMPT = `Tu PrepWise ka real-time Live Video AI Faculty mentor hai for JEE, NEET aur Board exams.
+Student ne live video call par camera se apna textbook, handwritten notes, ray diagram, numerical problem ya question dikhaya hai aur doubt pucha hai.
 
-RULES FOR NATURAL LIVE TEACHER ANSWERS:
-1. Short & Direct (2 to 4 sentences): Jawab crisp, accurate aur to-the-point teacher style mein do. Faltu introductory ya concluding lines mat bol.
-2. Natural Experienced Teacher Tone: Ek energetic, warm aur supportive Kota/Delhi faculty ki tarah explain kar (e.g. "Dekhiye, is question mein sabse pehle conservation of energy lagegi...").
-3. Phonetic Math Wording: Kabhi bhi raw LaTeX delimiters ($ ya \\frac ya \\sqrt) mat use kar. Formulas ko bilkul natural spoken style mein likh taaki bolne mein bilkul clear lage (jaise: "v equals u plus a t", "x square", "under-root", "force equals mass into acceleration").
-4. No Bullet Asterisks: Bullet points ya **bold** asterisks mat lagao, seedhe natural sentences likho taaki voice bina rukawat ke bol sake.`;
+IMPORTANT TEACHER GUIDELINES:
+1. DYNAMIC LENGTH & COMPLETE SOLUTIONS (NO ARTIFICIAL RESTRICTIONS):
+   - Agar student ne koi bada derivation (jaise Compound Microscope, Astronomical Telescope), optics ray diagram, physics numerical problem, ya derivation dikhaya hai, toh pura PROPER, REASONABLE aur STEP-BY-STEP complete solution samjhao.
+   - Har zaroori formula (jaise objective lens magnification Mo = vo/uo, eyepiece Me = 1 + D/fe, total magnification M, cases for near point D aur infinity), steps aur ray diagram ka significance clearly explain karo.
+   - Agar chhota factual sawal hai, toh 2-3 lines mein crisp explain karo.
+   - Solution ko zabardasti aadha ya cut-off mat karo. Student ko pura concept samajh aana chahiye.
+2. NATURAL INDIAN FACULTY TONE:
+   - Ek experienced, supportive Kota/Delhi top faculty ki tarah natural Hinglish mein explain karo (jaise: "Dekhiye bacchon, is page par Compound Microscope ka derivation hai...").
+3. SPOKEN MATH PHONETICS:
+   - Formulas ko natural readable words mein likho taaki bolne aur sunne mein bilkul clear ho (jaise: "M barabar L upon fo into 1 plus D upon fe", "vo upon uo", "v equals u plus a t", "under-root").
+4. CLEAN PARAGRAPH FORMATTING:
+   - Bold asterisks (**), bullets (*), ya raw LaTeX delimiters ($) ki jagah clean paragraphs aur step-by-step readable text use karo.`;
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,17 +25,16 @@ export async function POST(req: NextRequest) {
 
     if (!frame && !message) {
       return NextResponse.json(
-        { reply: "Kripya camera se question dikhayein ya bol kar puchein." },
+        { reply: "Kripya camera se question ya notes dikhayein aur puchein." },
         { status: 400 }
       );
     }
 
-    let promptText = message || "Camera par jo question hai use step-by-step samjhaiye.";
+    let promptText = message || "Camera par jo handwritten notes ya question hai use step-by-step explain kijiye.";
     if (studentContext?.targetExam) {
       promptText = `[Student Target: ${studentContext.targetExam}] ${promptText}`;
     }
 
-    // Clean base64 frame if provided (Fast slice, zero regex backtracking)
     let rawBase64 = "";
     if (frame && typeof frame === "string") {
       const commaIdx = frame.indexOf(",");
@@ -49,10 +55,8 @@ export async function POST(req: NextRequest) {
     if (keys.length > 0) {
       for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
-
-        // 1. Try Primary Live Model: gemini-3.8-flash
         const controller1 = new AbortController();
-        const timeout1 = setTimeout(() => controller1.abort(), 4500);
+        const timeout1 = setTimeout(() => controller1.abort(), 6500);
 
         try {
           const parts: any[] = [{ text: promptText }];
@@ -75,11 +79,10 @@ export async function POST(req: NextRequest) {
               contents: [{ parts }],
               generationConfig: {
                 temperature: 0.35,
-                maxOutputTokens: 350,
+                maxOutputTokens: 1200, // Reasonable capacity for full derivations
               },
             }),
           });
-
           clearTimeout(timeout1);
 
           if (res1.ok) {
@@ -95,19 +98,15 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // Handle Rate-Limit 429 -> Rotate to Next Key
           if (res1.status === 429) {
-            lastGoogleError = `Key ${i + 1} 429 Quota Exhausted`;
-            continue; // Next key
+            lastGoogleError = `Key ${i + 1} Quota Exhausted`;
+            continue;
           }
 
-          // If Server Spike (503 / 500 / Overload) -> Try Model 2 on SAME KEY
           if (res1.status === 503 || res1.status === 500 || res1.status === 502) {
             lastGoogleError = `Model 1 Spike (${res1.status})`;
-
             const controller2 = new AbortController();
-            const timeout2 = setTimeout(() => controller2.abort(), 3500);
-
+            const timeout2 = setTimeout(() => controller2.abort(), 4500);
             try {
               const url2 = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${key}`;
               const res2 = await fetch(url2, {
@@ -119,13 +118,11 @@ export async function POST(req: NextRequest) {
                   contents: [{ parts }],
                   generationConfig: {
                     temperature: 0.35,
-                    maxOutputTokens: 350,
+                    maxOutputTokens: 1200,
                   },
                 }),
               });
-
               clearTimeout(timeout2);
-
               if (res2.ok) {
                 const data2 = await res2.json();
                 const reply2 = data2?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
@@ -138,16 +135,12 @@ export async function POST(req: NextRequest) {
                   });
                 }
               }
-
-              // Model 2 ALSO returned 503/spike -> BREAK GOOGLE CIRCUIT!
               if (res2.status === 503 || res2.status === 500 || res2.status === 502) {
-                lastGoogleError = "Google Global Infrastructure Overload (Circuit Broken)";
                 googleCircuitBroken = true;
-                break; // Stop looping remaining 4 Google keys, immediately jump to Groq!
+                break;
               }
             } catch (err2: any) {
               clearTimeout(timeout2);
-              lastGoogleError = err2?.message || "Model 2 Timeout";
               googleCircuitBroken = true;
               break;
             }
@@ -155,18 +148,13 @@ export async function POST(req: NextRequest) {
         } catch (e1: any) {
           clearTimeout(timeout1);
           lastGoogleError = e1?.message || "Model 1 Timeout";
-          // If timeout occurred, check if we should break or try next
-          if (e1?.name === "AbortError") {
-            lastGoogleError = "Google 4.5s Timeout";
-          }
         }
-
         if (googleCircuitBroken) break;
       }
     }
 
     // ─────────────────────────────────────────────────────────────
-    // TIER 2: INSTANT GROQ LPU MULTIMODAL FAILOVER (0.3s)
+    // TIER 2: GROQ MULTIMODAL LPU FAILOVER
     // ─────────────────────────────────────────────────────────────
     const groqKey =
       process.env.GROQ_API_KEY_LIVE?.replace(/["'\r\n]/g, "").trim() ||
@@ -174,11 +162,9 @@ export async function POST(req: NextRequest) {
 
     if (groqKey) {
       const groqController = new AbortController();
-      const groqTimeout = setTimeout(() => groqController.abort(), 4000);
-
+      const groqTimeout = setTimeout(() => groqController.abort(), 6000);
       try {
         const groqContent: any[] = [{ type: "text", text: promptText }];
-
         if (rawBase64) {
           groqContent.push({
             type: "image_url",
@@ -202,10 +188,9 @@ export async function POST(req: NextRequest) {
               { role: "user", content: groqContent },
             ],
             temperature: 0.35,
-            max_tokens: 350,
+            max_tokens: 1200,
           }),
         });
-
         clearTimeout(groqTimeout);
 
         if (groqRes.ok) {
