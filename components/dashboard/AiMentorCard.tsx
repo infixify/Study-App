@@ -1,7 +1,7 @@
 // components/dashboard/AiMentorCard.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 interface AiMentorCardProps {
   userId: string;
@@ -12,7 +12,10 @@ interface AiMentorCardProps {
   onOpenAiTalk?: () => void;
 }
 
+const LAST_REFRESH_KEY = "pw_ai_mentor_last_refreshed";
+
 export default function AiMentorCard({
+  userId,
   targetExam = "Competitive Exam",
   report,
   loading,
@@ -21,6 +24,34 @@ export default function AiMentorCard({
 }: AiMentorCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"daily" | "subjects" | "swot" | "rank">("daily");
+  const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
+
+  // Load last refreshed timestamp from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(`${LAST_REFRESH_KEY}_${userId}`);
+      if (stored) setLastRefreshed(stored);
+    } catch (_) {}
+  }, [userId]);
+
+  // When a refresh completes (loading goes false and report exists), save timestamp
+  const prevLoadingRef = React.useRef(loading);
+  useEffect(() => {
+    if (prevLoadingRef.current === true && loading === false && report) {
+      const now = new Date().toLocaleString("en-IN", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+      setLastRefreshed(now);
+      try {
+        localStorage.setItem(`${LAST_REFRESH_KEY}_${userId}`, now);
+      } catch (_) {}
+    }
+    prevLoadingRef.current = loading;
+  }, [loading, report, userId]);
 
   const isNeet = targetExam.toUpperCase().includes("NEET");
 
@@ -30,7 +61,6 @@ export default function AiMentorCard({
     report?.diagnostic_summary ||
     `Prioritize high-yield numerical practice over passive video watching. Aim for a 60% problem-solving ratio to secure a top rank in ${targetExam}.`;
 
-  // Dynamic Subject Analysis (Adapts to real report or intelligent personalized targets)
   const subjectAnalysis = report?.subject_analysis || [
     {
       name: "Physics",
@@ -87,6 +117,14 @@ export default function AiMentorCard({
                 <span className="text-[9px] font-black text-indigo-300 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-700/60">
                   {targetExam}
                 </span>
+              </div>
+              {/* Last Refreshed Timestamp */}
+              <div className="text-[9px] text-slate-400 font-medium mt-0.5">
+                {lastRefreshed
+                  ? `Last updated: ${lastRefreshed}`
+                  : report
+                  ? "Updated previously"
+                  : "Not yet generated"}
               </div>
             </div>
           </div>
@@ -240,7 +278,7 @@ export default function AiMentorCard({
                   {!dailyTasks ? (
                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center">
                       <p className="text-slate-500 text-[11px] font-semibold">
-                        Refresh to generate your personalized daily habits
+                        Click "Update & Refresh" below to generate your personalized daily habits
                       </p>
                     </div>
                   ) : (
@@ -422,7 +460,7 @@ export default function AiMentorCard({
               )}
 
               {/* REFRESH BUTTON */}
-              <div className="pt-2">
+              <div className="pt-2 space-y-1.5">
                 <button
                   type="button"
                   onClick={onRefresh}
@@ -430,10 +468,13 @@ export default function AiMentorCard({
                   className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-50 shadow-md"
                 >
                   <span className={loading ? "animate-spin" : ""}>🔄</span>
-                  {loading ? "Re-Analyzing Telemetry Data…" : "UPDATE & REFRESH PROGRESS"}
+                  {loading ? "Re-Analyzing Telemetry Data…" : "UPDATE & REFRESH ANALYSIS"}
                 </button>
-                <p className="text-[9.5px] text-center text-slate-500 mt-1 font-medium">
-                  Triggers AI diagnostic with latest questions, hours & test scores.
+                <p className="text-[9.5px] text-center text-slate-400 font-medium">
+                  ⚠️ Manual only — does not auto-refresh on page reload or login.
+                  {lastRefreshed && (
+                    <span className="block text-slate-400 mt-0.5">Last updated: {lastRefreshed}</span>
+                  )}
                 </p>
               </div>
             </div>
