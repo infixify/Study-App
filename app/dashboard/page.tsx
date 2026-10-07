@@ -23,21 +23,19 @@ declare global {
 
 // ─── HIGH-SPEED SWR IN-MEMORY CACHE (Eliminates Request Storms on Tab Switch) ───
 const CACHE_TTL_MS = 1 * 60 * 1000; // 1 min memory, 3 min localStorage
-const CACHE_VERSION = "v3"; // bump this whenever you update daily_content structure
 const globalMemoryCache: Record<string, { timestamp: number; data: any }> = {};
 
 function getMemCache<T>(key: string): T | null {
-  const vKey = `${key}_${CACHE_VERSION}`;
-  const item = globalMemoryCache[vKey];
+  const item = globalMemoryCache[key];
   if (item && Date.now() - item.timestamp < CACHE_TTL_MS) {
     return item.data as T;
   }
   try {
-    const raw = localStorage.getItem(`pw_cache_${vKey}`);
+    const raw = localStorage.getItem(`pw_cache_${key}`);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Date.now() - parsed.timestamp < CACHE_TTL_MS * 3) {
-        globalMemoryCache[vKey] = parsed;
+        globalMemoryCache[key] = parsed;
         return parsed.data as T;
       }
     }
@@ -46,17 +44,10 @@ function getMemCache<T>(key: string): T | null {
 }
 
 function setMemCache<T>(key: string, data: T): void {
-  const vKey = `${key}_${CACHE_VERSION}`;
   const payload = { timestamp: Date.now(), data };
-  globalMemoryCache[vKey] = payload;
+  globalMemoryCache[key] = payload;
   try {
-    // Clear old version keys
-    Object.keys(localStorage).forEach((k) => {
-      if (k.startsWith(`pw_cache_${key}`) && !k.endsWith(CACHE_VERSION)) {
-        localStorage.removeItem(k);
-      }
-    });
-    localStorage.setItem(`pw_cache_${vKey}`, JSON.stringify(payload));
+    localStorage.setItem(`pw_cache_${key}`, JSON.stringify(payload));
   } catch (_) {}
 }
 
@@ -325,11 +316,30 @@ function HeroWidget({
   }, []);
 
   useEffect(() => {
-    const cached = getMemCache<Record<string, ContentCardItem[]>>("daily_content_deck");
-    if (cached) return;
-
     async function fetchDynamicContent() {
       try {
+        // Step 1: Fetch only the latest updated_at — tiny query, saves DB reads
+        const { data: tsData } = await supabase
+          .from("daily_content")
+          .select("updated_at")
+          .eq("is_active", true)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .single();
+
+        const latestTs = tsData?.updated_at ?? null;
+        const cachedTs = localStorage.getItem("pw_content_ts");
+
+        // Step 2: If timestamp matches → use cache, no full fetch needed
+        if (latestTs && cachedTs === latestTs) {
+          const cached = getMemCache<Record<string, ContentCardItem[]>>("daily_content_deck");
+          if (cached) {
+            setDbItems(cached);
+            return;
+          }
+        }
+
+        // Step 3: Timestamp changed or no cache → full fetch
         const { data, error } = await supabase.from("daily_content").select("*").eq("is_active", true);
         if (!error && data && data.length > 0) {
           const mList: ContentCardItem[] = [];
@@ -339,6 +349,7 @@ function HeroWidget({
             const item: ContentCardItem = {
               id: row.id,
               quote: row.quote,
+              quote_source: (row.quote_source as "human" | "anime") || "human",
               character: row.character,
               show: row.show || "PrepWise",
               icon_or_sticker: row.icon_or_sticker || "⚡",
@@ -357,6 +368,8 @@ function HeroWidget({
           };
           setDbItems(deck);
           setMemCache("daily_content_deck", deck);
+          // Save latest timestamp so next open skips full fetch
+          if (latestTs) localStorage.setItem("pw_content_ts", latestTs);
         }
       } catch (_) {}
     }
