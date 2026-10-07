@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 
 // ============================================================================
-// CLEAN INLINE SVG ICONS (Zero Unicode/Encoding Glitches)
+// CLEAN INLINE SVG ICONS (Accurate Symbols & Zero Unicode Glitches)
 // ============================================================================
 const CloseIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -15,40 +15,55 @@ const CameraSwitchIcon = ({ className = "w-4 h-4" }: { className?: string }) => 
   </svg>
 );
 
-const TorchOnIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+// FLASHLIGHT ON: Bulb with glowing amber color, no diagonal cut
+const FlashlightOnIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+    <path
+      fill="#F59E0B"
+      stroke="#F59E0B"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+    />
   </svg>
 );
 
-const TorchOffIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+// FLASHLIGHT OFF: Simple bulb outline WITH a clean diagonal cut line across it
+const FlashlightOffIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+    />
+    <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" />
   </svg>
 );
 
-const MicIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+// MIC ON (Unmuted)
+const MicActiveIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
   </svg>
 );
 
-const SpeakerWaveIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+// MIC OFF (Muted with diagonal slash)
+const MicMutedIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-  </svg>
-);
-
-const SpeakerMuteIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-    <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-1.22 3.93M12 18a6.97 6.97 0 01-5-2.07M12 18v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V7m6 0a3 3 0 00-5.12-2.12" />
+    <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" />
   </svg>
 );
 
 const ChatBubbleIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+  </svg>
+);
+
+const TrashIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
   </svg>
 );
 
@@ -108,10 +123,10 @@ export interface LiveVideoCallModalProps {
 
 const CACHE_KEY_MESSAGES = "prepwise_live_call_messages_v3";
 const AUDIO_CACHE_PREFIX = "prepwise_tts_v3_";
-const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 Hours
+const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 Hours Auto Cleanup
 
 // ============================================================================
-// 24-HOUR AUTO STORAGE PURGE
+// 24-HOUR AUTO STORAGE PURGE (Saves Supabase Storage & Browser Cache)
 // ============================================================================
 function purgeExpiredSessionData() {
   if (typeof window === "undefined") return;
@@ -155,17 +170,29 @@ function purgeExpiredSessionData() {
 }
 
 // ============================================================================
-// ADVANCED PHONETIC TEACHER NORMALIZER (Math / Physics Spoken Normalizer)
+// NATURAL PHONETICS & SMOOTH SPEECH CLEANER
+// Eliminates awkward comma pauses, mathematical mispronunciations & robotic stutters
 // ============================================================================
 function cleanTextForNaturalSpeech(raw: string): string {
   if (!raw) return "";
   let text = raw;
 
+  // 1. Remove markdown symbols & latex tags
   text = text.replace(/[*#`_~]/g, " ");
   text = text.replace(/\$\$|\$/g, " ");
   text = text.replace(/Step \d+:\s*/gi, "");
   text = text.replace(/\\\[|\\\]|\\\(|\\\)/g, "");
 
+  // 2. Fix awkward multiple punctuations causing huge gaps
+  text = text.replace(/\.{2,}/g, ".");
+  text = text.replace(/,{2,}/g, ",");
+  text = text.replace(/[:;-]{2,}/g, " ");
+  text = text.replace(/[:;]/g, ",");
+
+  // Remove commas before small conjunctions/prepositions that cause weird pauses
+  text = text.replace(/,\s*(hai|ki|toh|aur|se|mein|ka|ke|ko|par)\b/gi, " $1");
+
+  // 3. Indian Academic / Kota Faculty Spoken Pronunciations
   text = text.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1 by $2");
   text = text.replace(/\\sqrt\{([^}]+)\}/g, "under root $1");
   text = text.replace(/\u221A/g, "under root ");
@@ -178,18 +205,27 @@ function cleanTextForNaturalSpeech(raw: string): string {
   text = text.replace(/v\u00B2/g, "v square");
   text = text.replace(/u\u00B2/g, "u square");
 
-  text = text.replace(/M_o/gi, "M objective");
-  text = text.replace(/M_e/gi, "M eyepiece");
-  text = text.replace(/v_o\/u_o/gi, "v objective by u objective");
-  text = text.replace(/v_o/gi, "v objective");
-  text = text.replace(/u_o/gi, "u objective");
-  text = text.replace(/f_o/gi, "f objective");
-  text = text.replace(/f_e/gi, "f eyepiece");
-  text = text.replace(/L\/f_o/gi, "L by f objective");
-  text = text.replace(/D\/f_e/gi, "D by f eyepiece");
-  text = text.replace(/1\s*\+\s*D\/f_e/gi, "1 plus D by f eyepiece");
+  // Optical physics & common exam variables
+  text = text.replace(/M_o\b/gi, "M objective");
+  text = text.replace(/M_e\b/gi, "M eyepiece");
+  text = text.replace(/v_o\/u_o\b/gi, "v objective by u objective");
+  text = text.replace(/v_o\b/gi, "v objective");
+  text = text.replace(/u_o\b/gi, "u objective");
+  text = text.replace(/f_o\b/gi, "f objective");
+  text = text.replace(/f_e\b/gi, "f eyepiece");
+  text = text.replace(/L\/f_o\b/gi, "L by f objective");
+  text = text.replace(/D\/f_e\b/gi, "D by f eyepiece");
+  text = text.replace(/1\s*\+\s*D\/f_e\b/gi, "1 plus D by f eyepiece");
   text = text.replace(/m\/s\u00B2/g, "meter per second square");
   text = text.replace(/m\/s/g, "meter per second");
+
+  text = text.replace(/\bapprox\b/gi, "lagbhag");
+  text = text.replace(/\beqn\b|\beq\b/gi, "equation");
+  text = text.replace(/\bw\.r\.t\b/gi, "with respect to");
+  text = text.replace(/\bi\.e\b/gi, "yaani ki");
+  text = text.replace(/\be\.g\b/gi, "for example");
+  text = text.replace(/\bconst\b/gi, "constant");
+  text = text.replace(/\bmag\b/gi, "magnification");
 
   text = text.replace(/\u0394T/g, "delta T");
   text = text.replace(/\u0394/g, "delta ");
@@ -326,6 +362,7 @@ export function LiveVideoCallModal({
   const [flashTrigger, setFlashTrigger] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [audioCache, setAudioCache] = useState<Record<string, string>>({});
+  const [clearSuccessNotice, setClearSuccessNotice] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -338,6 +375,7 @@ export function LiveVideoCallModal({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
+  // 24-HOUR AUTO STORAGE PURGE ON LOAD
   useEffect(() => {
     if (isModalOpen) {
       purgeExpiredSessionData();
@@ -361,6 +399,17 @@ export function LiveVideoCallModal({
       );
     } catch (_) {}
   }, []);
+
+  // MANUAL CHAT CLEAR (Limits Supabase & Local Cache usage)
+  const handleManualClearChat = () => {
+    playUiTone("press");
+    setMessages([]);
+    try {
+      localStorage.removeItem(CACHE_KEY_MESSAGES);
+    } catch (_) {}
+    setClearSuccessNotice(true);
+    setTimeout(() => setClearSuccessNotice(false), 2500);
+  };
 
   useEffect(() => {
     if (isModalOpen) {
@@ -430,6 +479,7 @@ export function LiveVideoCallModal({
     setFacingMode((prev) => (prev === "environment" ? "user" : "environment"));
   };
 
+  // FLASHLIGHT TOGGLE WITH COLOR & CUT
   const toggleTorch = async () => {
     playUiTone("press");
     if (!streamRef.current) return;
@@ -475,6 +525,7 @@ export function LiveVideoCallModal({
     setActiveSpeechMessageId(null);
   };
 
+  // NATURAL PHONETICS & SMOOTH CONTINUOUS TTS
   const speakTextContinuously = async (fullText: string, messageId?: string) => {
     if (isMuted) return;
     stopSpeaking();
@@ -495,7 +546,7 @@ export function LiveVideoCallModal({
     isAudioQueuePlayingRef.current = true;
 
     const getAudioUrl = async (sentence: string): Promise<string | null> => {
-      const clean = cleanTextForNaturalSpeech(sentence).slice(0, 180);
+      const clean = cleanTextForNaturalSpeech(sentence).slice(0, 200);
       if (!clean) return null;
       if (audioCache[clean]) return audioCache[clean];
 
@@ -566,7 +617,7 @@ export function LiveVideoCallModal({
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang = "hi-IN";
-        utter.rate = 1.08;
+        utter.rate = 1.12;
         utter.pitch = 1.0;
         utter.onend = () => {
           if (isAudioQueuePlayingRef.current) onDone();
@@ -747,18 +798,19 @@ export function LiveVideoCallModal({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* FLASHLIGHT TOGGLE (Cut line on off, bright amber fill on on) */}
           {hasTorch && (
             <button
               type="button"
               onClick={toggleTorch}
-              className={`p-2 rounded-full backdrop-blur-md border text-xs font-bold transition active:scale-95 shadow-md ${
+              className={`p-2.5 rounded-full backdrop-blur-md border text-xs font-bold transition active:scale-95 shadow-md flex items-center justify-center ${
                 isTorchOn
-                  ? "bg-amber-500 text-black border-amber-400"
-                  : "bg-black/60 text-white border-white/20 hover:bg-black/80"
+                  ? "bg-amber-500/20 text-amber-400 border-amber-400 shadow-amber-500/30 ring-2 ring-amber-400/40"
+                  : "bg-black/60 text-slate-300 border-white/20 hover:bg-black/80"
               }`}
-              title="Toggle Torch"
+              title={isTorchOn ? "Flashlight ON (Tap to Turn Off)" : "Flashlight OFF (Tap to Turn On)"}
             >
-              {isTorchOn ? <TorchOnIcon className="w-4 h-4" /> : <TorchOffIcon className="w-4 h-4" />}
+              {isTorchOn ? <FlashlightOnIcon className="w-4 h-4" /> : <FlashlightOffIcon className="w-4 h-4" />}
             </button>
           )}
 
@@ -796,12 +848,18 @@ export function LiveVideoCallModal({
             className="mx-auto w-fit px-3.5 py-1.5 rounded-full bg-emerald-950/85 hover:bg-emerald-900 backdrop-blur-md border border-emerald-500/40 text-center shadow-lg flex items-center justify-center gap-2 animate-pulse active:scale-95 transition"
             title="Tap to Stop Voice"
           >
-            <SpeakerWaveIcon className="w-3.5 h-3.5 text-emerald-300" />
+            <MicActiveIcon className="w-3.5 h-3.5 text-emerald-300" />
             <p className="text-[11px] font-bold text-emerald-300">
               AI Explaining... (Tap to Stop)
             </p>
             <StopSquareIcon className="w-3 h-3 text-emerald-400 ml-1" />
           </button>
+        ) : clearSuccessNotice ? (
+          <div className="mx-auto w-fit px-3.5 py-1.5 rounded-full bg-emerald-950/90 border border-emerald-500/50 text-center shadow-lg animate-bounce">
+            <p className="text-[11px] font-bold text-emerald-300">
+              ✓ Chat history cleared (Free limits protected)
+            </p>
+          </div>
         ) : null}
       </div>
 
@@ -813,17 +871,37 @@ export function LiveVideoCallModal({
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-teal-400" />
                 <h5 className="text-xs font-black text-teal-300 uppercase tracking-wider">
-                  Live Solution Steps & Notes
+                  Live Solution Steps
                 </h5>
               </div>
-              <button
-                type="button"
-                onClick={() => setHudMode("compact")}
-                className="text-slate-400 hover:text-white p-1 rounded-lg bg-white/5 active:scale-95"
-                title="Minimize Drawer"
-              >
-                <ChevronDownIcon className="w-4 h-4" />
-              </button>
+
+              <div className="flex items-center gap-1.5">
+                {/* MANUAL CLEAR BUTTON & 24H RETENTION NOTICE */}
+                <button
+                  type="button"
+                  onClick={handleManualClearChat}
+                  className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 active:scale-95 transition"
+                  title="Clear Chat & Free Supabase Storage"
+                >
+                  <TrashIcon className="w-3 h-3 text-rose-400" />
+                  <span>Clear</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setHudMode("compact")}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg bg-white/5 active:scale-95"
+                  title="Minimize Drawer"
+                >
+                  <ChevronDownIcon className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* 24 HOURS RETENTION NOTICE MENTION */}
+            <div className="bg-slate-800/60 border border-white/5 rounded-xl px-2.5 py-1 text-[10px] text-slate-400 flex items-center justify-between">
+              <span>Auto 24h cleanup active (Saves Supabase quota)</span>
+              <span className="text-teal-400 font-mono font-semibold">24h TTL</span>
             </div>
 
             <div className="space-y-3 overflow-y-auto flex-1 pr-1">
@@ -974,24 +1052,24 @@ export function LiveVideoCallModal({
         </div>
 
         <div className="flex items-center justify-center gap-3.5 w-full max-w-xs">
-          {/* Mute/Unmute */}
+          {/* MIC MUTE / UNMUTE BUTTON (Mic shape with slash when muted) */}
           <button
             type="button"
             onClick={() => {
               if (!isMuted) stopSpeaking();
               setIsMuted(!isMuted);
             }}
-            className={`p-3.5 rounded-full transition-all active:scale-95 shadow-xl ${
+            className={`p-3.5 rounded-full transition-all active:scale-95 shadow-xl flex items-center justify-center ${
               isMuted
-                ? "bg-rose-600 text-white border border-rose-400"
-                : "bg-slate-800/90 text-slate-300 border border-slate-700 hover:bg-slate-700"
+                ? "bg-rose-600 text-white border border-rose-400 ring-2 ring-rose-500/40"
+                : "bg-slate-800/90 text-slate-200 border border-slate-700 hover:bg-slate-700"
             }`}
-            title={isMuted ? "Unmute Voice" : "Mute Voice"}
+            title={isMuted ? "Mic Muted (Tap to Unmute Voice)" : "Mic Active (Tap to Mute Voice)"}
           >
-            {isMuted ? <SpeakerMuteIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
+            {isMuted ? <MicMutedIcon className="w-5 h-5 text-white" /> : <MicActiveIcon className="w-5 h-5 text-teal-300" />}
           </button>
 
-          {/* Push-to-Talk Mic */}
+          {/* Push-to-Talk Primary Mic Button */}
           <button
             type="button"
             onMouseDown={handleHoldStart}
@@ -1012,7 +1090,7 @@ export function LiveVideoCallModal({
               </>
             ) : (
               <>
-                <MicIcon className="w-5 h-5" />
+                <MicActiveIcon className="w-5 h-5" />
                 <span>{isAnalyzing ? "Solving..." : "Hold to Ask"}</span>
               </>
             )}
