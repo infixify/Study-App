@@ -1221,13 +1221,28 @@ export default function DashboardPage() {
 
       setLoading(false);
 
-      // ── AI Mentor: read directly from already-fetched profile ──────────
-      // No API call on page load. Report stays as-is until user manually
-      // clicks "UPDATE & REFRESH PROGRESS" (forceRefresh: true).
-      // ────────────────────────────────────────────────────────────────────
-      if (!isCancelled) {
-        if (uProf?.ai_mentor_report) setMentorReport(uProf.ai_mentor_report);
-        if (uProf?.ai_student_context) setStudentContext(uProf.ai_student_context);
+      try {
+        const cachedReport = uProf?.ai_mentor_report;
+        const cachedContext = uProf?.ai_student_context;
+        if (cachedReport && !isCancelled) {
+          setMentorReport(cachedReport);
+          if (cachedContext) setStudentContext(cachedContext);
+        } else {
+          setMentorLoading(true);
+          const res = await fetch("/api/ai-mentor", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: uid }),
+          });
+          if (res.ok && !isCancelled) {
+            const data = await res.json();
+            setMentorReport(data.report);
+            if (data.studentContext) setStudentContext(data.studentContext);
+          }
+        }
+      } catch (_) {
+      } finally {
+        if (!isCancelled) setMentorLoading(false);
       }
     }
 
@@ -1468,7 +1483,106 @@ export default function DashboardPage() {
           })}
         </div>
 
-        {/* 3. AI MENTOR WIDGET */}
+        {/* 3. METRICS ROW */}
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => router.push("/focus")}
+            className="bg-white p-3 rounded-2xl border border-slate-200/90 text-left active:scale-[0.98] transition-all hover:border-teal-500 shadow-2xs"
+          >
+            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Today Study</span>
+            <div className="text-lg font-black text-slate-900 tracking-tight">
+              {todayHours}
+              <span className="text-xs font-semibold text-slate-500 ml-0.5">h</span>
+            </div>
+            <span className="text-[10px] font-bold text-teal block mt-0.5">Study Timer →</span>
+          </button>
+
+          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 flex flex-col justify-between shadow-2xs">
+            <div>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[10px] font-bold text-slate-600">Questions Today</span>
+                <button
+                  type="button"
+                  onClick={handleOpenQuestionModal}
+                  className="text-[9.5px] font-black text-teal bg-teal/10 px-1.5 py-0.5 rounded border border-teal/20 hover:bg-teal/20"
+                >
+                  +Add
+                </button>
+              </div>
+              <div className="flex items-end gap-1.5 mt-0.5">
+                <span className="text-lg font-black text-slate-900 tracking-tight leading-none">{todayQuestions}</span>
+                {todayAvgQPerHr > 0 && (
+                  <span className="text-[10px] font-bold text-indigo-600 leading-none mb-0.5 whitespace-nowrap">
+                    {todayAvgQPerHr} Q/h
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="mt-1 pt-1 border-t border-slate-100">
+              <span className="text-[9px] font-semibold text-slate-400">
+                All time: <span className="font-bold text-slate-600">{totalQuestionsAllTime}</span>
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
+            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Tasks</span>
+            <div className="text-lg font-black text-slate-900 tracking-tight">{allTasks.length}</div>
+            <span className={`text-[10px] font-bold block mt-0.5 ${allTasks.length > 0 ? "text-rose-600" : "text-emerald-600"}`}>
+              {allTasks.length > 0 ? "Pending" : "All Done ✓"}
+            </span>
+          </div>
+        </div>
+
+        {/* 4. TODAY'S STUDY DISTRIBUTION */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
+          <div className="flex items-center justify-between text-xs font-black mb-2.5">
+            <span className="text-slate-900 font-bold flex items-center gap-1.5">
+              <span>⚖️</span> Today's Study Split
+            </span>
+          </div>
+          <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex mb-2.5 shadow-inner">
+            <div style={{ width: `${sumSplit > 0 ? theoryPct : 33}%` }} className="bg-amber-500 transition-all" />
+            <div style={{ width: `${sumSplit > 0 ? practicePct : 50}%` }} className="bg-teal transition-all" />
+            <div style={{ width: `${sumSplit > 0 ? revisionPct : 17}%` }} className="bg-indigo-600 transition-all" />
+          </div>
+          <div className="flex items-center justify-between text-[11px] font-bold px-0.5">
+            <span className="flex items-center gap-1.5 text-amber-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Theory ({splitRatio.theory}m)
+            </span>
+            <span className="flex items-center gap-1.5 text-teal-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-teal" /> Practice ({splitRatio.practice}m)
+            </span>
+            <span className="flex items-center gap-1.5 text-indigo-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" /> Revision ({splitRatio.revision}m)
+            </span>
+          </div>
+          {splitRatio.verified > 0 && (
+            <div className="mt-2.5 flex items-center gap-2 bg-teal/10 border border-teal/20 rounded-xl px-3 py-2">
+              <span className="text-sm">🛡️</span>
+              <div className="flex-1">
+                <span className="text-[11px] font-bold text-teal">{splitRatio.verified}m Verified (Leaderboard Counted)</span>
+                <p className="text-[10px] text-teal/80 mt-0.5">Face cam + App blocker both ON</p>
+              </div>
+              <span className="text-xs font-black text-teal">
+                {Math.round((splitRatio.verified / Math.max(todayStudyMins, 1)) * 100)}%
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* 5. COMBINED ACTION ITEMS */}
+        <ActionItemsWidget
+          tasks={allTasks}
+          scheduledTests={scheduledTests}
+          onCompleteTask={handleCompleteTask}
+          onCompleteTest={handleCompleteTest}
+          onAddTask={() => router.push("/todo")}
+          onViewAll={() => router.push("/todo")}
+        />
+
+        {/* 6. AI MENTOR WIDGET */}
         <div className="space-y-2">
           <AiMentorCard
             userId={user?.id}
@@ -1495,7 +1609,7 @@ export default function DashboardPage() {
             onOpenAiTalk={() => setLiveCallOpen(true)}
           />
 
-          {/* AI Doubt Solver & Live Video Call Dual Launchpad */}
+          {/* 7. AI Doubt Solver & Live Video Call Dual Launchpad */}
           <div className="grid grid-cols-2 gap-2.5">
             {/* Box 1: Text & Photo AI Doubt Solver */}
             <button
@@ -1558,113 +1672,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 4. METRICS ROW */}
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => router.push("/focus")}
-            className="bg-white p-3 rounded-2xl border border-slate-200/90 text-left active:scale-[0.98] transition-all hover:border-teal-500 shadow-2xs"
-          >
-            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Today Study</span>
-            <div className="text-lg font-black text-slate-900 tracking-tight">
-              {todayHours}
-              <span className="text-xs font-semibold text-slate-500 ml-0.5">h</span>
-            </div>
-            <span className="text-[10px] font-bold text-teal block mt-0.5">Study Timer →</span>
-          </button>
-
-          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 flex flex-col justify-between shadow-2xs">
-            <div>
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="text-[10px] font-bold text-slate-600">Questions Today</span>
-                <button
-                  type="button"
-                  onClick={handleOpenQuestionModal}
-                  className="text-[9.5px] font-black text-teal bg-teal/10 px-1.5 py-0.5 rounded border border-teal/20 hover:bg-teal/20"
-                >
-                  +Add
-                </button>
-              </div>
-              <div className="flex items-end gap-1.5 mt-0.5">
-                <span className="text-lg font-black text-slate-900 tracking-tight leading-none">{todayQuestions}</span>
-                {todayAvgQPerHr > 0 && (
-                  <span className="text-[10px] font-bold text-indigo-600 leading-none mb-0.5 whitespace-nowrap">
-                    {todayAvgQPerHr} Q/h
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="mt-1 pt-1 border-t border-slate-100">
-              <span className="text-[9px] font-semibold text-slate-400">
-                All time: <span className="font-bold text-slate-600">{totalQuestionsAllTime}</span>
-              </span>
-            </div>
-          </div>
-
-          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
-            <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Tasks</span>
-            <div className="text-lg font-black text-slate-900 tracking-tight">{allTasks.length}</div>
-            <span className={`text-[10px] font-bold block mt-0.5 ${allTasks.length > 0 ? "text-rose-600" : "text-emerald-600"}`}>
-              {allTasks.length > 0 ? "Pending" : "All Done ✓"}
-            </span>
-          </div>
-        </div>
-
-        {/* 5. TODAY'S STUDY DISTRIBUTION */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
-          <div className="flex items-center justify-between text-xs font-black mb-2.5">
-            <span className="text-slate-900 font-bold flex items-center gap-1.5">
-              <span>⚖️</span> Today's Study Split
-            </span>
-          </div>
-          <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex mb-2.5 shadow-inner">
-            <div style={{ width: `${sumSplit > 0 ? theoryPct : 33}%` }} className="bg-amber-500 transition-all" />
-            <div style={{ width: `${sumSplit > 0 ? practicePct : 50}%` }} className="bg-teal transition-all" />
-            <div style={{ width: `${sumSplit > 0 ? revisionPct : 17}%` }} className="bg-indigo-600 transition-all" />
-          </div>
-          <div className="flex items-center justify-between text-[11px] font-bold px-0.5">
-            <span className="flex items-center gap-1.5 text-amber-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Theory ({splitRatio.theory}m)
-            </span>
-            <span className="flex items-center gap-1.5 text-teal-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-teal" /> Practice ({splitRatio.practice}m)
-            </span>
-            <span className="flex items-center gap-1.5 text-indigo-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" /> Revision ({splitRatio.revision}m)
-            </span>
-          </div>
-          {splitRatio.verified > 0 && (
-            <div className="mt-2.5 flex items-center gap-2 bg-teal/10 border border-teal/20 rounded-xl px-3 py-2">
-              <span className="text-sm">🛡️</span>
-              <div className="flex-1">
-                <span className="text-[11px] font-bold text-teal">{splitRatio.verified}m Verified (Leaderboard Counted)</span>
-                <p className="text-[10px] text-teal/80 mt-0.5">Face cam + App blocker both ON</p>
-              </div>
-              <span className="text-xs font-black text-teal">
-                {Math.round((splitRatio.verified / Math.max(todayStudyMins, 1)) * 100)}%
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* 6. SYLLABUS COMPLETION WIDGET */}
-        <SyllabusCompletionWidget
-          subjects={subjects}
-          chapters={chapters}
-          progress={chapterProgress}
-          onOpenSyllabus={() => router.push("/library")}
-        />
-
-        {/* 7. COMBINED ACTION ITEMS */}
-        <ActionItemsWidget
-          tasks={allTasks}
-          scheduledTests={scheduledTests}
-          onCompleteTask={handleCompleteTask}
-          onCompleteTest={handleCompleteTest}
-          onAddTask={() => router.push("/todo")}
-          onViewAll={() => router.push("/todo")}
-        />
-
         {/* 8. RECENT MOCK TESTS */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
@@ -1705,7 +1712,15 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 9. QUICK ROUTE CARDS */}
+        {/* 9. SYLLABUS COMPLETION WIDGET */}
+        <SyllabusCompletionWidget
+          subjects={subjects}
+          chapters={chapters}
+          progress={chapterProgress}
+          onOpenSyllabus={() => router.push("/library")}
+        />
+
+        {/* 10. QUICK ROUTE CARDS */}
         <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
