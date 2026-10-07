@@ -1721,7 +1721,7 @@ export default function DashboardPage() {
         />
 
         {/* 10. QUICK ROUTE CARDS */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           <button
             type="button"
             onClick={() => router.push("/library")}
@@ -1753,6 +1753,17 @@ export default function DashboardPage() {
             <div>
               <div className="text-xs font-black text-slate-900">Analytics</div>
               <div className="text-[9px] font-semibold text-slate-500">Charts & Heatmap</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/error-book")}
+            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
+          >
+            <div className="text-xl mb-1">📕</div>
+            <div>
+              <div className="text-xs font-black text-slate-900">Error Book</div>
+              <div className="text-[9px] font-semibold text-slate-500">Mistakes & Notes</div>
             </div>
           </button>
         </div>
