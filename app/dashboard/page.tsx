@@ -1221,28 +1221,13 @@ export default function DashboardPage() {
 
       setLoading(false);
 
-      try {
-        const cachedReport = uProf?.ai_mentor_report;
-        const cachedContext = uProf?.ai_student_context;
-        if (cachedReport && !isCancelled) {
-          setMentorReport(cachedReport);
-          if (cachedContext) setStudentContext(cachedContext);
-        } else {
-          setMentorLoading(true);
-          const res = await fetch("/api/ai-mentor", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId: uid }),
-          });
-          if (res.ok && !isCancelled) {
-            const data = await res.json();
-            setMentorReport(data.report);
-            if (data.studentContext) setStudentContext(data.studentContext);
-          }
-        }
-      } catch (_) {
-      } finally {
-        if (!isCancelled) setMentorLoading(false);
+      // ── AI Mentor: read directly from already-fetched profile ──────────
+      // No API call on page load. Report stays as-is until user manually
+      // clicks "UPDATE & REFRESH PROGRESS" (forceRefresh: true).
+      // ────────────────────────────────────────────────────────────────────
+      if (!isCancelled) {
+        if (uProf?.ai_mentor_report) setMentorReport(uProf.ai_mentor_report);
+        if (uProf?.ai_student_context) setStudentContext(uProf.ai_student_context);
       }
     }
 
