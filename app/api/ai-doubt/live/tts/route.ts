@@ -23,7 +23,7 @@ function generateSecMsGec(clientToken: string): string {
 
 /**
  * Robust TLS-based WebSocket synthesis for Microsoft Edge Neural TTS
- * Avoids browser DOM TypeScript type-checking errors during Next.js build.
+ * Zero-dependency, avoids browser DOM type collisions during Next.js builds.
  */
 function synthesizeEdgeTTS(cleanText: string, timeoutMs = 2800): Promise<Buffer | null> {
   return new Promise((resolve) => {
@@ -140,7 +140,7 @@ function synthesizeEdgeTTS(cleanText: string, timeoutMs = 2800): Promise<Buffer 
         }
       }
 
-      // Process WebSocket frames
+      // Process incoming WebSocket frames
       while (upgraded && buffer.length >= 2) {
         const opcode = buffer[0] & 0x0f;
         let payloadLen = buffer[1] & 0x7f;
@@ -219,7 +219,7 @@ export async function GET(req: NextRequest) {
       try {
         const edgeAudio = await synthesizeEdgeTTS(cleanText, 2500);
         if (edgeAudio && edgeAudio.length > 0) {
-          return new NextResponse(edgeAudio, {
+          return new NextResponse(new Uint8Array(edgeAudio), {
             headers: {
               "Content-Type": "audio/mpeg",
               "Cache-Control": "public, max-age=86400, s-maxage=86400, immutable",
@@ -273,7 +273,7 @@ export async function GET(req: NextRequest) {
               bytes[i] = binaryString.charCodeAt(i);
             }
 
-            return new NextResponse(bytes.buffer, {
+            return new NextResponse(bytes, {
               headers: {
                 "Content-Type": "audio/wav",
                 "Cache-Control": "public, max-age=86400, s-maxage=86400, immutable",
@@ -300,7 +300,7 @@ export async function GET(req: NextRequest) {
       });
       if (googleRes.ok) {
         const audioBuffer = await googleRes.arrayBuffer();
-        return new NextResponse(audioBuffer, {
+        return new NextResponse(new Uint8Array(audioBuffer), {
           headers: {
             "Content-Type": "audio/mpeg",
             "Cache-Control": "public, max-age=86400, s-maxage=86400, immutable",
