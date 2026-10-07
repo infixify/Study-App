@@ -23,9 +23,10 @@ interface LiveMessage {
   provider?: string;
   failoverReason?: string;
   latencyMs?: number;
+  timestamp?: number;
 }
 
-// ─── PHONETIC TEACHER NORMALIZER (CLEANS MATH FOR NATURAL ACCENT & FLUIDITY) ───
+// â”€â”€â”€ PHONETIC TEACHER NORMALIZER (CLEANS MATH FOR NATURAL ACCENT & FLUIDITY) â”€â”€â”€
 function cleanTextForNaturalSpeech(raw: string): string {
   if (!raw) return "";
   let text = raw;
@@ -55,13 +56,13 @@ function cleanTextForNaturalSpeech(raw: string): string {
   text = text.replace(/\\rightarrow/g, " gives ");
 
   text = text.replace(/[\[\]{}()]/g, " ");
-  text = text.replace(/[-–—]/g, " ");
+  text = text.replace(/[-â€“â€”]/g, " ");
   text = text.replace(/\s+/g, " ");
 
   return text.trim();
 }
 
-// ─── CLEAN FORMATTER FOR COPIED / PLAIN TEXT ───
+// â”€â”€â”€ CLEAN FORMATTER FOR COPIED / PLAIN TEXT â”€â”€â”€
 function cleanFormulaSymbols(raw: string): string {
   if (!raw) return "";
   return raw
@@ -69,14 +70,15 @@ function cleanFormulaSymbols(raw: string): string {
     .replace(/\$\$|\$/g, "")
     .replace(/\\\[|\\\]|\\\(|\\\)/g, "")
     .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)")
-    .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
-    .replace(/\\times/g, " × ")
-    .replace(/\\div/g, " ÷ ")
-    .replace(/\\rightarrow/g, " → ")
+    .replace(/\\sqrt\{([^}]+)\}/g, "âˆš($1)")
+    .replace(/\\times/g, " Ã— ")
+    .replace(/\\div/g, " Ã· ")
+    .replace(/\\rightarrow/g, " â†’ ")
     .trim();
 }
 
-// ─── RICH STRUCTURED SOLUTION CARD COMPONENT ───
+// â”€â”€â”€ RICH STRUCTURED SOLUTION CARD COMPONENT â”€â”€â”€
+// â”€â”€â”€ RICH STRUCTURED SOLUTION CARD COMPONENT â”€â”€â”€
 function FormattedSolutionCard({
   message,
   onReplay,
@@ -105,67 +107,67 @@ function FormattedSolutionCard({
     .filter((l) => l.length > 0);
 
   return (
-    <div className="bg-slate-900/95 border border-teal-500/30 rounded-2xl p-3.5 text-slate-100 shadow-xl space-y-2.5 transition-all">
+    <div className="bg-slate-900/95 border border-teal-500/40 rounded-2xl p-4 text-slate-100 shadow-xl space-y-3 transition-all">
       {/* Header: Provider Badge, Latency, and Timestamps */}
-      <div className="flex items-center justify-between border-b border-white/10 pb-2">
+      <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
         <div className="flex items-center gap-1.5 flex-wrap">
           {message.provider === "google" ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/40">
-              ✨ Gemini Vision AI
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm">
+              âœ¨ Gemini Vision AI
             </span>
           ) : message.provider === "groq" ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-              ⚡ Groq LPU (Fast Failover)
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
+              âš¡ Groq LPU (Fast Failover)
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
-              👨‍🏫 AI Faculty
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shadow-sm">
+              ðŸ‘¨â€ðŸ« AI Faculty
             </span>
           )}
 
           {message.latencyMs && (
-            <span className="text-[9px] font-mono text-slate-400">
-              ⚡ {(message.latencyMs / 1000).toFixed(1)}s
+            <span className="text-[9.5px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded-md">
+              âš¡ {(message.latencyMs / 1000).toFixed(1)}s
             </span>
           )}
-          <span className="text-[9px] font-mono text-slate-500">· {message.time}</span>
+          <span className="text-[9.5px] font-mono text-slate-400">Â· {message.time}</span>
         </div>
 
         {/* Quick Actions: Audio & Copy */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => (isSpeakingThis ? onStopSpeech() : onReplay(message.text))}
-            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1 ${
+            className={`px-2.5 py-1 rounded-lg text-[10.5px] font-bold transition flex items-center gap-1 shadow-sm ${
               isSpeakingThis
-                ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse"
-                : "bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 border border-teal-500/30"
+                ? "bg-rose-500/20 text-rose-300 border border-rose-500/50 animate-pulse"
+                : "bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/40"
             }`}
             title={isSpeakingThis ? "Stop Voice" : "Replay Voice"}
           >
-            <span>{isSpeakingThis ? "⏹️ Stop" : "🔊 Listen"}</span>
+            <span>{isSpeakingThis ? "â¹ï¸ Stop" : "ðŸ”Š Listen"}</span>
           </button>
 
           <button
             type="button"
             onClick={handleCopy}
-            className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 transition"
+            className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 transition shadow-sm"
             title="Copy Solution"
           >
-            {copied ? "✓ Copied" : "📋 Copy"}
+            {copied ? "âœ“ Copied" : "ðŸ“‹ Copy"}
           </button>
         </div>
       </div>
 
       {/* Failover Alert if Gemini had quota / network trouble */}
       {message.failoverReason && (
-        <div className="text-[9px] text-amber-300/90 bg-amber-950/40 border border-amber-500/30 rounded-lg px-2.5 py-1 leading-normal font-mono">
-          ℹ️ {message.failoverReason}
+        <div className="text-[9.5px] text-amber-300/90 bg-amber-950/40 border border-amber-500/30 rounded-xl px-3 py-1.5 leading-normal font-mono">
+          â„¹ï¸ {message.failoverReason}
         </div>
       )}
 
-      {/* Structured Solution Content with Steps & Formulas */}
-      <div className="space-y-2 text-xs leading-relaxed">
+      {/* Structured Solution Content with Steps, Cards & Clean Spacing */}
+      <div className="space-y-2.5 text-xs leading-relaxed">
         {rawLines.map((line, idx) => {
           const cleanLine = cleanFormulaSymbols(line);
           const lower = cleanLine.toLowerCase();
@@ -183,9 +185,9 @@ function FormattedSolutionCard({
 
           if (isStepHeader) {
             return (
-              <div key={idx} className="pt-1.5 pb-0.5">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-teal-500/20 border border-teal-500/40 text-teal-300 text-[10.5px] font-bold uppercase tracking-wide">
-                  <span>✦</span>
+              <div key={idx} className="pt-2 pb-0.5">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-teal-500/20 border border-teal-500/40 text-teal-300 text-[11px] font-bold uppercase tracking-wide shadow-sm">
+                  <span>âœ¦</span>
                   <span>{cleanLine}</span>
                 </div>
               </div>
@@ -195,9 +197,9 @@ function FormattedSolutionCard({
           // Math Formula detection
           const isFormula =
             (cleanLine.includes("=") ||
-              cleanLine.includes("×") ||
-              cleanLine.includes("÷") ||
-              cleanLine.includes("√") ||
+              cleanLine.includes("Ã—") ||
+              cleanLine.includes("Ã·") ||
+              cleanLine.includes("âˆš") ||
               cleanLine.includes("Mo =") ||
               cleanLine.includes("Me =") ||
               cleanLine.includes("M =")) &&
@@ -205,22 +207,22 @@ function FormattedSolutionCard({
             cleanLine.length < 90;
 
           const isMathLine =
-            (cleanLine.includes("=") || cleanLine.includes(" → ")) &&
+            (cleanLine.includes("=") || cleanLine.includes(" â†’ ")) &&
             (cleanLine.includes("/") ||
               cleanLine.includes("+") ||
               cleanLine.includes("-") ||
-              cleanLine.includes("×") ||
-              cleanLine.includes("√") ||
+              cleanLine.includes("Ã—") ||
+              cleanLine.includes("âˆš") ||
               cleanLine.length < 80);
 
           if (isFormula || isMathLine) {
             return (
               <div
                 key={idx}
-                className="my-1.5 p-2.5 rounded-xl bg-black/60 border border-teal-500/40 text-teal-200 font-mono text-[11.5px] flex items-center justify-between shadow-inner"
+                className="my-2 p-3 rounded-xl bg-black/60 border border-teal-500/40 text-teal-200 font-mono text-[12px] flex items-center justify-between shadow-inner"
               >
                 <span className="font-semibold select-all tracking-wide">{cleanLine}</span>
-                <span className="text-[8.5px] text-teal-400/60 font-sans uppercase font-bold tracking-wider">
+                <span className="text-[9px] text-teal-400/70 font-sans uppercase font-bold tracking-wider ml-2 shrink-0">
                   Formula
                 </span>
               </div>
@@ -228,18 +230,18 @@ function FormattedSolutionCard({
           }
 
           // Bullet points
-          if (cleanLine.startsWith("-") || cleanLine.startsWith("•") || cleanLine.startsWith("*")) {
+          if (cleanLine.startsWith("-") || cleanLine.startsWith("â€¢") || cleanLine.startsWith("*")) {
             return (
-              <div key={idx} className="flex items-start gap-2 pl-1 text-slate-200">
-                <span className="text-teal-400 font-bold">•</span>
-                <span className="flex-1">{cleanLine.replace(/^[-•*]\s*/, "")}</span>
+              <div key={idx} className="flex items-start gap-2.5 pl-1.5 text-slate-200">
+                <span className="text-teal-400 font-bold text-sm leading-none mt-0.5">â€¢</span>
+                <span className="flex-1 text-[12.5px] leading-relaxed">{cleanLine.replace(/^[-â€¢*]\s*/, "")}</span>
               </div>
             );
           }
 
           // Standard explanatory paragraph
           return (
-            <p key={idx} className="text-slate-100 leading-relaxed font-normal">
+            <p key={idx} className="text-slate-100 text-[12.5px] leading-relaxed font-normal">
               {cleanLine}
             </p>
           );
@@ -274,7 +276,40 @@ export function LiveVideoCallModal({
   // Call & HUD State
   const [callDuration, setCallDuration] = useState(0);
   const [hudMode, setHudMode] = useState<"compact" | "expanded">("compact");
-  const [messages, setMessages] = useState<LiveMessage[]>([]);
+  // 24-Hour Auto-Purging Local Chat History Cache
+  const LIVE_CACHE_KEY = "prepwise_live_chat_cache_v1";
+  const [messages, setMessages] = useState<LiveMessage[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const stored = localStorage.getItem("prepwise_live_chat_cache_v1");
+      if (!stored) return [];
+      const parsed = JSON.parse(stored);
+      const now = Date.now();
+      // Keep only messages within the last 24 hours (86,400,000 ms)
+      const valid = (parsed.messages || []).filter((m: any) => {
+        return m.timestamp && now - m.timestamp < 24 * 60 * 60 * 1000;
+      });
+      return valid;
+    } catch (_) {
+      return [];
+    }
+  });
+
+  // Save messages with timestamp & auto-prune older than 24h
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const now = Date.now();
+      const valid = messages.filter((m: any) => {
+        const ts = m.timestamp || now;
+        return now - ts < 24 * 60 * 60 * 1000;
+      });
+      localStorage.setItem(
+        LIVE_CACHE_KEY,
+        JSON.stringify({ messages: valid, lastUpdated: now })
+      );
+    } catch (_) {}
+  }, [messages]);
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [activeSpeechMessageId, setActiveSpeechMessageId] = useState<string | null>(null);
 
@@ -433,7 +468,7 @@ export function LiveVideoCallModal({
     setFacingMode(nextMode);
   };
 
-  // ─── CONTINUOUS, MULTI-SENTENCE STREAMING SPEECH ENGINE ───
+  // â”€â”€â”€ CONTINUOUS, MULTI-SENTENCE STREAMING SPEECH ENGINE â”€â”€â”€
   const stopSpeaking = () => {
     if (activeAudioRef.current) {
       activeAudioRef.current.pause();
@@ -579,7 +614,7 @@ export function LiveVideoCallModal({
     if (!cleaned) return;
 
     const rawChunks = cleaned
-      .split(/(?<=[.?!।\n])\s+/)
+      .split(/(?<=[.?!à¥¤\n])\s+/)
       .map((s) => s.trim())
       .filter((s) => s.length > 1);
 
@@ -633,7 +668,7 @@ export function LiveVideoCallModal({
       queryText ||
       "Camera par jo handwritten notes aur ray diagram hai use step-by-step detail mein explain kijiye.";
 
-    const displayBubbleText = queryText ? `🎙️ "${queryText}"` : "📸 [Question Photo Scan]";
+    const displayBubbleText = queryText ? `ðŸŽ™ï¸ "${queryText}"` : "ðŸ“¸ [Question Photo Scan]";
 
     const userMsg: LiveMessage = {
       id: Date.now().toString(),
@@ -824,7 +859,7 @@ export function LiveVideoCallModal({
             }`}
             title="Toggle Flashlight"
           >
-            🔦
+            ðŸ”¦
           </button>
 
           <button
@@ -833,7 +868,7 @@ export function LiveVideoCallModal({
             className="w-10 h-10 rounded-full flex items-center justify-center bg-black/40 border border-white/15 text-white backdrop-blur-md hover:bg-black/60 text-sm shadow-md"
             title="Flip Camera"
           >
-            🔄
+            ðŸ”„
           </button>
 
           <button
@@ -842,7 +877,7 @@ export function LiveVideoCallModal({
             className="w-10 h-10 rounded-full flex items-center justify-center bg-rose-600/90 border border-rose-500 text-white backdrop-blur-md hover:bg-rose-700 text-sm font-bold shadow-md"
             title="End Video Call"
           >
-            ✕
+            âœ•
           </button>
         </div>
       </div>
@@ -852,7 +887,7 @@ export function LiveVideoCallModal({
         <div className="relative z-20 max-w-sm mx-auto px-4 w-full">
           <div className="bg-emerald-950/90 backdrop-blur-md border border-emerald-500/40 rounded-2xl p-3 text-center shadow-xl animate-pulse">
             <span className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider block mb-1">
-              🎙️ Listening to your question...
+              ðŸŽ™ï¸ Listening to your question...
             </span>
             <p className="text-xs text-white font-medium italic">"{transcript}"</p>
           </div>
@@ -875,7 +910,7 @@ export function LiveVideoCallModal({
                 onClick={() => setHudMode("compact")}
                 className="text-slate-300 hover:text-white text-xs px-2.5 py-1 rounded-lg bg-white/10 font-bold"
               >
-                Minimize ▾
+                Minimize â–¾
               </button>
             </div>
 
@@ -898,7 +933,7 @@ export function LiveVideoCallModal({
                         className="p-3 rounded-2xl text-xs leading-relaxed bg-teal-950/70 border border-teal-500/30 text-teal-100 ml-6 text-right"
                       >
                         <div className="text-[9px] font-mono text-teal-400/80 mb-0.5">
-                          You · {m.time}
+                          You Â· {m.time}
                         </div>
                         <div>{m.text}</div>
                       </div>
@@ -962,14 +997,14 @@ export function LiveVideoCallModal({
                 <span className="w-2 h-2 rounded-full bg-teal-400" />
                 <span className="text-[9.5px] font-mono font-bold text-teal-300 uppercase tracking-wide">
                   {latestAiMessage.provider === "google"
-                    ? "✨ Gemini Solution"
+                    ? "âœ¨ Gemini Solution"
                     : latestAiMessage.provider === "groq"
-                    ? "⚡ Groq Solution"
+                    ? "âš¡ Groq Solution"
                     : "Latest Solution"}
                 </span>
                 {isAiSpeaking && (
                   <span className="text-[9px] font-bold text-emerald-400 animate-pulse flex items-center gap-1">
-                    <span>🔊</span>
+                    <span>ðŸ”Š</span>
                     <span>Speaking...</span>
                   </span>
                 )}
@@ -980,7 +1015,7 @@ export function LiveVideoCallModal({
             </div>
             <div className="flex items-center gap-1 text-[11px] text-teal-300 bg-teal-500/20 border border-teal-500/30 px-3 py-1.5 rounded-xl shrink-0 font-bold group-hover:bg-teal-500/30">
               <span>View Full</span>
-              <span>💬</span>
+              <span>ðŸ’¬</span>
             </div>
           </div>
         ) : isAnalyzing ? (
@@ -999,15 +1034,15 @@ export function LiveVideoCallModal({
           <p className="text-[10px] font-semibold text-slate-300">
             {isHoldingMic ? (
               <span className="text-emerald-400 font-bold animate-pulse">
-                🔴 Listening... Sawal boliye (Release karte hi solve hoga)
+                ðŸ”´ Listening... Sawal boliye (Release karte hi solve hoga)
               </span>
             ) : isAnalyzing ? (
               <span className="text-teal-300 font-bold">
-                ⚡ Reading notes & formulating solution...
+                âš¡ Reading notes & formulating solution...
               </span>
             ) : isAiSpeaking ? (
               <span className="text-emerald-300 font-bold flex items-center justify-center gap-1">
-                <span>🔊 AI Faculty is speaking...</span>
+                <span>ðŸ”Š AI Faculty is speaking...</span>
                 <button
                   type="button"
                   onClick={stopSpeaking}
@@ -1017,7 +1052,7 @@ export function LiveVideoCallModal({
                 </button>
               </span>
             ) : (
-              <span>🎙️ Hold mic to speak · Chhodte hi AI solve karega</span>
+              <span>ðŸŽ™ï¸ Hold mic to speak Â· Chhodte hi AI solve karega</span>
             )}
           </p>
         </div>
@@ -1038,7 +1073,7 @@ export function LiveVideoCallModal({
             }`}
             title={isMuted ? "Unmute AI Voice" : "Mute AI Voice"}
           >
-            {isMuted ? "🔇" : "🔊"}
+            {isMuted ? "ðŸ”‡" : "ðŸ”Š"}
           </button>
 
           {/* MAIN PUSH-TO-TALK MIC BUTTON (HOLD TO TALK) */}
@@ -1058,7 +1093,7 @@ export function LiveVideoCallModal({
             }`}
             title="Press and Hold to Speak"
           >
-            {isHoldingMic ? "🔴" : isAnalyzing ? "⏳" : "🎙️"}
+            {isHoldingMic ? "ðŸ”´" : isAnalyzing ? "â³" : "ðŸŽ™ï¸"}
           </button>
 
           {/* Toggle HUD Solution Drawer */}
@@ -1072,7 +1107,7 @@ export function LiveVideoCallModal({
             }`}
             title="Toggle Solution Notes Drawer"
           >
-            💬
+            ðŸ’¬
           </button>
         </div>
       </div>
