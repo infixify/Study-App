@@ -1221,28 +1221,11 @@ export default function DashboardPage() {
 
       setLoading(false);
 
-      try {
-        const cachedReport = uProf?.ai_mentor_report;
-        const cachedContext = uProf?.ai_student_context;
-        if (cachedReport && !isCancelled) {
-          setMentorReport(cachedReport);
-          if (cachedContext) setStudentContext(cachedContext);
-        } else {
-          setMentorLoading(true);
-          const res = await fetch("/api/ai-mentor", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId: uid }),
-          });
-          if (res.ok && !isCancelled) {
-            const data = await res.json();
-            setMentorReport(data.report);
-            if (data.studentContext) setStudentContext(data.studentContext);
-          }
-        }
-      } catch (_) {
-      } finally {
-        if (!isCancelled) setMentorLoading(false);
+      // AI Mentor: strictly read-only from DB — never auto-generate.
+      // Report only updates when user manually clicks "Update & Refresh".
+      if (!isCancelled) {
+        setMentorReport(uProf?.ai_mentor_report ?? null);
+        setStudentContext(uProf?.ai_student_context ?? null);
       }
     }
 
@@ -1721,7 +1704,7 @@ export default function DashboardPage() {
         />
 
         {/* 10. QUICK ROUTE CARDS */}
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => router.push("/library")}
@@ -1753,17 +1736,6 @@ export default function DashboardPage() {
             <div>
               <div className="text-xs font-black text-slate-900">Analytics</div>
               <div className="text-[9px] font-semibold text-slate-500">Charts & Heatmap</div>
-            </div>
-          </button>
-          <button
-            type="button"
-            onClick={() => router.push("/error-book")}
-            className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
-          >
-            <div className="text-xl mb-1">📕</div>
-            <div>
-              <div className="text-xs font-black text-slate-900">Error Book</div>
-              <div className="text-[9px] font-semibold text-slate-500">Mistakes & Notes</div>
             </div>
           </button>
         </div>
