@@ -1507,7 +1507,7 @@ export default function DashboardPage() {
               } catch (_) {}
               finally { setMentorLoading(false); }
             }}
-            onOpenDoubtSolver={() => setDoubtOpen(true)}
+            onOpenAiTalk={() => setLiveCallOpen(true)}
           />
 
           {/* AI Doubt Solver & Live Video Call Dual Launchpad */}
