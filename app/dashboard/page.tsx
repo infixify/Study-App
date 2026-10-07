@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import BottomNav from "@/components/dashboard/BottomNav";
 import AiMentorCard from "@/components/dashboard/AiMentorCard";
 import AiChatSheet from "@/components/dashboard/AiChatSheet";
+import LiveVideoCallModal from "@/components/dashboard/LiveVideoCallModal";
 import { optimizeMediaUrl } from "@/lib/cloudinary";
 
 declare global {
@@ -315,7 +316,7 @@ function renderMediaSource(url: string): string {
   if (cleanUrl.startsWith("/Qanime/")) {
     cleanUrl = cleanUrl.replace("/Qanime/", "/Qamine/");
   }
-  if (cleanUrl.startsWith("/")) return cleanUrl; // Relative local public folder
+  if (cleanUrl.startsWith("/")) return cleanUrl;
   return optimizeMediaUrl(cleanUrl, 180);
 }
 
@@ -920,7 +921,10 @@ export default function DashboardPage() {
   const [mentorReport, setMentorReport] = useState<any>(null);
   const [mentorLoading, setMentorLoading] = useState(false);
   const [studentContext, setStudentContext] = useState<any>(null);
+  
+  // Modals
   const [doubtOpen, setDoubtOpen] = useState(false);
+  const [liveCallOpen, setLiveCallOpen] = useState(false);
 
   const [todayStudyMins, setTodayStudyMins] = useState(0);
   const [dailyGoalMins, setDailyGoalMins] = useState(480);
@@ -1537,12 +1541,10 @@ export default function DashboardPage() {
               </div>
             </button>
 
-            {/* Box 2: Live Video AI Doubt Solver (Video Call) */}
+            {/* Box 2: Live Video AI Doubt Solver (Video Call Modal Trigger) */}
             <button
               type="button"
-              onClick={() => {
-                setDoubtOpen(true);
-              }}
+              onClick={() => setLiveCallOpen(true)}
               className="relative p-3.5 bg-gradient-to-br from-[#0F172A] via-[#1E1B4B] to-[#312E81] hover:to-[#3730A3] text-white rounded-2xl border border-indigo-500/40 shadow-md active:scale-[0.98] transition-all text-left flex flex-col justify-between group overflow-hidden"
             >
               <div className="absolute -right-6 -bottom-6 w-20 h-20 bg-indigo-500/20 rounded-full blur-xl pointer-events-none" />
@@ -1972,10 +1974,17 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 11. AI DOUBT SOLVER SHEET */}
+      {/* 11. AI CHAT SHEET (TEXT & PHOTO DOUBTS) */}
       <AiChatSheet open={doubtOpen} onClose={() => setDoubtOpen(false)} studentContext={studentContext} />
 
-      {/* 12. BOTTOM NAVIGATION */}
+      {/* 12. LIVE VIDEO CALL AI MODAL (VIDEO CALL 1-ON-1) */}
+      <LiveVideoCallModal
+        open={liveCallOpen}
+        onClose={() => setLiveCallOpen(false)}
+        studentContext={studentContext}
+      />
+
+      {/* 13. BOTTOM NAVIGATION */}
       <BottomNav />
     </div>
   );
