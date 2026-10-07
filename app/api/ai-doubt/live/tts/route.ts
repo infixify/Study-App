@@ -1,21 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Cloudflare Pages / Next-on-Pages requires all dynamic routes to export edge runtime
 export const runtime = "edge";
 
-const CHROMIUM_VERSION = "130.0.2849.68";
-const CHROMIUM_FULL_VERSION = "130.0.2849.68";
-const TRUSTED_CLIENT_TOKEN = "6A5AA1D4EA6542D8A6D5260F3F9374F8";
-const WIN_EPOCH = 116444736000000000n;
-const S_TO_NS = 10000000n;
+const TRUSTED_CLIENT_TOKEN =
+  process.env.MICROSOFT_EDGE_TOKEN || "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+const WIN_EPOCH = 11644473600;
+const S_TO_NS = 1e9;
+const CHROMIUM_VERSION = process.env.EDGE_CHROMIUM_VERSION || "143.0.3650.75";
 
+/**
+ * Computes Microsoft Sec-MS-GEC DRM Token using Web Crypto (100% Edge Runtime Compatible)
+ * Uses standard number arithmetic avoiding '...n' BigInt literals for zero build failure.
+ */
 async function generateSecMsGec(clientToken: string): Promise<string> {
-  const ticks = BigInt(Date.now()) * 10000n + WIN_EPOCH;
-  const roundedTicks = ticks - (ticks % (300n * S_TO_NS));
-  const strToHash = `${roundedTicks}${clientToken}`;
+  let ticks = Date.now() / 1000 + WIN_EPOCH;
+  ticks -= ticks % 300; // Round down to nearest 5 minutes
+  ticks *= S_TO_NS / 100; // Convert to 100ns intervals
+  const strToHash = ticks.toFixed(0) + clientToken;
 
-  const encoder = new TextEncoder();
-  const data = encoder.encode(strToHash);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const enc = new TextEncoder();
+  const hashBuffer = await crypto.subtle.digest(
+    "SHA-256",
+    enc.encode(strToHash)
+  );
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -23,6 +31,12 @@ async function generateSecMsGec(clientToken: string): Promise<string> {
     .toUpperCase();
 }
 
+/**
+ * Normalizes text for continuous, natural faculty speech:
+ * - Eliminates artificial long pauses caused by duplicate punctuation or ellipses
+ * - Strips mid-sentence awkward commas so voice flows seamlessly
+ * - Expands Hinglish / Physics & Maths abbreviations into natural spoken sounds
+ */
 function normalizeForFastSmoothSpeech(raw: string): string {
   if (!raw) return "";
   let text = raw;
@@ -74,6 +88,9 @@ function normalizeForFastSmoothSpeech(raw: string): string {
   return text.slice(0, 240);
 }
 
+/**
+ * Microsoft Edge Read-Aloud WebSockets Streaming Synthesizer (Edge Runtime Compatible)
+ */
 async function synthesizeEdgeTTS(
   cleanText: string,
   timeoutMs = 2800
