@@ -70,7 +70,7 @@ export default function FocusPage() {
   const [manualToTime, setManualToTime] = useState<string>("16:30");
   const [manualDate, setManualDate] = useState<string>(() => {
     const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    return now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   });
   const [manualError, setManualError] = useState<string | null>(null);
 
@@ -90,7 +90,7 @@ export default function FocusPage() {
 
   const isVerifiedSession = faceVerificationEnabled && appBlockerEnabled && overlayGranted && usageGranted;
 
-  const handleDirectStopAndSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const handleDirectStopAndSaveRef = useRef<(options?: { alreadyLogged?: boolean; elapsedSeconds?: number }) => Promise<void>>(() => Promise.resolve());
 
   // ─── LIVE CALCULATED TIME IN MINUTES ───
   const computedManualMinutes = useMemo(() => {
@@ -98,15 +98,25 @@ export default function FocusPage() {
     const [fH, fM] = manualFromTime.split(":").map(Number);
     const [tH, tM] = manualToTime.split(":").map(Number);
     let diff = (tH * 60 + tM) - (fH * 60 + fM);
-    if (diff < 0) diff += 24 * 60; // Handle overnight study (e.g. 23:00 to 01:30)
+    if (diff < 0) diff += 24 * 60; // Crosses midnight
     return diff;
   }, [manualFromTime, manualToTime]);
 
-  function applyNativeApps(raw: { name: string; packageName: string }[]) {
-    if (!Array.isArray(raw) || raw.length === 0) return;
-    const items = raw.map(nativeToAppItem);
-    items.sort((a, b) => a.name.localeCompare(b.name));
-    setAllApps(items);
+  const formattedComputedDuration = useMemo(() => {
+    const hrs = Math.floor(computedManualMinutes / 60);
+    const mins = computedManualMinutes % 60;
+    if (hrs === 0) return `${mins} mins`;
+    return `${hrs}h ${mins > 0 ? mins + "m" : ""} (${computedManualMinutes} mins)`;
+  }, [computedManualMinutes]);
+
+  function applyNativeApps(nativeList: any[]) {
+    if (!Array.isArray(nativeList) || nativeList.length === 0) {
+      setAllApps(WEB_FALLBACK_APPS);
+      setAppsLoaded(true);
+      return;
+    }
+    const mapped = nativeList.map(nativeToAppItem);
+    setAllApps(mapped);
     setAppsLoaded(true);
   }
 
@@ -146,51 +156,130 @@ export default function FocusPage() {
     });
   }
 
-  const handleDirectStopAndSave = async () => {
-    if (typeof window !== "undefined") {
-      const bridge = (window as any).AppBridge;
-      if (bridge) {
-        try {
-          bridge.postMessage(JSON.stringify({ action: "stopStrictTimer" }));
-          bridge.postMessage(JSON.stringify({ action: "stopFocusNotification" }));
-          bridge.postMessage(JSON.stringify({ action: "vibrate", type: "heavy" }));
-        } catch (err) {}
-      }
-    }
-
+  const handleDirectStopAndSave = async (options?: { alreadyLogged?: boolean; elapsedSeconds?: number }) => {
     setIsActive(false);
     setNativeCamPaused(false);
 
-    if (!userId || !startTime) {
+    const effectiveUid = userId || (typeof window !== "undefined" ? (window as any).__nativeAuth?.userId : null);
+
+    if (options?.alreadyLogged) {
       setSeconds(0);
       lastSyncedSecondsRef.current = 0;
+      if (effectiveUid) {
+        try {
+          const streakInfo = await loadAndReconcileStreak(effectiveUid);
+          setCurrentStreak(streakInfo.currentStreak);
+        } catch (_) {}
+      }
+      return;
+    }
+
+    const endedAt = new Date();
+    const durationSecs = Math.max(
+      seconds,
+      options?.elapsedSeconds || 0,
+      startTime ? Math.round((endedAt.getTime() - startTime.getTime()) / 1000) : 0
+    );
+
+    if (!effectiveUid || durationSecs <= 0) {
+      setSeconds(0);
+      lastSyncedSecondsRef.current = 0;
+      if (typeof window !== "undefined") {
+        const bridge = (window as any).AppBridge;
+        if (bridge) {
+          try {
+            bridge.postMessage(JSON.stringify({ action: "stopStrictTimer" }));
+            bridge.postMessage(JSON.stringify({ action: "stopFocusNotification", alreadyLogged: true }));
+          } catch (_) {}
+        }
+      }
       return;
     }
 
     setSaving(true);
     try {
-      const endedAt = new Date();
-      const durationSecs = Math.max(0, Math.round((endedAt.getTime() - startTime.getTime()) / 1000));
       const countsForStreak = durationSecs >= MIN_STREAK_SECONDS;
       const validSub = selectedSub || "Physics";
       const validMode = selectedTask || "questions";
+      const taskModeString = validMode === "questions" ? "Practice" : validMode === "theory" ? "Theory" : "Revision";
 
+      // 1. Calculate unsynced minutes and update daily_logs
+      const remainingSecs = Math.max(0, durationSecs - lastSyncedSecondsRef.current);
+      const remainingMins = Math.max(1, Math.round(remainingSecs / 60));
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
+      const { data: dailyRow } = await supabase
+        .from("daily_logs")
+        .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, verified_minutes")
+        .eq("user_id", effectiveUid)
+        .eq("log_date", today)
+        .maybeSingle();
+
+      const newMins = (dailyRow?.study_time_minutes || 0) + remainingMins;
+      const newTheory = (dailyRow?.theory_minutes || 0) + (validMode === "theory" ? remainingMins : 0);
+      const newPractice = (dailyRow?.practice_minutes || 0) + (validMode === "questions" ? remainingMins : 0);
+      const newRevision = (dailyRow?.revision_minutes || 0) + (validMode === "revision" ? remainingMins : 0);
+      const newVerified = (dailyRow?.verified_minutes || 0) + (isVerifiedSession ? remainingMins : 0);
+
+      await supabase.from("daily_logs").upsert(
+        {
+          user_id: effectiveUid,
+          log_date: today,
+          study_time_minutes: newMins,
+          theory_minutes: newTheory,
+          practice_minutes: newPractice,
+          revision_minutes: newRevision,
+          verified_minutes: newVerified,
+        },
+        { onConflict: "user_id,log_date" }
+      );
+      lastSyncedSecondsRef.current = durationSecs;
+
+      // 2. Direct session insert into focus_sessions
+      const effectiveStart = startTime || new Date(endedAt.getTime() - durationSecs * 1000);
       try {
         await supabase.from("focus_sessions").insert({
-          user_id: userId,
-          started_at: startTime.toISOString(),
+          user_id: effectiveUid,
+          started_at: effectiveStart.toISOString(),
           ended_at: endedAt.toISOString(),
           duration_seconds: durationSecs,
           counts_for_streak: countsForStreak,
           subject: validSub,
           task_type: validMode,
+          mode: taskModeString,
           verified: isVerifiedSession,
         });
       } catch (err) {
         console.error("Direct session insert err:", err);
       }
 
-      const streakInfo = await loadAndReconcileStreak(userId);
+      // 3. Auto-log questions if practice mode
+      if (validMode === "questions" && remainingMins >= 2) {
+        try {
+          const estQs = Math.max(1, Math.round(remainingMins * 0.75));
+          await supabase.from("question_logs").insert({
+            user_id: effectiveUid,
+            question_count: estQs,
+            log_date: today,
+            source: "timer",
+          });
+        } catch (_) {}
+      }
+
+      // 4. Notify native bridge that session has already been logged by Web
+      if (typeof window !== "undefined") {
+        const bridge = (window as any).AppBridge;
+        if (bridge) {
+          try {
+            bridge.postMessage(JSON.stringify({ action: "stopStrictTimer" }));
+            bridge.postMessage(JSON.stringify({ action: "stopFocusNotification", alreadyLogged: true }));
+            bridge.postMessage(JSON.stringify({ action: "vibrate", type: "heavy" }));
+          } catch (err) {}
+        }
+      }
+
+      // 5. Reconcile streak
+      const streakInfo = await loadAndReconcileStreak(effectiveUid);
       setCurrentStreak(streakInfo.currentStreak);
       setPostStreakResult({ counted: countsForStreak, newStreak: streakInfo.currentStreak });
     } catch (_) {}
@@ -212,9 +301,9 @@ export default function FocusPage() {
         } catch (_) {}
       }
 
-      w.onNativeDirectStopFocus = () => { handleDirectStopAndSaveRef.current(); };
+      w.onNativeDirectStopFocus = (payload?: any) => { handleDirectStopAndSaveRef.current(payload); };
       w.onNativeRequestStopFocus = () => { handleDirectStopAndSaveRef.current(); };
-      w.onDirectLoggedSession = () => { handleDirectStopAndSaveRef.current(); };
+      w.onDirectLoggedSession = (payload?: any) => { handleDirectStopAndSaveRef.current(payload || { alreadyLogged: true }); };
       w.onNativeFocusTimerSync = (secs: number) => { setSeconds(secs); };
       w.onNativeRestoreActiveSession = (sess: any) => {
         if (sess && sess.elapsedSeconds > 0) {
@@ -249,19 +338,20 @@ export default function FocusPage() {
     async function loadUser() {
       const { data: authData } = await supabase.auth.getUser();
       const user = authData?.user;
-      if (!user) return;
-      setUserId(user.id);
+      const uid = user?.id || (typeof window !== "undefined" ? (window as any).__nativeAuth?.userId : null);
+      if (!uid) return;
+      setUserId(uid);
 
       const { data: profile } = await supabase
         .from("users")
         .select("target_exam")
-        .eq("uid", user.id)
+        .eq("uid", uid)
         .maybeSingle();
 
       if (profile?.target_exam) setTargetExam(profile.target_exam);
 
       try {
-        const streakInfo = await loadAndReconcileStreak(user.id);
+        const streakInfo = await loadAndReconcileStreak(uid);
         setCurrentStreak(streakInfo.currentStreak);
         if (streakInfo.streakWasReset) setStreakWasReset(true);
       } catch (e) {}
@@ -372,7 +462,7 @@ export default function FocusPage() {
     const diffMinutes = Math.round(diffSeconds / 60);
     if (diffMinutes <= 0) return;
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
     const { data: dailyRow } = await supabase
       .from("daily_logs")
       .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, verified_minutes")
@@ -508,13 +598,14 @@ export default function FocusPage() {
         counts_for_streak: chosenMinutes * 60 >= MIN_STREAK_SECONDS,
         subject: chosenSub,
         task_type: chosenTask,
+        mode: chosenTask === "questions" ? "Practice" : chosenTask === "theory" ? "Theory" : "Revision",
         verified: false,
       };
 
       await supabase.from("focus_sessions").insert(sessionPayload);
 
       // 5. Reconcile streak if today
-      const todayStr = new Date().toISOString().split("T")[0];
+      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
       if (manualDate === todayStr && newMins * 60 >= MIN_STREAK_SECONDS) {
         const streakInfo = await loadAndReconcileStreak(userId);
         setCurrentStreak(streakInfo.currentStreak);
@@ -539,416 +630,492 @@ export default function FocusPage() {
     return (
       <button
         type="button"
-        onClick={onToggle}
         disabled={disabled}
-        className={`shrink-0 w-11 h-6 rounded-full flex items-center px-0.5 transition-all duration-200 ${on ? "bg-teal justify-end" : "bg-ink/15 justify-start"} ${disabled ? "opacity-40" : ""}`}
+        onClick={onToggle}
+        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+          disabled ? "opacity-40 cursor-not-allowed" : ""
+        } ${on ? "bg-teal-500" : "bg-slate-700"}`}
       >
-        <span className="w-5 h-5 rounded-full bg-white shadow-xs" />
+        <span
+          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+            on ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
       </button>
     );
   }
 
   return (
-    <div className="min-h-screen bg-paper pb-28">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-24 select-none">
       <AppHeader />
 
-      <main className="max-w-md mx-auto px-5 pt-4 flex flex-col gap-5">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-display text-2xl text-ink">Focus Mode</h1>
-              {isNativeApp && (
-                <span className="text-[10px] font-black bg-teal/15 text-teal px-2 py-0.5 rounded-full border border-teal/30">
-                  🛡️ Native Protected
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-slate mt-0.5">
-              Target: <span className="font-bold text-teal">{targetExam}</span> • Zero Distractions
-            </p>
-          </div>
-          <button
-            onClick={() => setShowManualModal(true)}
-            className="text-xs font-bold text-teal bg-teal/10 px-3 py-1.5 rounded-full hover:bg-teal/20 transition-all border border-teal/20"
+      <main className="flex-1 max-w-md mx-auto w-full px-4 pt-4 space-y-4">
+        {/* Verification Status Banner */}
+        {isActive && (
+          <div
+            className={`p-3 rounded-2xl border text-xs flex items-center justify-between transition-all ${
+              isVerifiedSession
+                ? "bg-teal-950/40 border-teal-500/40 text-teal-300"
+                : "bg-slate-900 border-slate-800 text-slate-400"
+            }`}
           >
-            + Log Offline
-          </button>
-        </div>
-
-        {postStreakResult && (
-          <div className="rounded-ticket border border-teal/20 bg-teal/10 px-4 py-3 flex items-center gap-3">
-            <span className="text-xl">{postStreakResult.counted ? "🔥" : "⏱️"}</span>
-            <div>
-              <p className="text-xs font-bold text-ink">
-                {postStreakResult.counted
-                  ? `Streak updated: ${postStreakResult.newStreak} day${postStreakResult.newStreak !== 1 ? "s" : ""}!`
-                  : "Session saved & logged ✓ (min 2 min for streak count)"}
-              </p>
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${isVerifiedSession ? "bg-teal-400 animate-pulse" : "bg-slate-500"}`} />
+              <span className="font-medium">
+                {isVerifiedSession ? "Strict Leaderboard Verified" : "Personal Study Mode"}
+              </span>
             </div>
+            <span className="text-[10px] text-slate-400 font-mono">
+              {faceVerificationEnabled && appBlockerEnabled ? "Cam & Block Active" : "Unmonitored"}
+            </span>
           </div>
         )}
 
+        {/* Camera Warning Banner (Live detection pause) */}
         {isActive && faceVerificationEnabled && nativeCamPaused && (
-          <div className="rounded-ticket border border-coral/30 bg-coral/10 px-4 py-3 flex items-center gap-3">
-            <span className="text-xl">⏸️</span>
-            <div>
-              <p className="text-xs font-bold text-ink">Paused — face not detected</p>
-              <p className="text-[10px] text-slate">Come back into camera view to resume your timer.</p>
+          <div className="p-3 bg-red-950/60 border border-red-500/50 rounded-2xl flex items-center justify-between text-xs text-red-200 animate-pulse">
+            <div className="flex items-center gap-2">
+              <span>⚠️</span>
+              <span>Face missing — Timer paused</span>
             </div>
+            <span className="text-[10px] bg-red-900/60 px-2 py-0.5 rounded-full font-mono">PAUSED</span>
           </div>
         )}
 
-        {/* Main Timer Card */}
-        <div className="bg-white rounded-ticket border border-ink/10 p-6 flex flex-col items-center justify-center text-center shadow-xs">
-          <div className="text-[11px] font-bold text-slate uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        {/* Main Stopwatch Cockpit */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 text-center space-y-4 shadow-xl backdrop-blur relative overflow-hidden">
+          <div className="flex items-center justify-center gap-2 text-xs font-medium text-slate-400">
             {isActive && faceVerificationEnabled && (
-              <span className={`inline-block w-2 h-2 rounded-full ${nativeCamPaused ? "bg-coral animate-pulse" : "bg-teal"}`} />
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             )}
-            {isActive ? `🔥 Studying ${selectedSub} (${selectedTask})` : "Ready to focus?"}
+            <span>
+              {isActive ? `🔥 Studying ${selectedSub} (${selectedTask})` : "Ready to focus?"}
+            </span>
           </div>
-          <div className="font-mono text-5xl font-black text-ink my-3 tracking-tight">
+
+          <div className="font-mono text-5xl md:text-6xl font-black tracking-tight text-white py-2">
             {formatTimer(seconds)}
           </div>
+
           {!isActive ? (
-            <button
-              onClick={() => setShowPreModal(true)}
-              className="mt-4 px-8 py-3.5 bg-teal text-white font-bold text-sm rounded-2xl shadow-md shadow-teal/20 hover:bg-teal/90 transition-all"
-            >
-              ▶ Start Study Timer
-            </button>
+            <div className="space-y-2">
+              <button
+                onClick={() => setShowPreModal(true)}
+                className="w-full py-4 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold rounded-2xl shadow-lg shadow-teal-500/20 active:scale-[0.98] transition-all text-base flex items-center justify-center gap-2"
+              >
+                <span>▶ Start Focus Mode</span>
+              </button>
+            </div>
           ) : (
             <button
+              onClick={() => handleDirectStopAndSave()}
               disabled={saving}
-              onClick={handleDirectStopAndSave}
-              className="mt-4 px-8 py-3.5 bg-rose-600 text-white font-bold text-sm rounded-2xl shadow-md shadow-rose-600/20 hover:bg-rose-700 transition-all"
+              className="w-full py-4 bg-red-500 hover:bg-red-400 text-white font-bold rounded-2xl shadow-lg shadow-red-500/20 active:scale-[0.98] transition-all text-base disabled:opacity-50"
             >
               {saving ? "Saving..." : "■ Stop & Log Session"}
             </button>
           )}
+
+          {postStreakResult && (
+            <div className="p-3 bg-emerald-950/60 border border-emerald-500/30 rounded-xl text-xs text-emerald-300">
+              {postStreakResult.counted ? (
+                <span>🎉 Qualified! Current Streak: <strong>{postStreakResult.newStreak} days</strong></span>
+              ) : (
+                <span>Session logged. Study for 2+ mins to count for daily streak!</span>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Feature Toggles */}
-        <div className="bg-white rounded-ticket border border-ink/10 shadow-xs overflow-hidden">
-          <div className="bg-marigold/10 border-b border-marigold/20 px-4 py-2.5 flex items-start gap-2">
-            <span className="text-sm mt-0.5">🏆</span>
-            <p className="text-[10px] text-ink/70 leading-relaxed">
-              <span className="font-bold text-ink">Leaderboard entries</span> are counted when{" "}
-              <span className="font-bold text-marigold">both toggles are ON</span>. Study data is always saved regardless.
-            </p>
+        {/* ─── DUAL-TOGGLE STRICT MODE CONTROL PANEL ─── */}
+        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Strict Verification Toggles
+            </span>
+            <span className="text-[10px] text-teal-400 font-medium">Required for Leaderboard</span>
           </div>
 
-          {/* Face Verification Toggle */}
-          <div className="px-4 py-4 border-b border-ink/6">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${faceVerificationEnabled ? "bg-teal/15" : "bg-ink/5"}`}>
-                  <span className="text-lg">🎥</span>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-ink">Face Verification</p>
-                  <p className="text-[10px] text-slate mt-0.5 leading-relaxed">
-                    {faceVerificationEnabled
-                      ? overlayGranted
-                        ? "✓ Active — native cam tracking, works in background"
-                        : "⏳ Please allow 'Display over other apps'..."
-                      : "Native camera confirms you're present. Works even when screen is off."}
-                  </p>
-                </div>
+          {/* Toggle 1: Face Verification */}
+          <div className="flex items-center justify-between p-3 bg-slate-950/50 rounded-xl border border-slate-800/80">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">📷</span>
+                <span className="text-xs font-semibold text-slate-200">Face Verification</span>
+                {faceVerificationEnabled && (
+                  <span className="text-[10px] bg-teal-500/20 text-teal-300 px-1.5 py-0.2 rounded font-mono">ON</span>
+                )}
               </div>
-              <ToggleSwitch
-                on={faceVerificationEnabled && overlayGranted}
-                onToggle={handleFaceToggle}
-                disabled={isActive}
-              />
+              <p className="text-[11px] text-slate-400">
+                Continuous presence check · Pauses timer if face lost
+              </p>
             </div>
+            <ToggleSwitch
+              on={faceVerificationEnabled}
+              onToggle={handleFaceToggle}
+              disabled={isActive}
+            />
           </div>
 
-          {/* App Blocker Toggle */}
-          <div className="px-4 py-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${appBlockerEnabled ? "bg-rose-50" : "bg-ink/5"}`}>
-                  <span className="text-lg">🛡️</span>
+          {/* Toggle 2: App Blocker / Strict Lock */}
+          <div className="p-3 bg-slate-950/50 rounded-xl border border-slate-800/80 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">🛡️</span>
+                  <span className="text-xs font-semibold text-slate-200">Block Distracting Apps</span>
+                  {appBlockerEnabled && (
+                    <span className="text-[10px] bg-teal-500/20 text-teal-300 px-1.5 py-0.2 rounded font-mono">ON</span>
+                  )}
                 </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-ink">App Blocker</p>
-                  <p className="text-[10px] text-slate mt-0.5 leading-relaxed">
-                    {appBlockerEnabled
-                      ? usageGranted
-                        ? `✓ Active — ${allowedApps.length === 0 ? "all apps blocked" : `${allowedApps.length} app(s) allowed`}`
-                        : "⏳ Waiting for Usage Access..."
-                      : "Blocks distracting apps during study. Needs Usage Access."}
-                  </p>
-                </div>
+                <p className="text-[11px] text-slate-400">
+                  Blocks all apps except your allowed list
+                </p>
               </div>
               <ToggleSwitch
-                on={appBlockerEnabled && usageGranted}
+                on={appBlockerEnabled}
                 onToggle={handleAppBlockerToggle}
                 disabled={isActive}
               />
             </div>
 
-            {appBlockerEnabled && usageGranted && (
-              <div className="mt-3 ml-12">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[10px] text-slate font-medium">
-                    {allowedApps.length === 0 ? "🔒 All apps blocked" : `${allowedApps.length} app(s) allowed`}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => { setShowAppsModal(true); setAppsSearch(""); }}
-                    className="text-[11px] font-bold text-teal bg-teal/10 hover:bg-teal/20 px-2.5 py-1 rounded-lg border border-teal/20 transition-all flex items-center gap-1 shadow-2xs"
-                  >
-                    <span>⚙️</span>
-                    <span>Manage Allowed Apps</span>
-                  </button>
-                </div>
-                {allowedApps.length > 0 && (
-                  <div className="flex flex-wrap gap-1 pt-0.5">
-                    {allowedApps.map((id) => {
-                      const app = allApps.find((a) => a.id === id) || { name: id, icon: "📱" };
-                      return (
-                        <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[10px] font-bold">
-                          <span>{app.icon} {app.name}</span>
-                          <button type="button" onClick={() => toggleAppAllowed(id)} className="hover:text-rose-500 ml-0.5 font-bold">✕</button>
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
+            {/* Allowed Apps Selector Container */}
+            <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-400 font-medium">Whitelist:</span>
+                <span className="text-[11px] font-mono px-2 py-0.5 bg-slate-800 rounded-md text-teal-300 font-semibold">
+                  {allowedApps.length} Allowed
+                </span>
               </div>
-            )}
+              <button
+                type="button"
+                onClick={() => setShowAppsModal(true)}
+                className="text-xs font-bold bg-teal-500/10 hover:bg-teal-500/20 text-teal-300 border border-teal-500/30 px-3 py-1.5 rounded-lg active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                <span>Select Allowed Apps</span>
+                <span className="text-[10px]">⚙️</span>
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* Offline Manual Entry Trigger Button */}
+        <button
+          onClick={() => setShowManualModal(true)}
+          className="w-full py-3 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-2xl text-xs font-medium flex items-center justify-center gap-2 transition-all active:scale-98"
+        >
+          <span>✍️ Studied offline? Log From / To Time</span>
+        </button>
       </main>
 
-      {/* Allowed Apps Modal */}
-      {showAppsModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 max-h-[85vh] flex flex-col gap-3">
-            <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <div>
-                <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
-                  <span>🛡️</span> Select Allowed Apps
-                </h3>
-                <p className="text-[10px] text-slate mt-0.5">
-                  Keep select apps unlocked. All other apps stay blocked.
-                  {isNativeApp && <span className="ml-1 text-teal font-bold">• {allApps.length} installed</span>}
-                </p>
-              </div>
-              <button onClick={() => setShowAppsModal(false)} className="w-7 h-7 rounded-full bg-ink/5 text-xs text-ink/70 flex items-center justify-center font-bold">✕</button>
-            </div>
-            <div className="relative">
-              <input
-                type="text"
-                value={appsSearch}
-                onChange={(e) => setAppsSearch(e.target.value)}
-                placeholder="Search installed apps..."
-                className="w-full px-3 py-2 text-xs rounded-xl border border-ink/15 focus:border-teal outline-none pl-7"
-              />
-              <span className="absolute left-2.5 top-2.5 text-slate/50 text-xs">🔍</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[11px] text-slate font-medium">Tap app to Whitelist/Block:</p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => { const allIds = filteredApps.map((a) => a.id); setAllowedApps(allIds); localStorage.setItem("prepwise_allowed_apps", JSON.stringify(allIds)); }}
-                  className="text-[10px] font-bold text-teal bg-teal/10 px-2 py-1 rounded-lg border border-teal/20"
-                >
-                  Select All
-                </button>
-                {allowedApps.length > 0 && (
-                  <button type="button" onClick={handleBlockAll} className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-lg border border-rose-200">
-                    Block All
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="overflow-y-auto flex-1 pr-1">
-              {!appsLoaded ? (
-                <p className="text-[11px] text-slate text-center py-6">Loading installed apps…</p>
-              ) : filteredApps.length === 0 ? (
-                <p className="text-[11px] text-slate text-center py-6">No apps found</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  {filteredApps.map((app) => {
-                    const isAllowed = allowedApps.includes(app.id);
-                    return (
-                      <button
-                        key={app.id}
-                        type="button"
-                        onClick={() => toggleAppAllowed(app.id)}
-                        className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all ${isAllowed ? "bg-teal/10 border-teal/40 text-teal shadow-2xs" : "bg-paper/40 border-ink/10 text-slate hover:bg-paper"}`}
-                      >
-                        <span className="text-base">{app.icon}</span>
-                        <span className="truncate flex-1 text-left">{app.name}</span>
-                        <span className={`text-[11px] font-black ${isAllowed ? "text-teal" : "text-rose-500"}`}>{isAllowed ? "✓" : "⛔"}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <button type="button" onClick={() => setShowAppsModal(false)} className="w-full py-3 rounded-xl bg-ink text-white font-bold text-xs shadow-md">
-              Save Allowed Apps ({allowedApps.length} Allowed)
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Pre-Session Modal */}
+      {/* ─── PRE-SESSION LAUNCH MODAL ─── */}
       {showPreModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <h3 className="text-sm font-bold text-ink">Choose Subject</h3>
-              <button onClick={() => setShowPreModal(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60">✕</button>
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-slate block mb-1">Subject</label>
-              <div className="grid grid-cols-3 gap-1.5">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
+            <h3 className="text-base font-bold text-white text-center">Customize Focus Session</h3>
+
+            {/* Subject Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-400">Subject</label>
+              <div className="grid grid-cols-3 gap-2">
                 {availableSubjects.map((sub) => (
-                  <button key={sub} type="button" onClick={() => setSelectedSub(sub)}
-                    className={`py-2 rounded-xl text-xs font-bold border transition-all ${selectedSub === sub ? "bg-teal text-white border-teal shadow-xs" : "bg-paper/60 border-ink/10 text-ink"}`}>
+                  <button
+                    key={sub}
+                    type="button"
+                    onClick={() => setSelectedSub(sub)}
+                    className={`py-2 px-1 text-xs rounded-xl font-medium border text-center transition-all ${
+                      selectedSub === sub
+                        ? "bg-teal-500/20 border-teal-500 text-teal-300 font-bold"
+                        : "bg-slate-950 border-slate-800 text-slate-400"
+                    }`}
+                  >
                     {sub}
                   </button>
                 ))}
               </div>
             </div>
-            <div>
-              <label className="text-[11px] font-bold text-slate block mb-1">Category</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {[{ id: "theory", label: "🎥 Theory" }, { id: "questions", label: "✍️ Practice" }, { id: "revision", label: "🔄 Revision" }].map((item) => (
-                  <button key={item.id} type="button" onClick={() => setSelectedTask(item.id as StudyTaskType)}
-                    className={`py-2 rounded-xl text-[11px] font-bold border transition-all ${selectedTask === item.id ? "bg-marigold/20 text-ink border-marigold shadow-xs" : "bg-paper/60 border-ink/10 text-slate"}`}>
-                    {item.label}
+
+            {/* Task Type Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-400">Focus Task</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: "questions", label: "Questions" },
+                  { id: "theory", label: "Theory" },
+                  { id: "revision", label: "Revision" },
+                ].map((task) => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    onClick={() => setSelectedTask(task.id as StudyTaskType)}
+                    className={`py-2 px-1 text-xs rounded-xl font-medium border text-center transition-all ${
+                      selectedTask === task.id
+                        ? "bg-teal-500/20 border-teal-500 text-teal-300 font-bold"
+                        : "bg-slate-950 border-slate-800 text-slate-400"
+                    }`}
+                  >
+                    {task.label}
                   </button>
                 ))}
               </div>
             </div>
-            <div className={`rounded-xl px-3 py-2.5 border text-[10px] leading-relaxed ${isVerifiedSession ? "bg-teal/8 border-teal/25 text-teal" : "bg-ink/5 border-ink/10 text-slate"}`}>
-              {isVerifiedSession
-                ? "✅ Verified session — counts for Leaderboard!"
-                : `ℹ️ ${!faceVerificationEnabled && !appBlockerEnabled ? "Both toggles off" : !faceVerificationEnabled ? "Face Verification off" : "App Blocker off"}. Study data is saved to your personal stats.`}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPreModal(false)}
+                className="flex-1 py-3 bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleStartSession}
+                className="flex-1 py-3 bg-teal-500 text-slate-950 text-xs font-bold rounded-xl shadow-lg shadow-teal-500/20"
+              >
+                Start Now
+              </button>
             </div>
-            <button
-              onClick={handleStartSession}
-              className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20 hover:bg-teal/90"
-            >
-              ▶ Start Study Timer
-            </button>
           </div>
         </div>
       )}
 
-      {/* ─── REDESIGNED FROM / TO TIME MODAL ─── */}
-      {showManualModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <h3 className="text-sm font-bold text-ink">Log Offline Study</h3>
-              <button onClick={() => setShowManualModal(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60">✕</button>
-            </div>
-            {manualError && <p className="text-xs text-rose-600 font-bold bg-rose-50 p-2 rounded-lg">⚠️ {manualError}</p>}
-            <div>
-              <label className="text-[11px] font-bold text-slate block mb-1">Subject</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {availableSubjects.map((sub) => (
-                  <button key={sub} type="button" onClick={() => setManualSub(sub)}
-                    className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${manualSub === sub ? "bg-teal text-white border-teal shadow-xs" : "bg-paper/60 border-ink/10 text-ink"}`}>
-                    {sub}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-slate block mb-1">Category</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {[{ id: "theory", label: "🎥 Theory" }, { id: "questions", label: "✍️ Practice" }, { id: "revision", label: "🔄 Revision" }].map((item) => (
-                  <button key={item.id} type="button" onClick={() => setManualTask(item.id as StudyTaskType)}
-                    className={`py-1.5 rounded-lg text-[11px] font-bold border transition-all ${manualTask === item.id ? "bg-marigold/20 text-ink border-marigold shadow-xs" : "bg-paper/60 border-ink/10 text-slate"}`}>
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            {/* From Time & To Time Inputs */}
-            <div className="grid grid-cols-2 gap-2">
+      {/* ─── ALLOWED APPS SELECTION MODAL ─── */}
+      {showAppsModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between">
               <div>
-                <label className="text-[11px] font-bold text-slate block mb-1">From Time</label>
-                <input
-                  type="time"
-                  value={manualFromTime}
-                  onChange={(e) => setManualFromTime(e.target.value)}
-                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15 focus:border-teal outline-none bg-paper/30"
-                />
+                <h3 className="text-sm font-bold text-white">Allowed Apps (Whitelist)</h3>
+                <p className="text-[11px] text-slate-400">All other installed apps will be blocked</p>
               </div>
-              <div>
-                <label className="text-[11px] font-bold text-slate block mb-1">To Time</label>
-                <input
-                  type="time"
-                  value={manualToTime}
-                  onChange={(e) => setManualToTime(e.target.value)}
-                  className="w-full p-2 text-center text-xs font-bold rounded-lg border border-ink/15 focus:border-teal outline-none bg-paper/30"
-                />
-              </div>
+              <button
+                onClick={() => setShowAppsModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 text-slate-300 text-xs flex items-center justify-center"
+              >
+                ✕
+              </button>
             </div>
 
-            {/* Live Computed Duration Badge */}
-            <div className="bg-teal/10 border border-teal/20 rounded-xl p-2.5 flex items-center justify-between text-xs">
-              <span className="font-bold text-teal">⏱️ Session Duration</span>
-              <span className="font-black text-teal-900">
-                {Math.floor(computedManualMinutes / 60)}h {computedManualMinutes % 60}m ({computedManualMinutes} mins)
+            <input
+              type="text"
+              placeholder="Search installed apps..."
+              value={appsSearch}
+              onChange={(e) => setAppsSearch(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+            />
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleBlockAll}
+                className="flex-1 py-1.5 text-[11px] font-semibold bg-red-950/40 border border-red-500/30 text-red-300 rounded-lg hover:bg-red-900/30 transition-all"
+              >
+                Block All Apps
+              </button>
+              <span className="text-xs text-slate-400 self-center font-mono">
+                {allowedApps.length} Allowed
               </span>
             </div>
 
-            <div>
-              <label className="text-[11px] font-bold text-slate block mb-1">Date</label>
+            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 min-h-[200px]">
+              {filteredApps.map((app) => {
+                const isAllowed = allowedApps.includes(app.id);
+                return (
+                  <div
+                    key={app.id}
+                    onClick={() => toggleAppAllowed(app.id)}
+                    className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
+                      isAllowed
+                        ? "bg-teal-950/40 border-teal-500/40 text-teal-200"
+                        : "bg-slate-950/50 border-slate-800/80 text-slate-300 hover:bg-slate-800/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-base">{app.icon}</span>
+                      <div className="text-left">
+                        <div className="text-xs font-semibold">{app.name}</div>
+                        <div className="text-[10px] text-slate-500 font-mono truncate max-w-[170px]">
+                          {app.id}
+                        </div>
+                      </div>
+                    </div>
+                    <span
+                      className={`text-xs w-5 h-5 rounded-md flex items-center justify-center font-bold ${
+                        isAllowed ? "bg-teal-500 text-slate-950" : "border border-slate-700 text-transparent"
+                      }`}
+                    >
+                      ✓
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setShowAppsModal(false)}
+              className="w-full py-3 bg-teal-500 text-slate-950 font-bold rounded-xl text-xs shadow-lg shadow-teal-500/20"
+            >
+              Done ({allowedApps.length} Allowed)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── REDESIGNED FROM / TO TIME LOGGING MODAL ─── */}
+      {showManualModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white">Log Past Study Time</h3>
+              <button
+                onClick={() => setShowManualModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 text-slate-300 text-xs flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            {manualError && (
+              <div className="p-2.5 bg-red-950/50 border border-red-500/40 rounded-xl text-xs text-red-200">
+                {manualError}
+              </div>
+            )}
+
+            {/* Date Picker */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-400">Date</label>
               <input
                 type="date"
                 value={manualDate}
                 onChange={(e) => setManualDate(e.target.value)}
-                className="w-full p-2 text-xs rounded-lg border border-ink/15 focus:border-teal outline-none"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-teal-500"
               />
             </div>
+
+            {/* From & To Time Inputs */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-slate-400">From Time</label>
+                <input
+                  type="time"
+                  value={manualFromTime}
+                  onChange={(e) => setManualFromTime(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-teal-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-slate-400">To Time</label>
+                <input
+                  type="time"
+                  value={manualToTime}
+                  onChange={(e) => setManualToTime(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-teal-500"
+                />
+              </div>
+            </div>
+
+            {/* Auto-Calculated Duration Preview Badge */}
+            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-center">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wider block">Calculated Study Duration</span>
+              <span className="text-lg font-bold font-mono text-teal-400">
+                {formattedComputedDuration}
+              </span>
+            </div>
+
+            {/* Subject Selector */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-400">Subject</label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {availableSubjects.map((sub) => (
+                  <button
+                    key={sub}
+                    type="button"
+                    onClick={() => setManualSub(sub)}
+                    className={`py-1.5 text-xs rounded-xl font-medium border text-center ${
+                      manualSub === sub
+                        ? "bg-teal-500/20 border-teal-500 text-teal-300 font-bold"
+                        : "bg-slate-950 border-slate-800 text-slate-400"
+                    }`}
+                  >
+                    {sub}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Task Selector */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-400">Task Type</label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { id: "questions", label: "Questions" },
+                  { id: "theory", label: "Theory" },
+                  { id: "revision", label: "Revision" },
+                ].map((task) => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    onClick={() => setManualTask(task.id as StudyTaskType)}
+                    className={`py-1.5 text-xs rounded-xl font-medium border text-center ${
+                      manualTask === task.id
+                        ? "bg-teal-500/20 border-teal-500 text-teal-300 font-bold"
+                        : "bg-slate-950 border-slate-800 text-slate-400"
+                    }`}
+                  >
+                    {task.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <button
-              disabled={saving || computedManualMinutes <= 0}
               onClick={handleSaveManualEntry}
-              className="w-full py-2.5 rounded-xl bg-ink text-paper font-bold text-xs shadow-md transition-all active:scale-[0.98] disabled:opacity-40"
+              disabled={saving}
+              className="w-full py-3 bg-teal-500 text-slate-950 font-bold rounded-xl text-xs shadow-lg shadow-teal-500/20 disabled:opacity-50"
             >
-              {saving ? "Saving..." : "Add to Daily Study Hours"}
+              {saving ? "Saving..." : `Save ${formattedComputedDuration}`}
             </button>
           </div>
         </div>
       )}
 
-      {/* Usage Access Modal */}
+      {/* ─── USAGE ACCESS PERMISSION GUIDE MODAL ─── */}
       {showUsageSteps && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <h3 className="text-sm font-bold text-ink flex items-center gap-2">🛡️ Enable App Blocker</h3>
-              <button onClick={() => setShowUsageSteps(false)} className="w-6 h-6 rounded-full bg-ink/5 text-xs text-ink/60 flex items-center justify-center">✕</button>
-            </div>
-            <p className="text-[11px] text-slate leading-relaxed">
-              App Blocker needs <span className="font-bold text-ink">Usage Access</span> permission to detect which apps you open and block them during study.
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl">
+            <h3 className="text-sm font-bold text-white">Enable App Blocker Access</h3>
+            <p className="text-xs text-slate-400">
+              Android requires Usage Access permission to detect and block non-allowed apps.
             </p>
-            <div className="space-y-2">
+
+            <ol className="text-xs text-slate-300 space-y-2 list-decimal list-inside bg-slate-950 p-3 rounded-xl border border-slate-800">
+              <li>Tap <strong>Open Settings</strong> below.</li>
+              <li>Find <strong>PrepWise</strong> in the list.</li>
+              <li>Toggle <strong>Allow usage access</strong> to ON.</li>
+              <li>Return to PrepWise.</li>
+            </ol>
+
+            <div className="flex gap-2">
               <button
+                type="button"
+                onClick={() => setShowUsageSteps(false)}
+                className="flex-1 py-2.5 bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
                 onClick={() => {
                   if (typeof window !== "undefined") {
-                    try { (window as any).AppBridge?.postMessage(JSON.stringify({ action: "requestUsagePermission" })); } catch (_) {}
+                    const w = window as any;
+                    w.AppBridge?.postMessage(JSON.stringify({ action: "requestUsagePermission" }));
                   }
+                  handleUsagePermissionGranted();
                 }}
-                className="w-full py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-md shadow-teal/20"
+                className="flex-1 py-2.5 bg-teal-500 text-slate-950 text-xs font-bold rounded-xl shadow-lg shadow-teal-500/20"
               >
-                Open Settings →
-              </button>
-              <button onClick={handleUsagePermissionGranted} className="w-full py-2.5 rounded-xl bg-ink/8 text-ink font-bold text-xs">
-                ✓ Done, I granted it
+                Open Settings
               </button>
             </div>
           </div>
