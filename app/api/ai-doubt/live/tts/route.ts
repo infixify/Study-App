@@ -2,125 +2,85 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "edge";
 
-// Your Sarvam API key from Cloudflare
+// Your API keys from Cloudflare
 const SARVAM_API_KEY = process.env.SARVAM_API_KEY || process.env.NEXT_PUBLIC_SARVAM_API_KEY;
+const HF_TOKEN = process.env.HF_TOKEN;
 
-// ========== HINDI-ENGLISH TO DEVANAGARI CONVERTER ==========
-/** Converts Hinglish to pure Devanagari Hindi for correct pronunciation */
-function convertHinglishToDevanagari(text: string): string {
-  // Common English words in Indian education that should stay in English
-  const ENGLISH_WORDS = [
-    'F', 'ma', 'm', 'a', 'v', 'u', 't', 's', 'c', 'p', 'e', 'r',
-    'force', 'mass', 'acceleration', 'velocity', 'energy', 'power',
-    'Newton', 'Einstein', 'Physics', 'Maths', 'Chemistry', 'Biology',
-    'law', 'theorem', 'formula', 'equation', 'graph', 'diagram',
-    'cm', 'mm', 'kg', 'm/s', 'm/s2', 'J', 'N', 'W', 'V', 'A',
-    'sin', 'cos', 'tan', 'log', 'ln'
-  ];
+// ========== IN-MEMORY CACHE (24-hour expiry) ==========
+// Cache structure: Map<textHash, { blob: Blob, timestamp: number }>
+const ttsCache = new Map<string, { blob: Blob; timestamp: number }>();
 
-  // Replace common Hinglish patterns with Devanagari (NO DUPLICATES, sorted by length)
-  const hinglishMap: Record<string, string> = {
-    // Numbers
-    '0': '\u0966', '1': '\u0967', '2': '\u0968', '3': '\u0969', '4': '\u096a', '5': '\u096b',
-    '6': '\u096c', '7': '\u096d', '8': '\u096e', '9': '\u096f',
-
-    // Longer words first (to avoid partial matches)
-    'kyunki': '\u0915\u094d\u092f\u094b\u0915\u0940',
-    'isliye': '\u0907\u0938\u0932\u093f\u090f',
-    'lekin': '\u0932\u0947\u0915\u093f\u0928',
-    'nahi': '\u0928\u0939\u0940\u0902',
-    'aur': '\u0914\u0930',
-    'hai': '\u0939\u0948',
-    'mein': '\u092e\u0947\u0902',
-    'bhi': '\u092d\u0940',
-    'jab': '\u091c\u092c',
-    'tab': '\u0924\u092c',
-    'agar': '\u0905\u0917\u0930',
-    'toh': '\u0924\u094b',
-    'yani': '\u092f\u093e\u0928\u0940',
-    'ye': '\u092f\u0947',
-    'wa': '\u0935\u093e',
-    'wo': '\u0935\u094b',
-    'in': '\u0907\u0928',
-    'ka': '\u0915\u093e',
-    'ke': '\u0915\u0947',
-    'ki': '\u0915\u0940',
-    'to': '\u0924\u094b',
-    'par': '\u092a\u0930',
-    'se': '\u0938\u0947',
-
-    // Math symbols in words
-    'plus': ' \u091c\u092e\u093e ',
-    'minus': ' \u0918\u091f\u093e ',
-    'into': ' \u0917\u0941\u0923\u093e ',
-    'divided by': ' \u092d\u093e\u0917 ',
-    'equals': ' \u092c\u0930\u093e\u092c\u0930 ',
-    'approximately': ' \u0932\u0917\u092d\u0917 '
-  };
-
-  let result = text;
-
-  // First: Keep English words as-is (for scientific terms)
-  const englishRegex = new RegExp(`\\b(${ENGLISH_WORDS.join('|')})\\b`, 'gi');
-  const englishMatches: {index: number, word: string}[] = [];
-  let match;
-  const textLower = text.toLowerCase();
-  while ((match = englishRegex.exec(textLower)) !== null) {
-    englishMatches.push({ index: match.index, word: text.substring(match.index, match.index + match[0].length) });
-  }
-
-  // Second: Convert Hinglish to Devanagari (longest keys first, whole words only)
-  const sortedKeys = Object.keys(hinglishMap).sort((a, b) => b.length - a.length);
-  for (const hinglish of sortedKeys) {
-    const devanagari = hinglishMap[hinglish];
-    const pattern = new RegExp(`\\b${hinglish}\\b`, 'gi');
-    result = result.replace(pattern, devanagari);
-  }
-
-  // Third: Restore English words that were accidentally converted
-  for (const { index, word } of englishMatches) {
-    const before = result.substring(0, index);
-    const after = result.substring(index + word.length);
-    result = before + word + after;
-  }
-
-  // Clean up extra spaces and preserve punctuation properly
-  return result.replace(/\s+/g, ' ').trim();
+async function generateCacheKey(text: string): Promise<string> {
+  // Create SHA-256 hash of text for consistent cache keys
+  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-// ========== TIER 1: TRAVIS EDGE TTS (hi-IN-MadhurNeural - FAST SPEED) ==========
-async function synthesizeTravisTTS(text: string): Promise<Blob | null> {
+function cleanText(text: string): string {
+  // Remove excessive spaces and fix punctuation gaps
+  return text
+    .replace(/\s+/g, ' ')                    // Multiple spaces -> single space
+    .replace(/([.,!?])\s+/g, '$1 ')         // Single space AFTER punctuation
+    .replace(/\s+([.,!?])/g, '$1')           // NO space BEFORE punctuation
+    .trim();
+}
+
+// ========== TIER 1: HUGGING FACE (Indic-Parler-TTS - Best Hindi Quality) ==========
+async function synthesizeHuggingFaceTTS(text: string): Promise<Blob | null> {
+  if (!HF_TOKEN) {
+    console.log("TIER 1 HF: HF_TOKEN is missing!");
+    return null;
+  }
+
   try {
-    console.log("TIER 1 TRAVIS: Synthesizing text:", text.substring(0, 100));
+    console.log("TIER 1 HF: Synthesizing text:", text.substring(0, 100));
     
-    const res = await fetch("https://tts.travisvn.com/v1/audio/speech", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text: text,
-        voice: "hi-IN-MadhurNeural",
-        speed: 1.25  // Faster speed as requested
-      }),
-      signal: AbortSignal.timeout(15000)
-    });
+    const response = await fetch(
+      "https://api-inference.huggingface.co/models/ai4bharat/indic-parler-tts",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${HF_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          inputs: text,
+          parameters: {
+            description: "Rohit's voice is clear and natural, with a moderate pace. The recording is of very high quality, with no background noise."
+          }
+        }),
+        signal: AbortSignal.timeout(30000) // 30 second timeout
+      }
+    );
 
-    console.log("TIER 1 TRAVIS: Response status:", res.status);
+    console.log("TIER 1 HF: Response status:", response.status);
     
-    if (res.ok) {
-      const audio = await res.arrayBuffer();
-      console.log("TIER 1 TRAVIS: Audio generated, size:", audio.byteLength, "bytes");
-      return new Blob([audio], { type: "audio/mpeg" });
-    } else {
-      const errorText = await res.text();
-      console.log("TIER 1 TRAVIS: FAILED - Status:", res.status, "Error:", errorText.substring(0, 200));
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log("TIER 1 HF: FAILED - Status:", response.status, "Error:", errorText.substring(0, 200));
+      
+      // Check for rate limit (429)
+      if (response.status === 429) {
+        console.log("TIER 1 HF: Rate limited - falling back to Tier 2");
+      }
+      return null;
     }
+
+    // Hugging Face returns audio as blob
+    const audioBlob = await response.blob();
+    console.log("TIER 1 HF: Audio generated, size:", audioBlob.size, "bytes");
+    
+    return audioBlob;
+    
   } catch (e: any) {
-    console.log("TIER 1 TRAVIS: Exception:", e?.message || String(e));
+    console.log("TIER 1 HF: Exception:", e?.message || String(e));
+    return null;
   }
-  return null;
 }
 
-// ========== TIER 2: SARVAM AI (Shubh model v3 - FAST SPEED) ==========
+// ========== TIER 2: SARVAM AI (Shubh model v3 - Fallback) ==========
 async function synthesizeSarvamTTS(text: string): Promise<Blob | null> {
   if (!SARVAM_API_KEY) {
     console.log("TIER 2 SARVAM: API KEY MISSING - Check Cloudflare environment variables");
@@ -140,7 +100,7 @@ async function synthesizeSarvamTTS(text: string): Promise<Blob | null> {
         text: text,
         language_code: "hi-IN",
         speaker: "shubh",
-        pace: 1.25,  // Faster speed as requested
+        pace: 1.1,  // 10% faster as requested
         speech_sample_rate: 24000,
         model: "bulbul:v3",
       }),
@@ -182,12 +142,14 @@ function getNativeTTSResponse(text: string): string {
     type: "native",
     text: text,
     voice: "hi-IN-MadhurNeural",
-    rate: 1.25  // Faster speed for native too
+    rate: 1.1  // 10% faster as requested
   });
 }
 
+// ========== MAIN HANDLER ==========
 export async function POST(req: NextRequest) {
   try {
+    // Parse request
     let text: string | null = null;
     try {
       const body = await req.json();
@@ -202,62 +164,79 @@ export async function POST(req: NextRequest) {
       return new NextResponse("Missing text", { status: 400 });
     }
 
-    // Clean up excessive punctuation gaps
-    // Replace multiple spaces with single space
-    // Ensure punctuation doesn't create weird gaps
-    text = text
-      .replace(/\s+/g, ' ')
-      .replace(/([.,!?])\s+/g, '$1 ')  // Single space after punctuation
-      .replace(/\s+([.,!?])/g, '$1')    // No space before punctuation
-      .trim();
+    // Clean text for better TTS
+    text = cleanText(text);
+
+    // Generate cache key
+    const cacheKey = await generateCacheKey(text);
+    
+    // Check cache first
+    const cached = ttsCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 86400000) {
+      console.log("CACHE HIT for text:", text.substring(0, 50));
+      return new Response(cached.blob, {
+        status: 200,
+        headers: {
+          "Content-Type": cached.blob.type || "audio/wav",
+          "X-TTS-Tier": "cached",
+          "X-Cache": "HIT",
+          "Cache-Control": "public, max-age=86400"
+        }
+      });
+    }
 
     console.log("\n=== TTS REQUEST START ===");
     console.log("Input text:", text.substring(0, 200));
+    console.log("HF_TOKEN present:", !!HF_TOKEN);
     console.log("SARVAM_API_KEY present:", !!SARVAM_API_KEY);
     console.log("========================\n");
 
-    // ===== TIER 1: TRAVIS EDGE TTS (hi-IN-MadhurNeural - FAST) =====
-    console.log("--- Trying TIER 1: Travis Edge TTS (hi-IN-MadhurNeural, speed=1.25) ---");
-    let blob = await synthesizeTravisTTS(text);
+    let blob: Blob | null = null;
+    let tier: string = "none";
+
+    // ===== TIER 1: HUGGING FACE (Indic-Parler-TTS) =====
+    console.log("--- Trying TIER 1: Hugging Face (Indic-Parler-TTS, Rohit voice) ---");
+    blob = await synthesizeHuggingFaceTTS(text);
     if (blob) {
-      console.log("SUCCESS: Tier 1 Travis Edge TTS\n");
-      return new Response(blob, {
-        status: 200,
-        headers: {
-          "Content-Type": "audio/mpeg",
-          "X-TTS-Provider": "travis-edge-hi-IN-MadhurNeural",
-          "X-TTS-Tier": "1",
-          "Cache-Control": "public, max-age=86400"
-        }
-      });
+      tier = "1";
+      console.log("SUCCESS: Tier 1 Hugging Face\n");
+    } else {
+      // ===== TIER 2: SARVAM (Shubh v3) =====
+      console.log("\n--- Trying TIER 2: Sarvam AI (Shubh v3, pace=1.1) ---");
+      blob = await synthesizeSarvamTTS(text);
+      if (blob) {
+        tier = "2";
+        console.log("SUCCESS: Tier 2 Sarvam AI\n");
+      } else {
+        // ===== TIER 3: DEVICE NATIVE =====
+        console.log("\n--- Falling back to TIER 3: Device Native (rate=1.1) ---");
+        console.log("All previous tiers failed. Returning native TTS JSON.\n");
+        const nativeResponse = getNativeTTSResponse(text);
+        return new NextResponse(nativeResponse, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "X-TTS-Provider": "native",
+            "X-TTS-Tier": "3"
+          }
+        });
+      }
     }
 
-    // ===== TIER 2: SARVAM (Shubh v3 - FAST) =====
-    console.log("\n--- Trying TIER 2: Sarvam AI (Shubh v3, pace=1.25) ---");
-    blob = await synthesizeSarvamTTS(text);
+    // Cache the result for 24 hours
     if (blob) {
-      console.log("SUCCESS: Tier 2 Sarvam AI\n");
-      return new Response(blob, {
-        status: 200,
-        headers: {
-          "Content-Type": "audio/wav",
-          "X-TTS-Provider": "sarvam-shubh-v3",
-          "X-TTS-Tier": "2",
-          "Cache-Control": "public, max-age=86400"
-        }
-      });
+      ttsCache.set(cacheKey, { blob, timestamp: Date.now() });
+      console.log("CACHED audio for text:", text.substring(0, 50));
     }
 
-    // ===== TIER 3: DEVICE NATIVE (FAST) =====
-    console.log("\n--- Falling back to TIER 3: Device Native (rate=1.25) ---");
-    console.log("All previous tiers failed. Returning native TTS JSON.\n");
-    const nativeResponse = getNativeTTSResponse(text);
-    return new NextResponse(nativeResponse, {
+    // Return the audio
+    return new Response(blob!, {
       status: 200,
       headers: {
-        "Content-Type": "application/json",
-        "X-TTS-Provider": "native",
-        "X-TTS-Tier": "3"
+        "Content-Type": blob?.type || "audio/wav",
+        "X-TTS-Tier": tier,
+        "X-Cache": "MISS",
+        "Cache-Control": "public, max-age=86400"
       }
     });
 
