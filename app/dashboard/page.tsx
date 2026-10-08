@@ -156,7 +156,8 @@ const QUOTE_LIMIT = 3;
 const MEME_LIMIT = 2;
 
 function getTodayKey(): string {
-  return `pw_content_state_${new Date().toISOString().split("T")[0]}`;
+  const istDate = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  return `pw_content_state_${istDate}`;
 }
 
 // Odd Days = Human first, Even Days = Anime first
@@ -209,7 +210,7 @@ function saveDailyContentState(state: DailyContentState): void {
 
 function getDailyIndex(deckLength: number, salt: string): number {
   if (!deckLength) return 0;
-  const dateStr = new Date().toISOString().split("T")[0];
+  const dateStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const str = dateStr + salt;
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -967,11 +968,12 @@ export default function DashboardPage() {
     const later = new Date(now.getTime() + 60 * 60 * 1000);
     return `${String(later.getHours()).padStart(2, "0")}:00`;
   });
-  const [qLogDate, setQLogDate] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [qLogDate, setQLogDate] = useState<string>(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
   const [savingQuestion, setSavingQuestion] = useState(false);
   const [questionConflictWarning, setQuestionConflictWarning] = useState<string | null>(null);
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  // Exact Indian Standard Time (IST) YYYY-MM-DD
+  const todayStr = useMemo(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }), []);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1222,7 +1224,6 @@ export default function DashboardPage() {
       setLoading(false);
 
       // AI Mentor: strictly read-only from DB — never auto-generate.
-      // Report only updates when user manually clicks "Update & Refresh".
       if (!isCancelled) {
         setMentorReport(uProf?.ai_mentor_report ?? null);
         setStudentContext(uProf?.ai_student_context ?? null);
@@ -1273,7 +1274,7 @@ export default function DashboardPage() {
     const later = new Date(now.getTime() + 60 * 60 * 1000);
     setQTimeFrom(`${String(now.getHours()).padStart(2, "0")}:00`);
     setQTimeTo(`${String(later.getHours()).padStart(2, "0")}:00`);
-    setQLogDate(now.toISOString().split("T")[0]);
+    setQLogDate(now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
     setQTopicName("");
     setQCount("30");
     setQStartFrom("1");
