@@ -14,8 +14,8 @@ function convertHinglishToDevanagari(text: string): string {
     'force', 'mass', 'acceleration', 'velocity', 'energy', 'power',
     'Newton', 'Einstein', 'Physics', 'Maths', 'Chemistry', 'Biology',
     'law', 'theorem', 'formula', 'equation', 'graph', 'diagram',
-    'cm', 'mm', 'kg', 'm/s', 'm/s²', 'J', 'N', 'W', 'V', 'A',
-    'sin', 'cos', 'tan', 'log', 'ln', 'π', 'θ', 'φ', 'μ', 'λ'
+    'cm', 'mm', 'kg', 'm/s', 'm/s2', 'J', 'N', 'W', 'V', 'A',
+    'sin', 'cos', 'tan', 'log', 'ln'
   ];
 
   // Replace common Hinglish patterns with Devanagari
@@ -29,12 +29,11 @@ function convertHinglishToDevanagari(text: string): string {
     'aur': 'और', 'to': 'तो', 'par': 'पर', 'se': 'से', 'bhi': 'भी',
     'nahi': 'नहीं', 'kyunki': 'क्योकी', 'lekin': 'लेकिन', 'isliye': 'इसलिए',
     'jab': 'जब', 'tab': 'तब', 'agar': 'अगर', 'toh': 'तो',
-    'yani': 'यानी', 'ki': 'की', 'ka': 'का', 'ko': 'को',
-    'ye': 'ये', 'wo': 'वो', 'in': 'इन',
+    'yani': 'यानी', 'ye': 'ये', 'wo': 'वो', 'in': 'इन',
 
     // Math symbols in words
     'plus': ' जमा ', 'minus': ' घटा ', 'into': ' गुणा ', 'divided by': ' भाग ',
-    'equals': ' बराबर ', 'approximately': ' लगभग ',
+    'equals': ' बराबर ', 'approximately': ' लगभग '
   };
 
   let result = text;
@@ -194,7 +193,7 @@ async function synthesizeBhashiniTTS(text: string): Promise<Blob | null> {
         config: {
           language: { sourceLanguage: "hi" },
           domain: "general",
-          speaker: { gender: "male" } // Using male voice as requested
+          speaker: { gender: "male" }
         }
       }),
       signal: AbortSignal.timeout(10000)
