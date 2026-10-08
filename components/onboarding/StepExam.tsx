@@ -6,7 +6,7 @@ import { BackButton } from "./StepClass";
 interface StepExamProps {
   classLevel: ClassLevel | null;
   selectedExam: TargetExam | null;
-  wantsBoards: boolean;
+  wantsBoards?: boolean;
   onSelectExam: (exam: TargetExam, includeSchool: boolean) => void;
   onBack: () => void;
 }
@@ -92,3 +92,5 @@ export function StepExam({
     </div>
   );
 }
+
+export default StepExam;
