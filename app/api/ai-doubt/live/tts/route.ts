@@ -88,6 +88,125 @@ function convertHinglishToDevanagari(text: string): string {
   return result.replace(/\s+/g, ' ').trim();
 }
 
+// ========== TIER 1: MICROSOFT EDGE TTS (hi-IN-MadhurNeural - MALE VOICE) ==========
+async function synthesizeEdgeTTS(text: string): Promise<Blob | null> {
+  try {
+    console.log("TIER 1 EDGE: Starting WebSocket connection for:", text.substring(0, 100));
+    
+    const WIN_EPOCH = 11644473600;
+    const seconds = Math.floor(Date.now() / 1000) + WIN_EPOCH;
+    const roundedSeconds = seconds - (seconds % 300);
+    const ticks = BigInt(roundedSeconds) * BigInt("10000000");
+    const strToHash = ticks.toString() + "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+    const enc = new TextEncoder();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", enc.encode(strToHash));
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const secMsGec = hashArray.map(b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+
+    const connectionId = crypto.randomUUID().replace(/-/g, "");
+    const CHROMIUM_VERSION = "143.0.3650.75";
+    const wssUrl = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=1-${CHROMIUM_VERSION}&ConnectionId=${connectionId}`;
+
+    console.log("TIER 1 EDGE: WebSocket URL generated, connecting...");
+
+    return new Promise<Blob | null>((resolve) => {
+      let finished = false;
+      const audioChunks: Uint8Array[] = [];
+      const timer = setTimeout(() => {
+        if (!finished) { 
+          finished = true; 
+          console.log("TIER 1 EDGE: Timeout after 12 seconds");
+          resolve(null); 
+        }
+      }, 12000);
+
+      const ws = new WebSocket(wssUrl);
+
+      ws.onopen = () => {
+        console.log("TIER 1 EDGE: WebSocket OPEN");
+        const configMsg = "Content-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n" +
+          JSON.stringify({
+            context: {
+              synthesis: {
+                audio: {
+                  metadataoptions: { sentenceBoundaryEnabled: "false", wordBoundaryEnabled: "false" },
+                  outputFormat: "audio-24khz-48kbitrate-mono-mp3"
+                }
+              }
+            }
+          });
+        ws.send(configMsg);
+
+        const escapedText = text
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;").replace(/'/g, "&apos;");
+
+        const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="hi-IN">
+          <voice name="hi-IN-MadhurNeural"><prosody rate="+10%">${escapedText}</prosody></voice>
+        </speak>`;
+
+        const speechMsg = `X-RequestId:${crypto.randomUUID().replace(/-/g, "")}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n${ssml}`;
+        ws.send(speechMsg);
+        console.log("TIER 1 EDGE: SSML message sent");
+      };
+
+      ws.onmessage = (event: MessageEvent) => {
+        if (typeof event.data === "string") {
+          if (event.data.includes("Path:turn.end")) {
+            if (!finished) {
+              finished = true; 
+              clearTimeout(timer); 
+              ws.close();
+              console.log("TIER 1 EDGE: Received turn.end, audio chunks:", audioChunks.length);
+              if (audioChunks.length > 0) {
+                const merged = new Uint8Array(audioChunks.reduce((a, b) => a + b.length, 0));
+                let offset = 0;
+                for (const chunk of audioChunks) { merged.set(chunk, offset); offset += chunk.length; }
+                console.log("TIER 1 EDGE: Audio merged, total bytes:", merged.length);
+                resolve(new Blob([merged], { type: "audio/mpeg" }));
+              } else { 
+                console.log("TIER 1 EDGE: No audio chunks received");
+                resolve(null); 
+              }
+            }
+          } else {
+            console.log("TIER 1 EDGE: String message:", event.data.substring(0, 100));
+          }
+        } else if (event.data instanceof ArrayBuffer) {
+          const buffer = new Uint8Array(event.data);
+          if (buffer.length > 2) {
+            const view = new DataView(event.data);
+            const headerLen = view.getUint16(0);
+            if (buffer.length > 2 + headerLen) {
+              const audioSlice = buffer.slice(2 + headerLen);
+              if (audioSlice.length > 0) {
+                audioChunks.push(audioSlice);
+                console.log("TIER 1 EDGE: Audio chunk received, size:", audioSlice.length);
+              }
+            }
+          }
+        }
+      };
+
+      ws.onerror = (e) => { 
+        console.log("TIER 1 EDGE: WebSocket ERROR:", e); 
+        if (!finished) { finished = true; clearTimeout(timer); resolve(null); } 
+      };
+      ws.onclose = () => { 
+        if (!finished) { 
+          finished = true; 
+          clearTimeout(timer); 
+          console.log("TIER 1 EDGE: WebSocket CLOSED without turn.end"); 
+          resolve(null); 
+        }
+      };
+    });
+  } catch (e: any) {
+    console.log("TIER 1 EDGE: Exception:", e?.message || String(e));
+    return null;
+  }
+}
+
 // ========== TIER 2: SARVAM AI (Shubh model v3 - as requested) ==========
 async function synthesizeSarvamTTS(text: string): Promise<Blob | null> {
   if (!SARVAM_API_KEY) {
@@ -129,7 +248,7 @@ async function synthesizeSarvamTTS(text: string): Promise<Blob | null> {
         console.log("TIER 2 SARVAM: Audio generated, size:", audio.length, "bytes");
         return new Blob([audio], { type: "audio/wav" });
       } else {
-        console.log("TIER 2 SARVAM: No audio found in response. Full data:", JSON.stringify(data).substring(0, 500));
+        console.log("TIER 2 SARVAM: No audio found in response");
       }
     } else {
       const errorText = await res.text();
@@ -186,7 +305,7 @@ async function synthesizeBhashiniTTS(text: string): Promise<Blob | null> {
           console.log("TIER 3 BHASHINI: Audio fetch failed, status:", audioRes.status);
         }
       } else {
-        console.log("TIER 3 BHASHINI: No audio URL in response. Full data:", JSON.stringify(data).substring(0, 500));
+        console.log("TIER 3 BHASHINI: No audio URL in response");
       }
     } else {
       const errorText = await res.text();
@@ -223,13 +342,30 @@ export async function POST(req: NextRequest) {
       return new NextResponse("Missing text", { status: 400 });
     }
 
-    console.log("=== TTS REQUEST START ===");
+    console.log("\n=== TTS REQUEST START ===");
     console.log("Input text:", text.substring(0, 200));
     console.log("SARVAM_API_KEY present:", !!SARVAM_API_KEY);
+    console.log("========================\n");
 
-    // ===== TIER 2: SARVAM (Shubh model v3 - PRIMARY) =====
+    // ===== TIER 1: MICROSOFT EDGE (hi-IN-MadhurNeural - MALE VOICE) =====
+    console.log("--- Trying TIER 1: Microsoft Edge TTS (hi-IN-MadhurNeural) ---");
+    let blob = await synthesizeEdgeTTS(text);
+    if (blob) {
+      console.log("SUCCESS: Tier 1 Microsoft Edge TTS\n");
+      return new Response(blob, {
+        status: 200,
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "X-TTS-Provider": "edge-hi-IN-MadhurNeural",
+          "X-TTS-Tier": "1",
+          "Cache-Control": "public, max-age=86400"
+        }
+      });
+    }
+
+    // ===== TIER 2: SARVAM (Shubh model v3 - as requested) =====
     console.log("\n--- Trying TIER 2: Sarvam AI (Shubh v3) ---");
-    let blob = await synthesizeSarvamTTS(text);
+    blob = await synthesizeSarvamTTS(text);
     if (blob) {
       console.log("SUCCESS: Tier 2 Sarvam AI\n");
       return new Response(blob, {
