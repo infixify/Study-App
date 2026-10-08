@@ -277,6 +277,70 @@ export async function POST(req: NextRequest) {
       return new NextResponse("Missing text parameter", { status: 400 });
     }
 
+    // ── DEBUG MODE (temporary): ?debug=1 returns per-tier diagnostics JSON ──
+    const wantsDebug =
+      (typeof (req as any).url === "string" && (req as any).url.includes("debug=1"));
+    if (wantsDebug) {
+      const diag: Record<string, unknown> = { inputText: text, runtime: "edge", ts: Date.now() };
+
+      // TIER 1: Edge TTS raw WebSocket probe with full error capture
+      try {
+        const secMsGec = await generateSecMsGec(TRUSTED_CLIENT_TOKEN);
+        const connectionId = crypto.randomUUID().replace(/-/g, "");
+        const wssUrl = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=1-${CHROMIUM_VERSION}&ConnectionId=${connectionId}`;
+        diag.secMsGec = secMsGec;
+        diag.wssUrl = wssUrl;
+        diag.wsConstructor = typeof WebSocket;
+        const edgeResult = await new Promise((resolve) => {
+          const info: Record<string, unknown> = { opened: false, messages: [], binaryFrames: 0, audioBytes: 0 };
+          let ws: any;
+          const timer = setTimeout(() => { info.timeout = true; try { ws && ws.close(); } catch (_) {} resolve(info); }, 8000);
+          try {
+            ws = new WebSocket(wssUrl);
+            ws.binaryType = "arraybuffer";
+            ws.onopen = () => { info.opened = true; };
+            ws.onmessage = (ev: any) => {
+              if (typeof ev.data === "string") {
+                if (info.messages.length < 6) info.messages.push(ev.data.slice(0, 300));
+              } else { info.binaryFrames++; info.audioBytes += (ev.data?.byteLength || 0); }
+            };
+            ws.onerror = (e: any) => { info.error = String((e && (e.message || e.type)) || e); };
+            ws.onclose = (e: any) => { info.closeCode = e?.code; info.closeReason = e?.reason; clearTimeout(timer); resolve(info); };
+          } catch (err: any) { info.constructorThrow = String(err?.message || err); clearTimeout(timer); resolve(info); }
+        });
+        diag.edgeTts = edgeResult;
+      } catch (err: any) {
+        diag.edgeTts = { outerError: String(err?.message || err) };
+      }
+
+      // TIER 2: Sarvam raw call with status + body snippet
+      try {
+        const sarvamApiKey = process.env.SARVAM_API_KEY;
+        diag.sarvamKeyPresent = Boolean(sarvamApiKey);
+        if (sarvamApiKey) {
+          const res = await fetch("https://api.sarvam.ai/v1/text-to-speech", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "api-subscription-key": sarvamApiKey },
+            body: JSON.stringify({ text: "test bol", language_code: "hi-IN", speaker: "shubh", pace: 1.0, model: "bulbul:v3", speech_sample_rate: 24000 }),
+          });
+          diag.sarvamStatus = res.status;
+          const body = await res.text();
+          diag.sarvamBodySnippet = body.slice(0, 300);
+        }
+      } catch (err: any) { diag.sarvamError = String(err?.message || err); }
+
+      // TIER 3: Google translate probe with status
+      try {
+        const gUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=test&tl=hi&client=tw-ob`;
+        const gRes = await fetch(gUrl, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } });
+        diag.googleStatus = gRes.status;
+        diag.googleBodySnippet = (await gRes.text()).slice(0, 120);
+      } catch (err: any) { diag.googleError = String(err?.message || err); }
+
+      return NextResponse.json(diag);
+    }
+
+
     const cleanText = normalizeForFastSmoothSpeech(text);
 
     // TIER 1: MICROSOFT EDGE NEURAL TTS
