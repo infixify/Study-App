@@ -6,7 +6,7 @@ import { createElement as e, useState } from "react";
 export interface ChapterItem {
   id: string;
   title: string;
-  classTag: string;
+  subjectName: string;
 }
 
 export interface Resource {
@@ -27,57 +27,40 @@ export const RESOURCE_TYPES: { key: string; label: string; icon: string }[] = [
   { key: "mock_test", label: "Mock Tests", icon: "🎯" },
 ];
 
-interface ResourceChapterListProps {
-  chapters: ChapterItem[];
+export interface SubjectGroup {
+  name: string;
   subjectRowIds: string[];
+  chapters: ChapterItem[];
+}
+
+interface ResourceChapterListProps {
+  subjectGroups: SubjectGroup[];
   category: string;
   resources: Resource[];
 }
 
 const FULL_SUBJECT_KEY = "__full_subject__";
 
-function classTagEl(tag: string) {
-  return e(
-    "span",
-    { className: "shrink-0 text-[10px] font-semibold text-ink/60 bg-ink/5 px-2 py-1 rounded-full" },
-    tag === "Dropper" ? "Dropper" : "Class " + tag
-  );
-}
-
-// 1. READ / OPEN PDF (Opens in native viewer with "Opening..." toast)
 function triggerRead(url: string, title: string) {
   if (typeof window !== "undefined" && (window as any).AppBridge) {
     (window as any).AppBridge.postMessage(
-      JSON.stringify({
-        action: "readPdf",
-        url: url,
-        title: title,
-      })
+      JSON.stringify({ action: "readPdf", url, title })
     );
     return;
   }
-  // Web fallback: opens in new tab
   window.open(url, "_blank");
 }
 
-// 2. DOWNLOAD TO DEVICE STORAGE (Saves to Downloads/PrepWise folder without force-opening viewer)
 function triggerDownload(url: string, title: string) {
   if (typeof window !== "undefined" && (window as any).AppBridge) {
     (window as any).AppBridge.postMessage(
-      JSON.stringify({
-        action: "downloadPdf",
-        url: url,
-        title: title,
-      })
+      JSON.stringify({ action: "downloadPdf", url, title })
     );
     return;
   }
-
-  // Web Browser Fallback
   const cleanName = (title.replace(/[^a-zA-Z0-9_-]/g, "_") || "document") + ".pdf";
   if (url.indexOf("/storage/v1/object/public/") !== -1) {
-    const target = url + (url.indexOf("?") === -1 ? "?" : "&") + "download=" + encodeURIComponent(cleanName);
-    window.open(target, "_blank");
+    window.open(url + (url.indexOf("?") === -1 ? "?" : "&") + "download=" + encodeURIComponent(cleanName), "_blank");
     return;
   }
   fetch(url)
@@ -92,33 +75,39 @@ function triggerDownload(url: string, title: string) {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(blobUrl);
     })
-    .catch(() => {
-      window.open(url, "_blank");
-    });
+    .catch(() => window.open(url, "_blank"));
 }
 
 export default function ResourceChapterList({
-  chapters,
-  subjectRowIds,
+  subjectGroups,
   category,
   resources,
 }: ResourceChapterListProps) {
+  const [activeSubject, setActiveSubject] = useState<string>(() =>
+    subjectGroups.length > 0 ? subjectGroups[0].name : ""
+  );
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [viewingFile, setViewingFile] = useState<{ title: string; url: string } | null>(null);
-  const isNcert = category === "ncert";
 
+  const isNcert = category === "ncert";
   const ofCategory = resources.filter((r) => r.category === category);
 
-  const subjectWide = ofCategory.filter(
-    (r) =>
-      r.chapter_id === null &&
-      r.subject_id !== null &&
-      subjectRowIds.indexOf(r.subject_id) !== -1
-  );
+  const currentGroup = subjectGroups.find((g) => g.name === activeSubject) ?? subjectGroups[0];
 
-  const chapterRows = chapters
-    .map((ch) => ({ ch, files: ofCategory.filter((r) => r.chapter_id === ch.id) }))
-    .filter((row) => row.files.length > 0);
+  const subjectWide = currentGroup
+    ? ofCategory.filter(
+        (r) =>
+          r.chapter_id === null &&
+          r.subject_id !== null &&
+          currentGroup.subjectRowIds.indexOf(r.subject_id) !== -1
+      )
+    : [];
+
+  const chapterRows = currentGroup
+    ? currentGroup.chapters
+        .map((ch) => ({ ch, files: ofCategory.filter((r) => r.chapter_id === ch.id) }))
+        .filter((row) => row.files.length > 0)
+    : [];
 
   function handleView(url: string, title: string) {
     if (typeof window !== "undefined" && (window as any).AppBridge) {
@@ -160,7 +149,7 @@ export default function ResourceChapterList({
     );
   }
 
-  function expandable(id: string, headerChildren: any[], files: Resource[]) {
+  function expandable(id: string, label: string, files: Resource[]) {
     const open = expandedId === id;
     return e(
       "div",
@@ -172,7 +161,7 @@ export default function ResourceChapterList({
           onClick: () => setExpandedId(open ? null : id),
           className: "w-full px-4 py-3 flex items-center gap-2 text-left",
         },
-        ...headerChildren,
+        e("span", { className: "text-sm font-medium text-ink flex-1" }, label),
         e("span", { className: "text-ink/40 text-xs" }, open ? "▲" : "▼")
       ),
       open ? e("div", { className: "px-4 pb-4 flex flex-col gap-3" }, files.map(fileCard)) : null
@@ -188,10 +177,9 @@ export default function ResourceChapterList({
           "bg-white rounded-ticket border border-ink/10 px-4 py-3 flex items-center justify-between gap-2",
       },
       e(
-        "div",
-        { className: "flex items-center gap-2 flex-1 min-w-0" },
-        classTagEl(ch.classTag),
-        e("span", { className: "text-sm font-medium text-ink truncate" }, ch.title)
+        "span",
+        { className: "text-sm font-medium text-ink flex-1 min-w-0 truncate" },
+        ch.title
       ),
       e(
         "div",
@@ -222,7 +210,6 @@ export default function ResourceChapterList({
 
   function pdfModal() {
     if (!viewingFile) return null;
-
     return e(
       "div",
       {
@@ -330,29 +317,46 @@ export default function ResourceChapterList({
     );
   }
 
+  // Capsule slider
+  const capsuleSlider = subjectGroups.length > 1
+    ? e(
+        "div",
+        { className: "flex gap-2 overflow-x-auto pb-1 scrollbar-hide mb-4" },
+        subjectGroups.map((g) =>
+          e(
+            "button",
+            {
+              key: g.name,
+              type: "button",
+              onClick: () => {
+                setActiveSubject(g.name);
+                setExpandedId(null);
+              },
+              className:
+                "shrink-0 px-4 py-1.5 rounded-full text-sm font-semibold transition-all " +
+                (activeSubject === g.name
+                  ? "bg-ink text-white"
+                  : "bg-ink/8 text-ink/60 border border-ink/10"),
+            },
+            g.name
+          )
+        )
+      )
+    : null;
+
   const nothing = chapterRows.length === 0 && subjectWide.length === 0;
 
   return e(
     "div",
     { className: "flex flex-col gap-3 mt-4" },
+    capsuleSlider,
     subjectWide.length > 0
-      ? expandable(
-          FULL_SUBJECT_KEY,
-          [e("span", { key: "t", className: "text-sm font-medium text-ink flex-1" }, "Full subject")],
-          subjectWide
-        )
+      ? expandable(FULL_SUBJECT_KEY, "Full subject", subjectWide)
       : null,
     chapterRows.map((row) =>
       isNcert
         ? ncertRow(row.ch, row.files)
-        : expandable(
-            row.ch.id,
-            [
-              classTagEl(row.ch.classTag),
-              e("span", { key: "t", className: "text-sm font-medium text-ink flex-1" }, row.ch.title),
-            ],
-            row.files
-          )
+        : expandable(row.ch.id, row.ch.title, row.files)
     ),
     nothing
       ? e("p", { className: "text-sm text-slate text-center py-8" }, "No files for this subject yet.")
