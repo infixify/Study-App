@@ -441,11 +441,11 @@ function AppHeaderContent({ isRootLayout }: { isRootLayout: boolean }) {
 
                   <div className="py-2 flex flex-col gap-1 border-b border-ink/8 dark:border-white/10">
                     <Link
-                      href="/profile"
+                      href="/settings"
                       onClick={() => setProfilePopupOpen(false)}
                       className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-medium text-ink dark:text-white hover:bg-ink/5 dark:hover:bg-white/5 transition-colors"
                     >
-                      <span>👤</span> View Full Profile & Settings
+                      <span>⚙️</span> Settings & Profile
                     </Link>
                     <Link
                       href="/focus"
