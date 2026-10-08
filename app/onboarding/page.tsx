@@ -28,7 +28,7 @@ export default function OnboardingPage() {
   const [data, setData] = useState<OnboardingData>({
     classLevel: null,
     targetExam: null,
-    wantsBoards: false,
+    wantsBoards: true,
     studyMode: null,
     batchOrBranch: null,
   });
