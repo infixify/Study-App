@@ -1,0 +1,26 @@
+name: Apply TTS fix v2 (temporary automation)
+on:
+  push:
+    branches: [fix/live-tts-503]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/live-tts-503
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply TTS fixes v2
+        run: node scripts/apply-tts-fix-v2.mjs
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(tts): exact BigInt Sec-MS-GEC token (Edge TTS Tier 1) + Sarvam v1 endpoint/bulbul:v3 Tier 2"
+          git push
