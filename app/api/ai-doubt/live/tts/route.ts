@@ -14,11 +14,13 @@ const CHROMIUM_VERSION = process.env.EDGE_CHROMIUM_VERSION || "143.0.3650.75";
  * Uses standard number arithmetic avoiding '...n' BigInt literals for zero build failure.
  */
 async function generateSecMsGec(clientToken: string): Promise<string> {
-  let ticks = Date.now() / 1000 + WIN_EPOCH;
-  ticks -= ticks % 300; // Round down to nearest 5 minutes
-  ticks *= S_TO_NS / 100; // Convert to 100ns intervals
-  const strToHash = ticks.toFixed(0) + clientToken;
-
+  // Exact integer math via BigInt (constructed from strings; no BigInt literals).
+  // Old float math overflowed Number.MAX_SAFE_INTEGER and corrupted the token.
+  const WIN_EPOCH = 11644473600;
+  let seconds = Math.floor(Date.now() / 1000) + WIN_EPOCH;
+  seconds = seconds - (seconds % 300); // round down to nearest 5 minutes
+  const ticks = BigInt(seconds) * BigInt("10000000"); // 100ns intervals
+  const strToHash = ticks.toString() + clientToken;
   const enc = new TextEncoder();
   const hashBuffer = await crypto.subtle.digest(
     "SHA-256",
@@ -298,22 +300,22 @@ export async function POST(req: NextRequest) {
     const sarvamApiKey = process.env.SARVAM_API_KEY;
     if (sarvamApiKey) {
       try {
-        const res = await fetch("https://api.sarvam.ai/text-to-speech", {
+        const res = await fetch("https://api.sarvam.ai/v1/text-to-speech", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "api-subscription-key": sarvamApiKey,
           },
           body: JSON.stringify({
-            inputs: [cleanText],
-            target_language_code: "hi-IN",
+            text: cleanText,
+            language_code: "hi-IN",
             speaker: "shubh",
-            pitch: 0,
+            
             pace: 1.15,
-            loudness: 1.5,
-            speech_sample_rate: 22050,
-            enable_preprocessing: true,
-            model: "bulbul:v1",
+            
+            speech_sample_rate: 24000,
+            
+            model: "bulbul:v3",
           }),
         });
         if (res.ok) {
