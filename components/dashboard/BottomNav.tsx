@@ -16,7 +16,7 @@ export default function BottomNav() {
   const rightItems = [
     { label: "Test", href: "/tests", icon: "📊" },
     { label: "Groups", href: "/groups", icon: "👥" },
-    { label: "Profile", href: "/profile", icon: "👤" },
+    { label: "Settings", href: "/settings", icon: "⚙️" },
   ];
 
   const homeActive = pathname === "/dashboard";
@@ -83,7 +83,7 @@ export default function BottomNav() {
 
         {/* RIGHT */}
         {rightItems.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive = pathname === item.href || pathname.startsWith("/settings");
           return (
             <Link
               key={item.href}
