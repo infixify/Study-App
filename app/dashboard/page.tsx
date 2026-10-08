@@ -152,8 +152,8 @@ const COLOR_PRESETS = [
   { color: "from-teal-500 to-emerald-600", bg: "bg-teal-50", border: "border-teal-200", text: "text-teal-950", badge: "bg-teal-500" },
 ];
 
-const QUOTE_LIMIT = 3;
-const MEME_LIMIT = 2;
+const QUOTE_LIMIT = 1; // 1 tap allowed: see 1 initial + 1 new = 2 cards total per day
+const MEME_LIMIT = 1; // same for memes
 
 function getTodayKey(): string {
   const istDate = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -671,10 +671,8 @@ function HeroWidget({
         {limitHit && (
           <p className="mt-1.5 text-center text-[10px] font-bold text-red-500">
             {mode === "motivation"
-              ? `Only ${QUOTE_LIMIT} quotes per day — come back tomorrow! 🌅`
-              : `Only ${MEME_LIMIT} memes per day — back to books! 📚`}
-            {" · "}
-            <span className="underline underline-offset-2 cursor-pointer">Upgrade for more</span>
+              ? `Only 2 quotes per day — come back tomorrow! 🌅`
+              : `Only 2 memes per day — back to books! 📚`}
           </p>
         )}
       </div>
