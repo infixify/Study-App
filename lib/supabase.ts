@@ -52,10 +52,6 @@ async function resolveBatchId(batchOrBranch: string | null): Promise<string | nu
 }
 
 // Real profile write — creates/updates the signed-in user's row.
-// NOTE: class_level / target_exam / wants_boards should only ever be written
-// here, at signup time. After onboarding_completed = true, the DB trigger
-// (see schema.sql -> trg_users_lock_after_onboarding) rejects changes to
-// these three columns, so the profile screen must never send them again.
 export async function saveOnboarding(data: OnboardingData) {
   const { data: authData } = await supabase.auth.getUser();
   if (!authData?.user) {
@@ -73,7 +69,7 @@ export async function saveOnboarding(data: OnboardingData) {
     email: authData.user.email!,
     class_level: data.classLevel,
     target_exam: data.targetExam,
-    wants_boards: data.wantsBoards,
+    wants_boards: data.wantsBoards ?? true,
     study_mode: data.studyMode,
     batch_or_branch_id: batchId,
     onboarding_completed: true,
@@ -90,24 +86,41 @@ export async function saveOnboarding(data: OnboardingData) {
 // this keeps any other still-mock-named import from breaking the build.
 export const mockSaveOnboarding = saveOnboarding;
 
-// Real profile update for the EDITABLE fields only (study_mode, batch).
+// Real profile update for user-editable fields (study_mode, batch, class_level, target_exam, wants_boards).
 export async function updateEditableProfile(fields: {
-  studyMode: StudyMode;
-  batchOrBranch: string | null;
+  studyMode?: StudyMode;
+  batchOrBranch?: string | null;
+  classLevel?: ClassLevel;
+  targetExam?: TargetExam;
+  wantsBoards?: boolean;
 }) {
   const { data: authData } = await supabase.auth.getUser();
   if (!authData?.user) {
     return { success: false, error: "Not signed in" };
   }
 
-  const batchId = await resolveBatchId(fields.batchOrBranch);
+  const updateData: Record<string, any> = {};
+
+  if (fields.studyMode !== undefined) {
+    updateData.study_mode = fields.studyMode;
+  }
+  if (fields.batchOrBranch !== undefined) {
+    const batchId = await resolveBatchId(fields.batchOrBranch);
+    updateData.batch_or_branch_id = batchId;
+  }
+  if (fields.classLevel !== undefined) {
+    updateData.class_level = fields.classLevel;
+  }
+  if (fields.targetExam !== undefined) {
+    updateData.target_exam = fields.targetExam;
+  }
+  if (fields.wantsBoards !== undefined) {
+    updateData.wants_boards = fields.wantsBoards;
+  }
 
   const { error } = await supabase
     .from("users")
-    .update({
-      study_mode: fields.studyMode,
-      batch_or_branch_id: batchId,
-    })
+    .update(updateData)
     .eq("uid", authData.user.id);
 
   if (error) {
@@ -117,13 +130,12 @@ export async function updateEditableProfile(fields: {
   return { success: true };
 }
 
-// Backward-compat alias for app/profile/page.tsx (still imports the mock name).
+// Backward-compat alias
 export const mockUpdateEditableProfile = updateEditableProfile;
 
 // ---------------------------------------------------------------------------
 // Batches — Online is grouped by institute with real, named batch series.
 // Offline is institute-name only (no batch-level detail), per product call.
-// In production this seeds/reads from the `batches` table (see schema.sql).
 // ---------------------------------------------------------------------------
 export interface OnlineBatchOption {
   institute: string;
@@ -144,8 +156,7 @@ export const ONLINE_BATCHES: OnlineBatchOption[] = [
   { institute: "Unacademy", name: "NEET/JEE batch", meta: "Subscription based" },
 ];
 
-// Offline: institute name only — student's actual batch inside the institute
-// isn't asked at signup for offline mode.
+// Offline: institute name only
 export const OFFLINE_INSTITUTES: string[] = [
   "Allen Career Institute",
   "Aakash Institute",
@@ -160,8 +171,7 @@ export const OFFLINE_INSTITUTES: string[] = [
 
 export const BATCH_OTHER = "Other / not listed";
 
-// Helper used by content queries (library/dashboard/resources) so a user on the
-// combined track or dropper sees both classes' chapters instead of just one.
+// CLASS_OPTIONS — Class 10th has been removed.
 export const CLASS_OPTIONS: { value: ClassLevel; label: string; sub: string; isNew?: boolean }[] = [
   { value: "11", label: "Class 11", sub: "Foundation year" },
   { value: "12", label: "Class 12", sub: "Boards + entrance" },
@@ -169,11 +179,11 @@ export const CLASS_OPTIONS: { value: ClassLevel; label: string; sub: string; isN
   { value: "Dropper", label: "Dropper", sub: "One more shot, fully focused" },
 ];
 
-// Helper used by content queries (library/dashboard) so a user on the
-// combined track sees both classes' chapters instead of just one.
+// Helper used by content queries (library/dashboard/resources) so a user on the
+// combined track or dropper sees both classes' chapters instead of just one.
 export function classLevelsForContent(classLevel: ClassLevel | null): string[] {
   if (classLevel === "11_12" || classLevel === "Dropper") {
-  // Dropper students and 11+12 combined students get full Class 11 and 12 NCERT & content
+    // Dropper students and 11+12 combined students get full Class 11 and 12 NCERT & content
     return ["11", "12"];
   }
   if (!classLevel) return [];
