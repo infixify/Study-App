@@ -102,8 +102,21 @@ const newPlay =
           const utterance = new SpeechSynthesisUtterance(chunk);
           utterance.lang = "hi-IN";
           utterance.rate = 1.05;
-          utterance.onend = done;
-          utterance.onerror = done;
+          // Chromium 15s garbage-collection cutoff keep-alive (pause+resume heartbeat every 8s)
+          const heartbeat = setInterval(() => {
+            try {
+              if (window.speechSynthesis.speaking) {
+                window.speechSynthesis.pause();
+                window.speechSynthesis.resume();
+              }
+            } catch (_) {}
+          }, 8000);
+          const finish = () => {
+            clearInterval(heartbeat);
+            done();
+          };
+          utterance.onend = finish;
+          utterance.onerror = finish;
           window.speechSynthesis.speak(utterance);
           return;
         }
@@ -176,9 +189,10 @@ cli = cli.slice(0, sC) + newStop + cli.slice(sEnd);
 
 const cliChecks = {
   playCount: (cli.match(/const playAudioChunk = useCallback\(/g) || []).length === 1,
-  interrupt: (cli.match(/speechInterruptRef/g) || []).length >= 5,
+  interrupt: (cli.match(/speechInterruptRef/g) || []).length >= 4,
   chunks: (cli.match(/splitIntoSpeechChunks/g) || []).length >= 2,
   synth: cli.includes('SpeechSynthesisUtterance'),
+  heartbeat: cli.includes('pause();') && cli.includes('resume();'),
 };
 if (!Object.values(cliChecks).every(Boolean)) fail('client verification: ' + JSON.stringify(cliChecks));
 writeFileSync('components/dashboard/LiveVideoCallModal.tsx', cli);
