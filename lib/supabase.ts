@@ -163,7 +163,6 @@ export const BATCH_OTHER = "Other / not listed";
 // Helper used by content queries (library/dashboard/resources) so a user on the
 // combined track or dropper sees both classes' chapters instead of just one.
 export const CLASS_OPTIONS: { value: ClassLevel; label: string; sub: string; isNew?: boolean }[] = [
-  { value: "10", label: "Class 10", sub: "Boards focus" },
   { value: "11", label: "Class 11", sub: "Foundation year" },
   { value: "12", label: "Class 12", sub: "Boards + entrance" },
   { value: "11_12", label: "11 + 12", sub: "Combined 2-year track", isNew: true },
