@@ -6,9 +6,39 @@ export const runtime = "edge";
 const SARVAM_API_KEY = process.env.SARVAM_API_KEY || process.env.NEXT_PUBLIC_SARVAM_API_KEY;
 const HF_TOKEN = process.env.HF_TOKEN;
 
-// ========== IN-MEMORY CACHE (24-hour expiry) ==========
-// Cache structure: Map<textHash, { blob: Blob, timestamp: number }>
-const ttsCache = new Map<string, { blob: Blob; timestamp: number }>();
+// ========== GLOBAL IN-MEMORY CACHE (24-hour expiry, shared across requests) ==========
+// Cache structure: Map<textHash, { blob: Blob, timestamp: number, text: string }>
+// Using module-level const so it persists across requests in the same worker instance
+const ttsCache = new Map<string, { blob: Blob; timestamp: number; text: string }>();
+
+// Clean cache periodically to prevent memory bloat
+function cleanupCache() {
+  const now = Date.now();
+  const keysToDelete: string[] = [];
+  
+  for (const [key, value] of ttsCache.entries()) {
+    if (now - value.timestamp > 86400000) {
+      keysToDelete.push(key);
+    }
+  }
+  
+  for (const key of keysToDelete) {
+    ttsCache.delete(key);
+  }
+  
+  // Clean up every 100 requests to prevent memory growth
+  if (ttsCache.size > 100) {
+    // Keep only the 50 most recent entries
+    const entries = Array.from(ttsCache.entries())
+      .sort((a, b) => b[1].timestamp - a[1].timestamp)
+      .slice(0, 50);
+    
+    ttsCache.clear();
+    for (const [key, value] of entries) {
+      ttsCache.set(key, value);
+    }
+  }
+}
 
 async function generateCacheKey(text: string): Promise<string> {
   // Create SHA-256 hash of text for consistent cache keys
@@ -299,10 +329,13 @@ export async function POST(req: NextRequest) {
     // Generate cache key
     const cacheKey = await generateCacheKey(text);
     
-    // Check cache first
+    // Clean up cache periodically
+    cleanupCache();
+    
+    // Check cache first - THIS IS CRITICAL FOR AVOIDING DUPLICATE REQUESTS
     const cached = ttsCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < 86400000) {
-      console.log("CACHE HIT for text:", text.substring(0, 50));
+      console.log("CACHE HIT for text:", text.substring(0, 50), "| Saved API call!");
       return new Response(cached.blob, {
         status: 200,
         headers: {
@@ -352,10 +385,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Cache the result for 24 hours
+    // Cache the result for 24 hours - THIS PREVENTS DUPLICATE REQUESTS FOR SAME TEXT
     if (blob) {
-      ttsCache.set(cacheKey, { blob, timestamp: Date.now() });
-      console.log("CACHED audio for text:", text.substring(0, 50));
+      ttsCache.set(cacheKey, { blob, timestamp: Date.now(), text });
+      console.log("CACHED audio for text:", text.substring(0, 50), "| Future requests will use cache!");
     }
 
     // Return the audio
