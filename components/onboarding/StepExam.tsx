@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { ClassLevel, TargetExam } from "@/lib/supabase";
 import { BackButton } from "./StepClass";
 
@@ -8,116 +7,88 @@ interface StepExamProps {
   classLevel: ClassLevel | null;
   selectedExam: TargetExam | null;
   wantsBoards: boolean;
-  onContinue: (exam: TargetExam, wantsBoards: boolean) => void;
+  onSelectExam: (exam: TargetExam, includeSchool: boolean) => void;
   onBack: () => void;
 }
 
-export default function StepExam({
+const EXAM_OPTIONS: { value: TargetExam; label: string; desc: string; icon: string; badge?: string }[] = [
+  { value: "JEE", label: "JEE Main & Adv", desc: "PCM • Engineering focus", icon: "⚡" },
+  { value: "NEET", label: "NEET UG", desc: "PCB • Medical focus", icon: "🩺" },
+  { value: "Both", label: "JEE + NEET Both", desc: "PCMB • All-rounder track", icon: "🎯", badge: "PCMB" },
+  { value: "School", label: "School / Boards Only", desc: "Board exams & foundations", icon: "📚" },
+];
+
+export function StepExam({
   classLevel,
   selectedExam,
-  wantsBoards,
-  onContinue,
+  onSelectExam,
   onBack,
 }: StepExamProps) {
-  const [exam, setExam] = useState<TargetExam | null>(selectedExam);
-  
-  // Droppers don't have school/board exams
   const isDropper = classLevel === "Dropper";
 
-  // For 10, 11, 12, and 11_12, default to true unless explicitly false
-  const [includeSchool, setIncludeSchool] = useState<boolean>(
-    isDropper ? false : (wantsBoards ?? true)
-  );
-
-  // Dynamic naming based on student's class (including 11_12)
-  const schoolExamTitle =
-    classLevel === "11"
-      ? "Class 11 School Exams"
-      : classLevel === "12"
-      ? "Class 12 Board Exams"
-      : classLevel === "11_12"
-      ? "School & Board Exams"
-      : classLevel === "10"
-      ? "Class 10 Board Exams"
-      : "School / Board Exams";
-
-  const schoolExamSubtitle =
-    classLevel === "11"
-      ? "Include CBSE/State annual exams and NCERT coverage alongside competitive prep"
-      : classLevel === "11_12"
-      ? "Include school annual exams, Board countdown & NCERT coverage alongside competitive prep"
-      : "Track Board countdown, subjective practice & NCERT alongside competitive prep";
+  const handleExamSelect = (examValue: TargetExam) => {
+    // Dropper students don't need school/boards; for all other classes, boards are ON by default
+    const includeSchool = !isDropper;
+    onSelectExam(examValue, includeSchool);
+  };
 
   return (
-    <div>
-      <BackButton onClick={onBack} />
-      <h2 className="font-display text-2xl font-semibold mt-4">
-        What are you targeting?
-      </h2>
-      <p className="text-slate text-sm mt-1 mb-6">
-        We'll build your countdown, syllabus, and test tracker around your target.
-      </p>
-
-      {/* Target Exam Selection (JEE / NEET) */}
-      <div className="flex flex-col gap-3">
-        {(["JEE", "NEET"] as TargetExam[]).map((e) => (
-          <button
-            key={e}
-            type="button"
-            onClick={() => setExam(e)}
-            className={`text-left rounded-ticket border p-4 transition-all ${
-              exam === e
-                ? "border-marigold bg-marigold/10 shadow-xs"
-                : "border-ink/12 bg-white hover:border-ink/25"
-            }`}
-          >
-            <div className="font-display text-lg font-semibold text-ink">{e}</div>
-            <div className="text-xs text-slate mt-0.5">
-              {e === "JEE" ? "JEE Mains + Advanced tracking" : "NEET-UG tracking"}
-            </div>
-          </button>
-        ))}
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <BackButton onClick={onBack} />
+        <div>
+          <h2 className="text-xl font-bold text-white">Target Exam</h2>
+          <p className="text-xs text-white/50">Pick your main competitive goal</p>
+        </div>
       </div>
 
-      {/* School / Board Exam Toggle (Hidden only for Droppers) */}
-      {!isDropper && (
-        <div className="mt-6 rounded-ticket border border-ink/10 bg-white p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-ink">{schoolExamTitle}</p>
-              <p className="text-xs text-slate mt-0.5 leading-relaxed">
-                {schoolExamSubtitle}
-              </p>
-            </div>
-            
-            {/* Toggle Switch */}
+      <div className="grid grid-cols-1 gap-3">
+        {EXAM_OPTIONS.map((exam) => {
+          const isSelected = selectedExam === exam.value;
+          return (
             <button
-              type="button"
-              role="switch"
-              aria-checked={includeSchool}
-              onClick={() => setIncludeSchool((prev) => !prev)}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                includeSchool ? "bg-teal" : "bg-ink/20"
+              key={exam.value}
+              onClick={() => handleExamSelect(exam.value)}
+              className={`w-full p-4 rounded-2xl border text-left transition-all duration-200 flex items-center justify-between group ${
+                isSelected
+                  ? "bg-violet-500/15 border-violet-500/50 shadow-lg shadow-violet-500/10"
+                  : "bg-white/[0.03] border-white/10 hover:bg-white/[0.06] hover:border-white/20"
               }`}
             >
-              <span
-                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                  includeSchool ? "translate-x-5" : "translate-x-0"
+              <div className="flex items-center gap-3.5">
+                <span className="text-2xl group-hover:scale-110 transition-transform">{exam.icon}</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-white text-sm">{exam.label}</span>
+                    {exam.badge && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                        {exam.badge}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-white/50 mt-0.5">{exam.desc}</p>
+                </div>
+              </div>
+              <div
+                className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
+                  isSelected ? "border-violet-400 bg-violet-500" : "border-white/20 group-hover:border-white/40"
                 }`}
-              />
+              >
+                {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
+              </div>
             </button>
-          </div>
+          );
+        })}
+      </div>
+
+      {/* Info note showing boards prep is included */}
+      {!isDropper && (
+        <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 text-center">
+          <p className="text-xs text-white/40">
+            ✨ Board & School exam preparation is included automatically
+          </p>
         </div>
       )}
-
-      {/* Continue Button */}
-      <button
-        disabled={!exam}
-        onClick={() => exam && onContinue(exam, isDropper ? false : includeSchool)}
-        className="w-full mt-8 bg-ink text-paper rounded-ticket py-3.5 font-medium disabled:opacity-30 disabled:cursor-not-allowed hover:bg-ink-100 transition-colors shadow-md"
-      >
-        Continue
-      </button>
     </div>
   );
 }
