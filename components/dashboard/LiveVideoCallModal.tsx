@@ -1,80 +1,103 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import {
-  Mic,
-  MicOff,
-  Video,
-  VideoOff,
-  PhoneOff,
-  RotateCcw,
-  Sparkles,
-  Volume2,
-  VolumeX,
-  MessageSquare,
-  X,
-  AlertCircle,
-  HelpCircle,
-  Send,
-  Camera,
-  Trash2,
-  CheckCircle,
-} from "lucide-react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 
-// Micro Icons for custom UI
-const FlashlightBulbIcon = ({ active }: { active: boolean }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    className={`w-6 h-6 transition-all duration-300 ${
-      active
-        ? "text-yellow-400 drop-shadow-[0_0_12px_rgba(250,204,21,0.8)] scale-110"
-        : "text-slate-300 hover:text-white"
-    }`}
-  >
-    <path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7zm-2 18a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-1h-4v1z" />
+// ============================================================================
+// CLEAN INLINE SVG ICONS (Accurate Symbols & Zero Glitches)
+// ============================================================================
+const CloseIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
   </svg>
 );
 
-const MicActiveIcon = () => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="w-7 h-7 text-emerald-400 animate-pulse"
-  >
-    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-    <line x1="12" x2="12" y1="19" y2="22" />
+const CameraSwitchIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
   </svg>
 );
 
-const MicMutedIcon = () => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="w-7 h-7 text-red-400"
-  >
-    <line x1="2" x2="22" y1="2" y2="22" />
-    <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2" />
-    <path d="M5 10v2a7 7 0 0 0 12 5" />
-    <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33" />
-    <path d="M9 9v3a3 3 0 0 0 5.12 2.12" />
-    <line x1="12" x2="12" y1="19" y2="22" />
+// 1. Flashlight ON: Filled vibrant glowing bulb, NO cut line
+const TorchOnIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm-2 17h4v1c0 .55-.45 1-1 1h-2c-.55 0-1-.45-1-1v-1z" />
   </svg>
 );
 
-interface ChatMessage {
+// 2. Flashlight OFF: Outlined bulb with a clean diagonal cut line
+const TorchOffIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 18h6m-5 3h4m-7.2-7.5A6.5 6.5 0 0112 3.5c1.8 0 3.4.7 4.6 1.9M8 12.5C7.4 11.5 7 10.3 7 9c0-.6.1-1.2.2-1.7M17 12.5c.3-.7.5-1.5.5-2.5 0-1.2-.4-2.3-1-3.2" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18" />
+  </svg>
+);
+
+// 3. Mic ACTIVE (Unmuted) Icon
+const MicActiveIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+  </svg>
+);
+
+// 4. Mic MUTED (Disabled/Mute) Icon with clean diagonal cut
+const MicMutedIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-1.2 3.9M12 18a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5c0-.4.1-.8.2-1.2M9.4 4.3A3 3 0 0115 5v5.2M3 3l18 18" />
+  </svg>
+);
+
+const TrashIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+  </svg>
+);
+
+const ChatBubbleIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+  </svg>
+);
+
+const CopyCheckIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+  </svg>
+);
+
+const CopyDefaultIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+  </svg>
+);
+
+const StopSquareIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
+  <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+    <rect x="6" y="6" width="12" height="12" rx="2" />
+  </svg>
+);
+
+const PlayTriangleIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
+  <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+    <path d="M8 5v14l11-7z" />
+  </svg>
+);
+
+const ChevronDownIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+  </svg>
+);
+
+const ChevronUpIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+  </svg>
+);
+
+// ============================================================================
+// CONSTANTS & TYPES
+// ============================================================================
+interface Message {
   id: string;
   sender: "user" | "ai";
   text: string;
@@ -95,64 +118,158 @@ interface LiveVideoCallModalProps {
 
 const CACHE_KEY_MESSAGES = "prepwise_live_session_messages_v1";
 const AUDIO_CACHE_PREFIX = "prepwise_live_tts_";
-const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 Hours
+const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000; // Strict 24 Hours Retention Limit
 
-// 24 Hour Cache Purge Utility
+// ============================================================================
+// 24-HOUR AUTO STORAGE PURGE (Guarantees zero storage bloat & low Supabase usage)
+// ============================================================================
 function purgeExpiredSessionData() {
   if (typeof window === "undefined") return;
   try {
     const now = Date.now();
+    const keysToRemove: string[] = [];
+
+    // 1. Purge messages older than 24h
     const stored = localStorage.getItem(CACHE_KEY_MESSAGES);
     if (stored) {
-      const parsed = JSON.parse(stored);
-      if (parsed.timestamp && now - parsed.timestamp > CACHE_EXPIRY_MS) {
-        localStorage.removeItem(CACHE_KEY_MESSAGES);
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed.timestamp && now - parsed.timestamp > CACHE_EXPIRY_MS) {
+          keysToRemove.push(CACHE_KEY_MESSAGES);
+        }
+      } catch (_) {
+        keysToRemove.push(CACHE_KEY_MESSAGES);
       }
     }
-    // Clean audio blob keys
+
+    // 2. Purge cached TTS blobs
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && key.startsWith(AUDIO_CACHE_PREFIX)) {
         try {
-          const item = JSON.parse(localStorage.getItem(key) || "{}");
-          if (item.timestamp && now - item.timestamp > CACHE_EXPIRY_MS) {
-            localStorage.removeItem(key);
+          const item = localStorage.getItem(key);
+          if (item) {
+            const parsed = JSON.parse(item);
+            if (parsed.timestamp && now - parsed.timestamp > CACHE_EXPIRY_MS) {
+              keysToRemove.push(key);
+            }
           }
         } catch (_) {
-          localStorage.removeItem(key);
+          keysToRemove.push(key);
         }
       }
     }
-  } catch (err) {
-    console.warn("Cache purge error:", err);
-  }
+
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+  } catch (_) {}
 }
 
-// Function to clean text for TTS and reduce excessive pauses
-function cleanTextForSpeech(text: string): string {
-  if (!text) return "";
-  let cleaned = text
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/[*_~#>]/g, "")
-    .replace(/(\$|\$\$)([\s\S]*?)\1/g, "$2")
-    .replace(/\s+/g, " ")
-    .trim();
+// ============================================================================
+// NATURAL SPOKEN SCRIPT FILTER & ACADEMIC PRONUNCIATION NORMALIZER
+// ============================================================================
+function cleanTextForSpeech(raw: string): string {
+  if (!raw) return "";
+  let text = raw;
 
-  // Natural pause normalization (prevents Microsoft TTS long boundary breaks)
-  cleaned = cleaned
-    .replace(/[,;]\s*/g, ", ")
-    .replace(/\.{2,}/g, ".")
-    .replace(/[!?]+\s*/g, ". ")
-    .replace(/:\s*/g, " - ")
-    .replace(/\s*([.,?!])\s*/g, "$1 ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // 1. Remove Markdown syntax & asterisks
+  text = text.replace(/[*#`_~\[\](){}]/g, " ");
+  text = text.replace(/Step \d+:\s*/gi, "");
 
-  return cleaned;
+  // 2. Normalizing pauses: Multiple commas, ellipses, and semicolons to continuous speech
+  text = text.replace(/\.{2,}/g, " ");
+  text = text.replace(/,{2,}/g, " ");
+  text = text.replace(/[:;-]{2,}/g, " ");
+  text = text.replace(/[:;]/g, " ");
+
+  // 3. Indian Faculty Academic Pronunciation Dictionaries
+  text = text.replace(/\bapprox\b/gi, "lagbhag");
+  text = text.replace(/\beqn\b|\beq\b/gi, "equation");
+  text = text.replace(/\bw\.r\.t\b/gi, "with respect to");
+  text = text.replace(/\bi\.e\b/gi, "yaani ki");
+  text = text.replace(/\be\.g\b/gi, "for example");
+  text = text.replace(/\bfig\b/gi, "figure");
+  text = text.replace(/\bconst\b/gi, "constant");
+  text = text.replace(/\bmag\b/gi, "magnification");
+  text = text.replace(/\bdiff\b/gi, "differentiation");
+  text = text.replace(/\bint\b/gi, "integration");
+
+  // 4. Common Optics & Physics Subscripts (Compound Microscope & Mechanics)
+  text = text.replace(/\bvo\b/gi, "v objective");
+  text = text.replace(/\buo\b/gi, "u objective");
+  text = text.replace(/\bfo\b/gi, "f objective");
+  text = text.replace(/\bfe\b/gi, "f eyepiece");
+  text = text.replace(/\bMo\b/gi, "M objective");
+  text = text.replace(/\bMe\b/gi, "M eyepiece");
+
+  // 5. Mathematical Operators to Spoken Words
+  text = text.replace(/\+/g, " plus ");
+  text = text.replace(/\s-\s/g, " minus ");
+  text = text.replace(/\s\*\s|\s×\s/g, " into ");
+  text = text.replace(/\s\/\s|\s÷\s/g, " divided by ");
+  text = text.replace(/\s=\s/g, " equals ");
+  text = text.replace(/\s≈\s/g, " approximately equals ");
+
+  // 6. Aggressively strip mid-sentence commas & hinge pauses so speech flows seamlessly
+  text = text.replace(/,\s*(hai|ki|toh|aur|se|mein|ka|ke|ko|par|jab|tab|isliye|kyuki|lekin)\b/gi, " $1");
+  text = text.replace(/([a-zA-Z0-9]+),\s*([a-zA-Z0-9]+)/g, "$1 $2");
+  text = text.replace(/,/g, " ");
+
+  text = text.replace(/\s+/g, " ").trim();
+  return text;
 }
 
+// ============================================================================
+// TEXTBOOK MATH FORMATTER (Converts raw LaTeX into readable textbook format)
+// ============================================================================
+function normalizeMathToTextbook(raw: string): string {
+  if (!raw) return "";
+  let text = raw;
+
+  // Fractions: \frac{a}{b} -> (a / b)
+  text = text.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)");
+
+  // Square roots: \sqrt{x} -> √(x)
+  text = text.replace(/\\sqrt\{([^}]+)\}/g, "√($1)");
+
+  // Common Greek symbols
+  text = text.replace(/\\mu/g, "μ");
+  text = text.replace(/\\theta/g, "θ");
+  text = text.replace(/\\lambda/g, "λ");
+  text = text.replace(/\\omega/g, "ω");
+  text = text.replace(/\\alpha/g, "α");
+  text = text.replace(/\\beta/g, "β");
+  text = text.replace(/\\gamma/g, "γ");
+  text = text.replace(/\\delta|\\Delta/g, "Δ");
+  text = text.replace(/\\pi/g, "π");
+
+  // Subscripts & Superscripts
+  text = text.replace(/_\{([^}]+)\}/g, "_$1");
+  text = text.replace(/\^\{2\}/g, "²");
+  text = text.replace(/\^\{3\}/g, "³");
+  text = text.replace(/\^\{([^}]+)\}/g, "^$1");
+
+  // Clean remaining LaTeX slashes
+  text = text.replace(/\\times/g, "×");
+  text = text.replace(/\\div/g, "÷");
+  text = text.replace(/\\pm/g, "±");
+  text = text.replace(/\\approx/g, "≈");
+  text = text.replace(/\\le|\\leq/g, "≤");
+  text = text.replace(/\\ge|\\geq/g, "≥");
+  text = text.replace(/\\infty/g, "∞");
+  text = text.replace(/\\to|\\rightarrow/g, "→");
+  text = text.replace(/\\implies/g, "⇒");
+  text = text.replace(/\\left|\\right/g, "");
+  text = text.replace(/\\text\{([^}]+)\}/g, "$1");
+  text = text.replace(/\\mathrm\{([^}]+)\}/g, "$1");
+  text = text.replace(/\\mathbf\{([^}]+)\}/g, "$1");
+  text = text.replace(/\\/g, "");
+
+  return text;
+}
+
+// ============================================================================
+// MAIN COMPONENT: LiveVideoCallModal
+// ============================================================================
 export default function LiveVideoCallModal({
   isOpen,
   open,
@@ -160,7 +277,6 @@ export default function LiveVideoCallModal({
   studentContext,
 }: LiveVideoCallModalProps) {
   const modalOpen = open !== undefined ? open : (isOpen ?? false);
-
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(modalOpen);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
@@ -168,31 +284,27 @@ export default function LiveVideoCallModal({
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isHoldingMic, setIsHoldingMic] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [hudMode, setHudMode] = useState<"compact" | "expanded">("compact");
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
   const [activeSpeechMessageId, setActiveSpeechMessageId] = useState<string | null>(null);
-
-  // Video Streaming State
-  const [isCameraActive, setIsCameraActive] = useState(true);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-
-  // Messages & Call Transcript State
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
-  const [textInput, setTextInput] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [callDuration, setCallDuration] = useState(0);
-  const [isAiThinking, setIsAiThinking] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [flashTrigger, setFlashTrigger] = useState(false);
+  const [callDuration, setCallDuration] = useState(0);
+  const [audioCache, setAudioCache] = useState<Record<string, string>>({});
 
   // Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const speechRecognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<any>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioQueueRef = useRef<string[]>([]);
   const isAudioQueuePlayingRef = useRef(false);
   const transcriptRef = useRef("");
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
   // Sync Open state
@@ -217,18 +329,24 @@ export default function LiveVideoCallModal({
   }, [isModalOpen]);
 
   // Save messages to 24h local storage
-  useEffect(() => {
-    if (messages.length > 0) {
-      try {
-        localStorage.setItem(
-          CACHE_KEY_MESSAGES,
-          JSON.stringify({ timestamp: Date.now(), items: messages })
-        );
-      } catch (_) {}
-    }
-  }, [messages]);
+  const saveMessagesToStorage = useCallback((msgs: Message[]) => {
+    try {
+      localStorage.setItem(
+        CACHE_KEY_MESSAGES,
+        JSON.stringify({ timestamp: Date.now(), items: msgs.slice(-30) })
+      );
+    } catch (_) {}
+  }, []);
 
-  // 2. Call Timer
+  // Manual Clear Chat (Supabase + LocalStorage Saver)
+  const handleManualClearChat = useCallback(() => {
+    setMessages([]);
+    try {
+      localStorage.removeItem(CACHE_KEY_MESSAGES);
+    } catch (_) {}
+  }, []);
+
+  // 2. Call Duration Timer
   useEffect(() => {
     if (isModalOpen) {
       setCallDuration(0);
@@ -243,228 +361,27 @@ export default function LiveVideoCallModal({
     };
   }, [isModalOpen]);
 
-  const formatTimer = (sec: number) => {
-    const mins = Math.floor(sec / 60);
-    const secs = sec % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  // Format Duration seconds -> mm:ss
+  const formatTime = (secs: number) => {
+    const mins = Math.floor(secs / 60);
+    const rem = secs % 60;
+    return `${mins.toString().padStart(2, "0")}:${rem.toString().padStart(2, "0")}`;
   };
 
-  // 3. Audio Player & Cleanup
-  const stopCurrentAudio = useCallback(() => {
-    if (currentAudioRef.current) {
-      currentAudioRef.current.pause();
-      currentAudioRef.current.src = "";
-      currentAudioRef.current = null;
-    }
-    audioQueueRef.current = [];
-    isAudioQueuePlayingRef.current = false;
-    setIsAiSpeaking(false);
-    setActiveSpeechMessageId(null);
-  }, []);
-
-  const playAudioBlobUrl = useCallback((blobUrl: string, msgId: string, onEnd?: () => void) => {
-    stopCurrentAudio();
-    const audio = new Audio(blobUrl);
-    currentAudioRef.current = audio;
-    setIsAiSpeaking(true);
-    setActiveSpeechMessageId(msgId);
-
-    audio.onended = () => {
-      setIsAiSpeaking(false);
-      setActiveSpeechMessageId(null);
-      if (onEnd) onEnd();
-    };
-    audio.onerror = () => {
-      setIsAiSpeaking(false);
-      setActiveSpeechMessageId(null);
-      if (onEnd) onEnd();
-    };
-    audio.play().catch((e) => {
-      console.warn("Audio play prevented:", e);
-      setIsAiSpeaking(false);
-      setActiveSpeechMessageId(null);
-    });
-  }, [stopCurrentAudio]);
-
-  // Fetch TTS from Microsoft Edge Backend
-  const playAiVoice = useCallback(
-    async (text: string, msgId: string) => {
-      const speechReadyText = cleanTextForSpeech(text);
-      if (!speechReadyText) return;
-
-      const cacheKey = `${AUDIO_CACHE_PREFIX}${encodeURIComponent(speechReadyText.slice(0, 60))}`;
-      try {
-        const cachedBlob = sessionStorage.getItem(cacheKey);
-        if (cachedBlob) {
-          playAudioBlobUrl(cachedBlob, msgId);
-          return;
-        }
-      } catch (_) {}
-
-      try {
-        setIsAiSpeaking(true);
-        setActiveSpeechMessageId(msgId);
-
-        const response = await fetch(
-          `/api/ai-doubt/live/tts?text=${encodeURIComponent(speechReadyText)}`
-        );
-        if (!response.ok) throw new Error("TTS Route Failed");
-
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-
-        try {
-          sessionStorage.setItem(cacheKey, blobUrl);
-        } catch (_) {}
-
-        playAudioBlobUrl(blobUrl, msgId);
-      } catch (err) {
-        console.warn("Edge TTS unavailable, falling back to Web Speech:", err);
-        if (typeof window !== "undefined" && "speechSynthesis" in window) {
-          window.speechSynthesis.cancel();
-          const utterance = new SpeechSynthesisUtterance(speechReadyText);
-          utterance.rate = 1.1;
-          utterance.lang = "hi-IN";
-          utterance.onend = () => {
-            setIsAiSpeaking(false);
-            setActiveSpeechMessageId(null);
-          };
-          utterance.onerror = () => {
-            setIsAiSpeaking(false);
-            setActiveSpeechMessageId(null);
-          };
-          window.speechSynthesis.speak(utterance);
-        } else {
-          setIsAiSpeaking(false);
-          setActiveSpeechMessageId(null);
-        }
-      }
-    },
-    [playAudioBlobUrl]
-  );
-
-  // 4. Capture Frame from Live Video
-  const captureFrameBase64 = useCallback((): string | null => {
-    if (!videoRef.current) return null;
-    try {
-      const video = videoRef.current;
-      if (video.videoWidth === 0 || video.videoHeight === 0) return null;
-
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.min(video.videoWidth, 800);
-      canvas.height = Math.round((video.videoHeight / video.videoWidth) * canvas.width);
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return null;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL("image/jpeg", 0.75);
-    } catch (e) {
-      console.warn("Frame capture error:", e);
-      return null;
-    }
-  }, []);
-
-  // 5. Send Doubt Query
-  const sendDoubtQuery = useCallback(
-    async (queryText: string) => {
-      if (!queryText.trim() && !isCameraActive) return;
-      setIsProcessing(true);
-      setIsAiThinking(true);
-
-      const userMsgId = `user_${Date.now()}`;
-      const nowTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      const newMsg: ChatMessage = {
-        id: userMsgId,
-        sender: "user",
-        text: queryText || "[Sent Camera Frame for Doubt Analysis]",
-        time: nowTime,
-        timestamp: Date.now(),
-      };
-
-      setMessages((prev) => [...prev, newMsg]);
-      setTextInput("");
-
-      const frameBase64 = isCameraActive ? captureFrameBase64() : null;
-
-      try {
-        const payload = {
-          message: queryText,
-          image: frameBase64,
-          studentContext: studentContext || {},
-          history: messages.slice(-4).map((m) => ({
-            role: m.sender === "user" ? "user" : "assistant",
-            content: m.text,
-          })),
-        };
-
-        const res = await fetch("/api/ai-doubt/live", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        if (!res.ok) throw new Error("API call failed");
-        const data = await res.json();
-
-        const aiText = data.reply || data.text || "Main aapka doubt samajh gaya. Kripya dhyan se dekhein.";
-        const aiMsgId = `ai_${Date.now()}`;
-        const aiMsg: ChatMessage = {
-          id: aiMsgId,
-          sender: "ai",
-          text: aiText,
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          timestamp: Date.now(),
-        };
-
-        setMessages((prev) => [...prev, aiMsg]);
-        setIsAiThinking(false);
-        setIsProcessing(false);
-
-        // Auto trigger high-clarity voice response
-        if (!isMuted) {
-          playAiVoice(aiText, aiMsgId);
-        }
-      } catch (err) {
-        console.error("Doubt processing error:", err);
-        setIsAiThinking(false);
-        setIsProcessing(false);
-
-        const errorMsg: ChatMessage = {
-          id: `err_${Date.now()}`,
-          sender: "ai",
-          text: "Maaf kijiye, network issue ke kaaran main check nahi kar paaya. Kripya dobara mic daba kar bole ya frame check karein.",
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, errorMsg]);
-      }
-    },
-    [
-      isCameraActive,
-      captureFrameBase64,
-      studentContext,
-      messages,
-      isMuted,
-      playAiVoice,
-    ]
-  );
-
-  // 6. Camera Lifecycle & Torch Control
+  // 3. Camera Setup & Streaming
   const startCamera = useCallback(async () => {
-    setCameraError(null);
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
     try {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+
       const constraints: MediaStreamConstraints = {
-        audio: false,
         video: {
           facingMode: { ideal: facingMode },
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
+        audio: false,
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -472,476 +389,692 @@ export default function LiveVideoCallModal({
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play().catch((e) => console.warn("Video play error:", e));
       }
 
-      // Check Torch capabilities
-      const track = stream.getVideoTracks()[0];
-      if (track) {
-        const capabilities = (track.getCapabilities && track.getCapabilities()) as any;
-        if (capabilities && capabilities.torch) {
-          setHasTorch(true);
-        } else {
-          setHasTorch(false);
-        }
+      // Check for torch track capability
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack && typeof videoTrack.getCapabilities === "function") {
+        const capabilities: any = videoTrack.getCapabilities();
+        setHasTorch(Boolean(capabilities && capabilities.torch));
+      } else {
+        setHasTorch(false);
       }
-      setIsCameraActive(true);
-    } catch (err: any) {
-      console.error("Camera access failed:", err);
-      setCameraError(
-        err?.name === "NotAllowedError"
-          ? "Camera permission denied. Please allow camera access in browser."
-          : "Unable to start camera. Please verify device camera is working."
-      );
-      setIsCameraActive(false);
+    } catch (err) {
+      console.error("[LiveVideoCallModal] Camera start error:", err);
     }
   }, [facingMode]);
 
-  const toggleTorch = async () => {
+  // Handle Torch Toggle
+  const toggleTorch = useCallback(async () => {
     if (!streamRef.current || !hasTorch) return;
-    try {
-      const track = streamRef.current.getVideoTracks()[0];
-      if (track) {
-        const nextState = !isTorchOn;
-        await (track as any).applyConstraints({
-          advanced: [{ torch: nextState }],
+    const videoTrack = streamRef.current.getVideoTracks()[0];
+    if (videoTrack) {
+      try {
+        const nextTorch = !isTorchOn;
+        await (videoTrack as any).applyConstraints({
+          advanced: [{ torch: nextTorch }],
         });
-        setIsTorchOn(nextState);
+        setIsTorchOn(nextTorch);
+      } catch (e) {
+        console.error("[LiveVideoCallModal] Torch error:", e);
       }
-    } catch (e) {
-      console.warn("Flashlight toggle error:", e);
     }
-  };
+  }, [hasTorch, isTorchOn]);
 
-  const flipCamera = () => {
-    setIsTorchOn(false);
+  // Switch Camera Direction (Rear <-> Front)
+  const toggleCameraDirection = useCallback(() => {
     setFacingMode((prev) => (prev === "environment" ? "user" : "environment"));
-  };
+  }, []);
 
+  // Initialize camera when opened
   useEffect(() => {
     if (isModalOpen) {
       startCamera();
     } else {
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
       }
-      stopCurrentAudio();
+      stopSpeaking();
     }
-
     return () => {
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current.getTracks().forEach((track) => track.stop());
       }
-      stopCurrentAudio();
     };
-  }, [isModalOpen, startCamera, stopCurrentAudio]);
+  }, [isModalOpen, startCamera]);
 
-  // 7. Speech Recognition
-  const startSpeechRecognition = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const SpeechRec =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRec) {
-      console.warn("Speech recognition not supported on this browser.");
-      return;
+  // 4. Capture Frame helper (Optimized JPEG snapshot for Live Vision Gemini)
+  const captureFrame = useCallback((): string | null => {
+    if (!videoRef.current || !canvasRef.current) return null;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.7);
+  }, []);
+
+  // 5. Speech Recognition Setup (Web Speech API)
+  const initSpeechRecognition = useCallback(() => {
+    if (typeof window === "undefined") return null;
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) return null;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-IN"; // English-India / Hinglish optimized
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = "";
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          finalTranscript += event.results[i][0].transcript;
+        }
+      }
+      setTranscript(finalTranscript);
+      transcriptRef.current = finalTranscript;
+    };
+
+    recognition.onerror = (e: any) => {
+      console.warn("[LiveVideoCallModal] Speech recognition warning:", e.error);
+    };
+
+    return recognition;
+  }, []);
+
+  // 6. Audio Player Queue & TTS (Edge Speech API)
+  const playAudioChunk = useCallback(
+    async (textToSpeak: string, msgId: string) => {
+      if (isMuted) return;
+
+      const cleanedSpeech = cleanTextForSpeech(textToSpeak);
+      if (!cleanedSpeech) return;
+
+      try {
+        setIsAiSpeaking(true);
+        setActiveSpeechMessageId(msgId);
+
+        // Check cache first
+        const cacheKey = `${AUDIO_CACHE_PREFIX}${msgId}`;
+        const cachedUrl = audioCache[cacheKey];
+
+        if (cachedUrl) {
+          if (currentAudioRef.current) {
+            currentAudioRef.current.pause();
+          }
+          const audio = new Audio(cachedUrl);
+          currentAudioRef.current = audio;
+          audio.onended = () => {
+            setIsAiSpeaking(false);
+            setActiveSpeechMessageId(null);
+          };
+          await audio.play();
+          return;
+        }
+
+        // Fetch from Edge TTS Route
+        const res = await fetch(
+          `/api/ai-doubt/live/tts?text=${encodeURIComponent(cleanedSpeech)}`
+        );
+
+        if (!res.ok) {
+          throw new Error("TTS Route Failed");
+        }
+
+        const blob = await res.blob();
+        const audioUrl = URL.createObjectURL(blob);
+
+        // Cache in memory and 24h storage
+        setAudioCache((prev) => ({ ...prev, [cacheKey]: audioUrl }));
+        try {
+          // Store blob url or mark timestamp in localStorage
+          localStorage.setItem(
+            cacheKey,
+            JSON.stringify({ timestamp: Date.now() })
+          );
+        } catch (_) {}
+
+        if (currentAudioRef.current) {
+          currentAudioRef.current.pause();
+        }
+
+        const audio = new Audio(audioUrl);
+        currentAudioRef.current = audio;
+        audio.onended = () => {
+          setIsAiSpeaking(false);
+          setActiveSpeechMessageId(null);
+        };
+        await audio.play();
+      } catch (err) {
+        console.error("[LiveVideoCallModal] TTS play error:", err);
+        setIsAiSpeaking(false);
+        setActiveSpeechMessageId(null);
+      }
+    },
+    [isMuted, audioCache]
+  );
+
+  const stopSpeaking = useCallback(() => {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current.currentTime = 0;
     }
+    setIsAiSpeaking(false);
+    setActiveSpeechMessageId(null);
+  }, []);
+
+  // 7. Push-To-Talk Handlers (Hold To Talk)
+  const handleHoldStart = useCallback(() => {
+    if (isAnalyzing) return;
+    stopSpeaking();
+    setIsHoldingMic(true);
+    setTranscript("");
+    transcriptRef.current = "";
 
     try {
-      const recognition = new SpeechRec();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = "hi-IN";
+      if (!recognitionRef.current) {
+        recognitionRef.current = initSpeechRecognition();
+      }
+      recognitionRef.current?.start();
+    } catch (_) {}
+  }, [isAnalyzing, stopSpeaking, initSpeechRecognition]);
 
-      transcriptRef.current = "";
-
-      recognition.onresult = (event: any) => {
-        let currentTranscript = "";
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          currentTranscript += event.results[i][0].transcript;
-        }
-        transcriptRef.current = currentTranscript;
-      };
-
-      recognition.onerror = (e: any) => {
-        console.warn("Speech rec error:", e);
-      };
-
-      recognition.onend = () => {
-        if (isHoldingMic) {
-          try {
-            recognition.start();
-          } catch (_) {}
-        }
-      };
-
-      speechRecognitionRef.current = recognition;
-      recognition.start();
-    } catch (err) {
-      console.warn("Speech recognition initiation error:", err);
-    }
-  }, [isHoldingMic]);
-
-  const stopSpeechRecognition = useCallback(() => {
-    if (speechRecognitionRef.current) {
-      try {
-        speechRecognitionRef.current.stop();
-      } catch (_) {}
-      speechRecognitionRef.current = null;
-    }
-
-    const recorded = transcriptRef.current.trim();
-    if (recorded.length > 0) {
-      sendDoubtQuery(recorded);
-    }
-    transcriptRef.current = "";
-  }, [sendDoubtQuery]);
-
-  const handleMicMouseDown = () => {
-    if (isMuted) return;
-    setIsHoldingMic(true);
-    stopCurrentAudio();
-    startSpeechRecognition();
-  };
-
-  const handleMicMouseUp = () => {
-    if (isMuted || !isHoldingMic) return;
+  const handleHoldEnd = useCallback(async () => {
+    if (!isHoldingMic) return;
     setIsHoldingMic(false);
-    stopSpeechRecognition();
-  };
 
-  const handleEndCall = () => {
-    stopCurrentAudio();
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
+    try {
+      recognitionRef.current?.stop();
+    } catch (_) {}
+
+    const queryText = transcriptRef.current.trim();
+    // Trigger visual shutter flash
+    setFlashTrigger(true);
+    setTimeout(() => setFlashTrigger(false), 300);
+
+    const frame = captureFrame();
+
+    // Add user message to UI
+    const userMsgId = `user_${Date.now()}`;
+    const newMessages: Message[] = [
+      ...messages,
+      {
+        id: userMsgId,
+        sender: "user",
+        text: queryText || "Camera frame question",
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        timestamp: Date.now(),
+      },
+    ];
+
+    setMessages(newMessages);
+    saveMessagesToStorage(newMessages);
+    setIsAnalyzing(true);
+
+    try {
+      const response = await fetch("/api/ai-doubt/live", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frame,
+          message: queryText,
+          studentContext,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`AI Live API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      const aiReply = data.reply || "Main is question ko analyze nahi kar paya. Kripya dobara clear frame dikhayein.";
+
+      const aiMsgId = `ai_${Date.now()}`;
+      const updatedWithAi: Message[] = [
+        ...newMessages,
+        {
+          id: aiMsgId,
+          sender: "ai",
+          text: aiReply,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          timestamp: Date.now(),
+        },
+      ];
+
+      setMessages(updatedWithAi);
+      saveMessagesToStorage(updatedWithAi);
+
+      // Play Voice Output automatically
+      if (!isMuted) {
+        playAudioChunk(aiReply, aiMsgId);
+      }
+    } catch (e: any) {
+      console.error("[LiveVideoCallModal] Request error:", e);
+      const errMsgId = `ai_err_${Date.now()}`;
+      const updatedWithError: Message[] = [
+        ...newMessages,
+        {
+          id: errMsgId,
+          sender: "ai",
+          text: "Server traffic high hai. Kripya 2 second baad fir se button dabakar puchiye.",
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          timestamp: Date.now(),
+        },
+      ];
+      setMessages(updatedWithError);
+      saveMessagesToStorage(updatedWithError);
+    } finally {
+      setIsAnalyzing(false);
+      setTranscript("");
+      transcriptRef.current = "";
     }
-    setIsModalOpen(false);
-    onClose();
-  };
+  }, [
+    isHoldingMic,
+    captureFrame,
+    messages,
+    saveMessagesToStorage,
+    studentContext,
+    isMuted,
+    playAudioChunk,
+  ]);
 
-  const copyText = (text: string, id: string) => {
+  // 8. Copy to clipboard
+  const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  // Scroll to bottom of drawer
+  useEffect(() => {
+    if (hudMode === "expanded") {
+      chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, hudMode]);
+
   if (!isModalOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-0 md:p-4 select-none">
-      {/* Main Container */}
-      <div className="relative w-full h-full md:max-w-4xl md:h-[90vh] md:rounded-3xl bg-slate-950 border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
-        {/* Top Header Overlay */}
-        <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between p-4 bg-gradient-to-b from-black/80 via-black/40 to-transparent">
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-2 bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700/60 shadow-lg">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-              <span className="w-2 h-2 rounded-full bg-red-500 absolute" />
-              <span className="text-xs font-semibold text-white tracking-wider ml-2">
-                LIVE FACULTY
-              </span>
-              <span className="text-slate-400 text-xs">|</span>
-              <span className="text-xs font-mono font-medium text-emerald-400">
-                {formatTimer(callDuration)}
-              </span>
-            </div>
+    <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-between overflow-hidden select-none">
+      {/* Hidden processing canvas */}
+      <canvas ref={canvasRef} className="hidden" />
 
-            {isAiSpeaking && (
-              <div className="flex items-center space-x-1.5 bg-emerald-950/80 border border-emerald-500/40 px-3 py-1 rounded-full animate-pulse">
-                <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-[11px] font-semibold text-emerald-300">
-                  Faculty Explaining...
-                </span>
-              </div>
-            )}
+      {/* Shutter Flash Animation Effect */}
+      {flashTrigger && (
+        <div className="absolute inset-0 bg-white/70 z-50 pointer-events-none animate-out fade-out duration-300" />
+      )}
 
-            {isAiThinking && (
-              <div className="flex items-center space-x-1.5 bg-indigo-950/80 border border-indigo-500/40 px-3 py-1 rounded-full animate-pulse">
-                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="text-[11px] font-semibold text-indigo-300">
-                  Reading Frame...
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setChatDrawerOpen(!chatDrawerOpen)}
-              className="relative p-2.5 rounded-full bg-black/50 backdrop-blur-md border border-slate-700/60 text-slate-200 hover:text-white hover:bg-black/70 transition shadow-lg"
-              title="Chat History"
-            >
-              <MessageSquare className="w-5 h-5" />
-              {messages.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-indigo-500 text-[10px] text-white font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                  {messages.length}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={handleEndCall}
-              className="p-2.5 rounded-full bg-red-600/80 hover:bg-red-600 text-white transition shadow-lg border border-red-500/40"
-              title="Leave Call"
-            >
-              <X className="w-5 h-5" />
-            </button>
+      {/* ─────────────────────────────────────────────────────────────
+          1. HEADER BAR: CALL DURATION, TORCH, SWITCH CAM, CLOSE
+          ───────────────────────────────────────────────────────────── */}
+      <div className="absolute top-0 inset-x-0 z-40 bg-gradient-to-b from-black/80 via-black/40 to-transparent p-4 flex items-center justify-between">
+        {/* Call Status & Timer Badge */}
+        <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-900/80 backdrop-blur border border-slate-700/80 text-xs font-semibold text-teal-400">
+            <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+            <span>AI Faculty Live</span>
+            <span className="text-slate-400 font-mono ml-1">{formatTime(callDuration)}</span>
           </div>
         </div>
 
-        {/* Video Canvas / Main View */}
-        <div className="relative flex-1 w-full h-full bg-slate-900 flex items-center justify-center overflow-hidden">
-          {cameraError ? (
-            <div className="flex flex-col items-center justify-center p-6 text-center max-w-md">
-              <AlertCircle className="w-12 h-12 text-amber-400 mb-3" />
-              <h3 className="text-lg font-bold text-white mb-1">Camera Notice</h3>
-              <p className="text-sm text-slate-300 mb-4">{cameraError}</p>
-              <button
-                onClick={startCamera}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition"
-              >
-                Retry Camera
-              </button>
-            </div>
-          ) : (
-            <video
-              ref={videoRef}
-              playsInline
-              muted
-              autoPlay
-              className={`w-full h-full object-cover transition-transform duration-300 ${
-                facingMode === "user" ? "scale-x-[-1]" : ""
+        {/* Action Controls */}
+        <div className="flex items-center space-x-2">
+          {/* Torch / Flashlight Button */}
+          {hasTorch && (
+            <button
+              type="button"
+              onClick={toggleTorch}
+              className={`p-2.5 rounded-full transition-all border ${
+                isTorchOn
+                  ? "bg-amber-400 text-slate-950 border-amber-300 shadow-lg shadow-amber-400/40"
+                  : "bg-slate-900/80 text-slate-300 border-slate-700 hover:bg-slate-800"
               }`}
-            />
+              title="Toggle Flashlight"
+            >
+              {isTorchOn ? <TorchOnIcon /> : <TorchOffIcon />}
+            </button>
           )}
 
-          {/* Real-time Subtitle Overlay on Video */}
-          {messages.length > 0 && messages[messages.length - 1].sender === "ai" && (
-            <div className="absolute bottom-28 left-4 right-4 z-20 flex justify-center pointer-events-none">
-              <div className="max-w-xl bg-black/75 backdrop-blur-md border border-slate-700/60 rounded-2xl px-4 py-3 shadow-2xl text-center pointer-events-auto">
-                <div className="flex items-center justify-center space-x-1.5 mb-1">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                  <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wide">
-                    Live Explanation
-                  </span>
-                </div>
-                <p className="text-sm text-slate-100 font-medium line-clamp-3 leading-relaxed">
-                  {messages[messages.length - 1].text}
-                </p>
-              </div>
-            </div>
-          )}
+          {/* Flip Camera */}
+          <button
+            type="button"
+            onClick={toggleCameraDirection}
+            className="p-2.5 rounded-full bg-slate-900/80 text-slate-300 border border-slate-700 hover:bg-slate-800 transition-all"
+            title="Flip Camera"
+          >
+            <CameraSwitchIcon />
+          </button>
 
-          {/* Watermark / Guidance Tag */}
-          <div className="absolute top-20 left-4 z-10 pointer-events-none">
-            <div className="bg-black/40 backdrop-blur-sm px-3 py-1 rounded-lg border border-white/10 text-[11px] text-slate-300">
-              Point camera at notebook, book, or screen
-            </div>
+          {/* Close Modal */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2.5 rounded-full bg-rose-600/90 hover:bg-rose-600 text-white transition-all shadow-lg active:scale-95"
+            title="End Call"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+      </div>
+
+      {/* ─────────────────────────────────────────────────────────────
+          2. FULLSCREEN VIDEO FEED (Real-time Video Surface)
+          ───────────────────────────────────────────────────────────── */}
+      <div className="relative w-full h-full flex items-center justify-center bg-slate-950">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className={`w-full h-full object-cover ${
+            facingMode === "user" ? "-scale-x-100" : ""
+          }`}
+        />
+
+        {/* Dynamic Aim Reticle Overlay (Helps student position textbook equations) */}
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center p-8">
+          <div className="w-full max-w-sm aspect-[4/3] rounded-3xl border-2 border-dashed border-teal-400/40 relative flex items-center justify-center">
+            {/* Corner Indicators */}
+            <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-teal-400 rounded-tl-lg" />
+            <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-teal-400 rounded-tr-lg" />
+            <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-teal-400 rounded-bl-lg" />
+            <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-teal-400 rounded-br-lg" />
+
+            {/* Instruction tooltip */}
+            <span className="text-[11px] font-medium text-teal-200/80 bg-slate-950/70 px-3 py-1 rounded-full border border-teal-500/20 backdrop-blur">
+              Point camera at question, notes, or diagram
+            </span>
           </div>
         </div>
 
-        {/* Bottom Call Action Control Bar */}
-        <div className="relative z-30 p-4 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent flex items-center justify-around border-t border-slate-800/80">
-          {/* Torch Toggle */}
-          <button
-            onClick={toggleTorch}
-            disabled={!hasTorch}
-            className={`p-3.5 rounded-2xl border transition-all duration-200 flex flex-col items-center space-y-1 ${
-              hasTorch
-                ? isTorchOn
-                  ? "bg-yellow-500/20 border-yellow-500/60 text-yellow-300"
-                  : "bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-700/60"
-                : "bg-slate-900 border-slate-800 text-slate-600 opacity-40 cursor-not-allowed"
-            }`}
-            title={hasTorch ? "Toggle Flashlight" : "Torch unavailable on this lens"}
-          >
-            <FlashlightBulbIcon active={isTorchOn} />
-            <span className="text-[10px] font-medium tracking-tight">Flash</span>
-          </button>
-
-          {/* Flip Lens */}
-          <button
-            onClick={flipCamera}
-            className="p-3.5 rounded-2xl bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700/60 text-slate-200 transition flex flex-col items-center space-y-1"
-            title="Switch Front/Back Camera"
-          >
-            <RotateCcw className="w-6 h-6 text-slate-300" />
-            <span className="text-[10px] font-medium tracking-tight">Flip</span>
-          </button>
-
-          {/* Push-to-Talk Mic Center Button */}
-          <div className="relative flex flex-col items-center">
-            {isHoldingMic && (
-              <span className="absolute -top-10 text-[11px] font-bold text-emerald-400 bg-emerald-950/90 border border-emerald-500/40 px-3 py-1 rounded-full animate-bounce">
-                Listening... Release to Ask
-              </span>
-            )}
+        {/* LIVE AUDIO WAVE / SPEAKING PULSE BADGE */}
+        {isAiSpeaking && (
+          <div className="absolute top-20 z-30 flex items-center space-x-2 bg-teal-950/80 border border-teal-500/40 px-3.5 py-1.5 rounded-full backdrop-blur shadow-xl animate-bounce">
+            <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-ping" />
+            <span className="text-xs font-semibold text-teal-200">AI Faculty Speaking...</span>
             <button
-              onMouseDown={handleMicMouseDown}
-              onMouseUp={handleMicMouseUp}
-              onTouchStart={handleMicMouseDown}
-              onTouchEnd={handleMicMouseUp}
-              disabled={isProcessing}
-              className={`relative w-18 h-18 rounded-3xl p-4 flex items-center justify-center transition-all duration-300 shadow-xl ${
-                isMuted
-                  ? "bg-slate-800 border-2 border-red-500/50 text-red-400"
-                  : isHoldingMic
-                  ? "bg-emerald-600 border-4 border-emerald-300 shadow-[0_0_25px_rgba(16,185,129,0.7)] scale-105"
-                  : isProcessing
-                  ? "bg-indigo-600 border-2 border-indigo-400 animate-pulse"
-                  : "bg-gradient-to-tr from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 border-2 border-indigo-400/60"
-              }`}
-              title="Hold to Speak Doubt"
+              type="button"
+              onClick={stopSpeaking}
+              className="ml-2 p-1 rounded-full bg-rose-500/30 hover:bg-rose-500/50 text-rose-300"
+              title="Stop audio"
             >
-              {isMuted ? (
-                <MicMutedIcon />
-              ) : isHoldingMic ? (
-                <MicActiveIcon />
-              ) : (
-                <Mic className="w-7 h-7 text-white" />
-              )}
+              <StopSquareIcon />
             </button>
-            <span className="text-[10px] font-semibold text-slate-300 mt-1">
-              {isHoldingMic ? "Listening..." : "Hold to Ask"}
-            </span>
           </div>
+        )}
 
-          {/* Mute Audio Output */}
-          <button
-            onClick={() => {
-              if (!isMuted) stopCurrentAudio();
-              setIsMuted(!isMuted);
-            }}
-            className={`p-3.5 rounded-2xl border transition flex flex-col items-center space-y-1 ${
-              isMuted
-                ? "bg-red-500/20 border-red-500/60 text-red-300"
-                : "bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-700/60"
-            }`}
-            title={isMuted ? "Unmute AI Faculty" : "Mute AI Faculty"}
-          >
-            {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
-            <span className="text-[10px] font-medium tracking-tight">
-              {isMuted ? "Unmute" : "Mute"}
-            </span>
-          </button>
-
-          {/* End Call Button */}
-          <button
-            onClick={handleEndCall}
-            className="p-3.5 rounded-2xl bg-red-600/90 hover:bg-red-600 border border-red-500/60 text-white transition flex flex-col items-center space-y-1 shadow-lg shadow-red-900/40"
-            title="End Session"
-          >
-            <PhoneOff className="w-6 h-6" />
-            <span className="text-[10px] font-medium tracking-tight">End</span>
-          </button>
-        </div>
-
-        {/* Slide-over Chat & Doubt History Drawer */}
-        {chatDrawerOpen && (
-          <div className="absolute inset-y-0 right-0 z-40 w-full sm:w-96 bg-slate-900/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl animate-in slide-in-from-right duration-300">
-            {/* Drawer Header */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <MessageSquare className="w-4 h-4 text-indigo-400" />
-                <h4 className="text-sm font-bold text-white">Call Transcript & History</h4>
-              </div>
-              <button
-                onClick={() => setChatDrawerOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-              >
-                <X className="w-4 h-4" />
-              </button>
+        {/* ANALYZING LOADER OVERLAY */}
+        {isAnalyzing && (
+          <div className="absolute inset-0 z-30 bg-slate-950/60 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center mb-4 animate-pulse">
+              <span className="w-8 h-8 rounded-full border-2 border-teal-400 border-t-transparent animate-spin" />
             </div>
+            <h3 className="text-base font-bold text-white mb-1">Kota AI Faculty Solving...</h3>
+            <p className="text-xs text-teal-200/80 max-w-xs">
+              Handwritten steps & diagram analyze ho rahe hain...
+            </p>
+          </div>
+        )}
 
-            {/* Chat List */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500">
-                  <HelpCircle className="w-10 h-10 mb-2 opacity-50" />
-                  <p className="text-xs">
-                    Abhi koi doubt discuss nahi hua hai. Hold the mic button ya text input use karein.
-                  </p>
-                </div>
-              ) : (
-                messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${
-                      msg.sender === "user" ? "items-end" : "items-start"
-                    }`}
-                  >
-                    <div
-                      className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs ${
-                        msg.sender === "user"
-                          ? "bg-indigo-600 text-white rounded-br-none"
-                          : "bg-slate-800 border border-slate-700/60 text-slate-100 rounded-bl-none shadow-md"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between space-x-2 mb-1">
-                        <span className="font-bold text-[10px] opacity-75">
-                          {msg.sender === "user" ? "You" : "AI Faculty"}
-                        </span>
-                        <span className="text-[9px] opacity-60">{msg.time}</span>
-                      </div>
-                      <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-
-                      {msg.sender === "ai" && (
-                        <div className="mt-2 pt-2 border-t border-slate-700/50 flex items-center justify-between">
-                          <button
-                            onClick={() => playAiVoice(msg.text, msg.id)}
-                            className="flex items-center space-x-1 text-[10px] text-indigo-300 hover:text-indigo-200"
-                          >
-                            <Volume2 className="w-3 h-3" />
-                            <span>
-                              {activeSpeechMessageId === msg.id && isAiSpeaking
-                                ? "Playing..."
-                                : "Listen"}
-                            </span>
-                          </button>
-                          <button
-                            onClick={() => copyText(msg.text, msg.id)}
-                            className="text-[10px] text-slate-400 hover:text-slate-200"
-                          >
-                            {copiedId === msg.id ? "Copied" : "Copy"}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-              <div ref={chatBottomRef} />
-            </div>
-
-            {/* Quick Text Input for Quiet Classrooms */}
-            <div className="p-3 border-t border-slate-800 bg-slate-950">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (textInput.trim() && !isProcessing) {
-                    sendDoubtQuery(textInput);
-                  }
-                }}
-                className="flex items-center space-x-2"
-              >
-                <input
-                  type="text"
-                  placeholder="Type doubt if you can't speak..."
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                  className="flex-1 bg-slate-900 border border-slate-700/70 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                />
-                <button
-                  type="submit"
-                  disabled={!textInput.trim() || isProcessing}
-                  className="p-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-xl transition"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </form>
+        {/* LIVE REAL-TIME TRANSCRIPT BADGE (While holding mic) */}
+        {isHoldingMic && (
+          <div className="absolute bottom-28 z-30 inset-x-6 flex justify-center pointer-events-none">
+            <div className="bg-slate-900/90 border border-teal-500/50 backdrop-blur-md px-4 py-2.5 rounded-2xl shadow-2xl max-w-md w-full text-center">
+              <p className="text-xs text-slate-400 mb-0.5">Suno aur bolo...</p>
+              <p className="text-sm font-semibold text-teal-300 italic">
+                {transcript || "Speak your doubt now..."}
+              </p>
             </div>
           </div>
         )}
+      </div>
+
+      {/* ─────────────────────────────────────────────────────────────
+          3. SOLUTION STEPS DRAWER (HUD DRAWER - COMPACT / EXPANDED)
+          ───────────────────────────────────────────────────────────── */}
+      <div
+        className={`absolute inset-x-0 bottom-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800 transition-all duration-300 flex flex-col ${
+          hudMode === "expanded" ? "h-[70vh]" : "h-24"
+        }`}
+      >
+        {/* Drawer Drag Bar & Header */}
+        <div
+          onClick={() => setHudMode((prev) => (prev === "compact" ? "expanded" : "compact"))}
+          className="w-full py-2.5 px-4 flex items-center justify-between cursor-pointer border-b border-slate-800/60 hover:bg-slate-900/40"
+        >
+          <div className="flex items-center space-x-2">
+            <ChatBubbleIcon className="w-4 h-4 text-teal-400" />
+            <span className="text-xs font-bold text-slate-200">
+              Solution Steps & Notes
+            </span>
+            {messages.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 font-semibold">
+                {messages.length}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center space-x-3">
+            {messages.length > 0 && hudMode === "expanded" && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleManualClearChat();
+                }}
+                className="flex items-center space-x-1 text-[11px] text-slate-400 hover:text-rose-400 transition-colors"
+                title="Clear Notes"
+              >
+                <TrashIcon />
+                <span>Clear</span>
+              </button>
+            )}
+            <div className="text-slate-400">
+              {hudMode === "expanded" ? <ChevronDownIcon /> : <ChevronUpIcon />}
+            </div>
+          </div>
+        </div>
+
+        {/* EXPANDED CONTENT: SCROLLABLE CHAT & SOLUTION STEPS */}
+        {hudMode === "expanded" ? (
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {messages.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
+                <ChatBubbleIcon className="w-8 h-8 mb-2 opacity-40 text-teal-400" />
+                <p className="text-xs">Abhi koi solution notes nahi hain.</p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Hold to Ask dabakar sawal boliye ya type karein.
+                </p>
+              </div>
+            ) : (
+              messages.map((m: Message) => (
+                <div
+                  key={m.id}
+                  className={`p-3 rounded-2xl text-xs ${
+                    m.sender === "user"
+                      ? "bg-teal-950/70 border border-teal-500/30 text-teal-100 ml-4 text-right"
+                      : "bg-slate-800/90 border border-slate-700/60 text-slate-100"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-bold text-[11px] text-teal-400">
+                      {m.sender === "user" ? "You" : "Kota AI Faculty"}
+                    </span>
+                    <span className="text-[10px] text-slate-400">{m.time}</span>
+                  </div>
+
+                  {/* Formatted Solution Text */}
+                  <div className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-slate-200">
+                    {normalizeMathToTextbook(m.text)}
+                  </div>
+
+                  {/* Solution Card Actions */}
+                  {m.sender === "ai" && (
+                    <div className="mt-2.5 pt-2 border-t border-slate-700/50 flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        {/* Play / Stop Audio Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (activeSpeechMessageId === m.id && isAiSpeaking) {
+                              stopSpeaking();
+                            } else {
+                              playAudioChunk(m.text, m.id);
+                            }
+                          }}
+                          className={`flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+                            activeSpeechMessageId === m.id && isAiSpeaking
+                              ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                              : "bg-teal-500/20 text-teal-300 border border-teal-500/40 hover:bg-teal-500/30"
+                          }`}
+                        >
+                          {activeSpeechMessageId === m.id && isAiSpeaking ? (
+                            <>
+                              <StopSquareIcon />
+                              <span>Stop Voice</span>
+                            </>
+                          ) : (
+                            <>
+                              <PlayTriangleIcon />
+                              <span>Listen Again</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Copy Solution */}
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(m.text, m.id)}
+                        className="flex items-center space-x-1 text-[10px] text-slate-400 hover:text-white px-2 py-1 rounded-md bg-slate-900/60 border border-slate-700/60"
+                        title="Copy solution text"
+                      >
+                        {copiedId === m.id ? (
+                          <>
+                            <CopyCheckIcon className="text-teal-400" />
+                            <span className="text-teal-400">Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <CopyDefaultIcon />
+                            <span>Copy</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+            <div ref={chatBottomRef} />
+          </div>
+        ) : (
+          /* COMPACT LATEST MESSAGE PREVIEW (1-line ticker) */
+          <div className="px-4 py-1 flex items-center justify-between text-xs text-slate-300 truncate">
+            {messages.length > 0 ? (
+              <span className="truncate text-[11px] text-slate-300">
+                <span className="text-teal-400 font-bold mr-1">Latest:</span>
+                {messages[messages.length - 1].text.slice(0, 90)}...
+              </span>
+            ) : (
+              <span className="text-[11px] text-slate-500 italic">
+                Hold to Ask dabakar doubt puchiye...
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* ─────────────────────────────────────────────────────────────
+            4. BOTTOM CONTROLS BAR: MUTE, HOLD TO TALK, DRAWER TOGGLE, END
+            ───────────────────────────────────────────────────────────── */}
+        <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-around">
+          {/* 1. Mute / Unmute Speaker Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              const nextMute = !isMuted;
+              setIsMuted(nextMute);
+              if (nextMute) stopSpeaking();
+            }}
+            className={`p-3.5 rounded-full transition-all active:scale-95 shadow-xl ${
+              isMuted
+                ? "bg-rose-900/80 text-rose-300 border border-rose-600 ring-2 ring-rose-500/30"
+                : "bg-slate-800/90 text-slate-200 border border-slate-700 hover:bg-slate-700"
+            }`}
+            title={isMuted ? "Unmute Voice" : "Mute Voice"}
+          >
+            {isMuted ? <MicMutedIcon className="w-5 h-5 text-rose-400" /> : <MicActiveIcon className="w-5 h-5" />}
+          </button>
+
+          {/* 2. HOLD TO ASK (MAIN ACTION BUTTON) */}
+          <button
+            type="button"
+            onMouseDown={handleHoldStart}
+            onMouseUp={handleHoldEnd}
+            onTouchStart={handleHoldStart}
+            onTouchEnd={handleHoldEnd}
+            disabled={isAnalyzing}
+            className={`px-8 py-3.5 rounded-full flex items-center space-x-2.5 font-bold transition-all shadow-2xl select-none active:scale-95 ${
+              isHoldingMic
+                ? "bg-rose-600 text-white shadow-rose-600/50 scale-105 ring-4 ring-rose-500/30"
+                : isAnalyzing
+                ? "bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700"
+                : "bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-white shadow-teal-500/30"
+            }`}
+          >
+            <MicActiveIcon className="w-5 h-5" />
+            <div className="flex items-center space-x-1.5">
+              <div
+                className={`w-2.5 h-2.5 rounded-full ${
+                  isHoldingMic
+                    ? "bg-white animate-ping"
+                    : "bg-teal-200 animate-pulse"
+                }`}
+              />
+              <span className="tracking-wider uppercase font-black text-xs">
+                {isHoldingMic ? "Listening..." : isAnalyzing ? "Solving..." : "Hold To Ask"}
+              </span>
+            </div>
+          </button>
+
+          {/* 3. Messages / Solutions Drawer Toggle */}
+          <button
+            type="button"
+            onClick={() =>
+              setHudMode((prev: "compact" | "expanded") => (prev === "compact" ? "expanded" : "compact"))
+            }
+            className={`p-3.5 rounded-full transition-all active:scale-95 shadow-xl ${
+              hudMode === "expanded"
+                ? "bg-teal-600 text-white border border-teal-400 ring-2 ring-teal-400/40"
+                : "bg-slate-800/90 text-slate-300 border border-slate-700 hover:bg-slate-700"
+            }`}
+            title="Toggle Solution Steps & Chat"
+          >
+            <ChatBubbleIcon className="w-5 h-5" />
+          </button>
+
+          {/* 4. End Call Button */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-3.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white shadow-xl active:scale-95 transition-all border border-rose-500"
+            title="End Video Call"
+          >
+            <CloseIcon className="w-5 h-5" />
+          </button>
+        </div>
       </div>
     </div>
   );
