@@ -7,84 +7,17 @@ const SARVAM_API_KEY = process.env.SARVAM_API_KEY || process.env.NEXT_PUBLIC_SAR
 const HF_TOKEN = process.env.HF_TOKEN;
 
 // ============================================================================
-// GLOBAL STATE - Persists across requests in the same Cloudflare worker
+// CACHE CONFIGURATION
 // ============================================================================
-
-// Cache: textHash -> { blob, timestamp, text }
-const GLOBAL_CACHE = globalThis as any;
-if (!GLOBAL_CACHE.__ttsCache) {
-  GLOBAL_CACHE.__ttsCache = new Map<string, { blob: Blob; timestamp: number; text: string }>();
-}
-const ttsCache: Map<string, { blob: Blob; timestamp: number; text: string }> = GLOBAL_CACHE.__ttsCache;
-
-// Pending requests: cacheKey -> Promise<Blob>
-// This prevents concurrent identical requests from hitting the API multiple times
-const pendingRequests: Map<string, Promise<Blob>> = new Map();
-
-// Request counter for periodic cleanup
-if (!GLOBAL_CACHE.__ttsRequestCount) {
-  GLOBAL_CACHE.__ttsRequestCount = 0;
-}
-
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
-
-/**
- * Clean up old cache entries to prevent memory bloat
- * Called periodically (every 50 requests)
- */
-function cleanupCache() {
-  GLOBAL_CACHE.__ttsRequestCount = (GLOBAL_CACHE.__ttsRequestCount || 0) + 1;
-  
-  // Only clean every 50 requests to avoid performance overhead
-  if (GLOBAL_CACHE.__ttsRequestCount % 50 !== 0) return;
-  
-  const now = Date.now();
-  const CACHE_TTL = 86400000; // 24 hours in ms
-  const MAX_CACHE_SIZE = 100;
-  
-  // Remove expired entries
-  for (const [key, value] of ttsCache.entries()) {
-    if (now - value.timestamp > CACHE_TTL) {
-      ttsCache.delete(key);
-    }
-  }
-  
-  // Limit cache size
-  if (ttsCache.size > MAX_CACHE_SIZE) {
-    const entries = Array.from(ttsCache.entries())
-      .sort((a: any, b: any) => b[1].timestamp - a[1].timestamp)
-      .slice(0, MAX_CACHE_SIZE);
-    
-    ttsCache.clear();
-    for (const [key, value] of entries) {
-      ttsCache.set(key, value);
-    }
-  }
-}
-
-/**
- * Generate a consistent cache key from text using SHA-256
- */
-async function generateCacheKey(text: string): Promise<string> {
-  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(hashBuffer))
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("");
-}
+const CACHE_NAME = "tts-audio-cache";
+const CACHE_TTL = 86400; // 24 hours in seconds
 
 // ============================================================================
 // HINDI-ENGLISH TO DEVANAGARI CONVERTER
 // ============================================================================
 
-/**
- * Converts Hinglish to pure Devanagari Hindi for correct pronunciation.
- * For English scientific terms, converts them to their Hindi pronunciation style.
- */
 function convertHinglishToDevanagari(text: string): string {
   const ENGLISH_TO_HINDI: Record<string, string> = {
-    // Scientific terms (longest first)
     'Newton': '\u0928\u094d\u092f\u0942\u091f\u0928',
     'Einstein': '\u0906\u0907\u0902\u0938\u094d\u091f\u0940\u0928',
     'Physics': '\u092b\u093f\u091c\u093f\u0915\u094d\u0938',
@@ -165,19 +98,14 @@ function convertHinglishToDevanagari(text: string): string {
   };
 
   let result = text;
-
   const englishKeys = Object.keys(ENGLISH_TO_HINDI).sort((a, b) => b.length - a.length);
   for (const eng of englishKeys) {
-    const hindi = ENGLISH_TO_HINDI[eng];
-    result = result.replace(new RegExp(`\\b${eng}\\b`, 'gi'), hindi);
+    result = result.replace(new RegExp(`\\b${eng}\\b`, 'gi'), ENGLISH_TO_HINDI[eng]);
   }
-
   const hinglishKeys = Object.keys(HINGLISH_TO_DEVNAGARI).sort((a, b) => b.length - a.length);
   for (const hinglish of hinglishKeys) {
-    const devanagari = HINGLISH_TO_DEVNAGARI[hinglish];
-    result = result.replace(new RegExp(`\\b${hinglish}\\b`, 'gi'), devanagari);
+    result = result.replace(new RegExp(`\\b${hinglish}\\b`, 'gi'), HINGLISH_TO_DEVNAGARI[hinglish]);
   }
-
   return result.replace(/\s+/g, ' ').trim();
 }
 
@@ -190,253 +118,183 @@ function cleanText(text: string): string {
 }
 
 // ============================================================================
+// CACHE KEY GENERATION
+// ============================================================================
+async function generateCacheKey(text: string): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// ============================================================================
+// IN-MEMORY CACHE WITH GLOBAL PERSISTENCE
+// Using globalThis to share cache across requests in same worker
+// ============================================================================
+const GLOBAL = globalThis as any;
+if (!GLOBAL.__ttsGlobalCache) {
+  GLOBAL.__ttsGlobalCache = new Map<string, { blob: Blob; timestamp: number }>();
+}
+const memoryCache = GLOBAL.__ttsGlobalCache;
+
+// Cleanup old entries periodically
+function cleanupMemoryCache() {
+  const now = Date.now();
+  const TTL = 86400000; // 24 hours
+  const MAX_SIZE = 200;
+  
+  for (const [key, value] of memoryCache.entries()) {
+    if (now - value.timestamp > TTL) {
+      memoryCache.delete(key);
+    }
+  }
+  
+  if (memoryCache.size > MAX_SIZE) {
+    const entries = Array.from(memoryCache.entries()) as Array<[string, { blob: Blob; timestamp: number }]>;
+    entries.sort((a, b) => b[1].timestamp - a[1].timestamp);
+    const recent = entries.slice(0, MAX_SIZE);
+    memoryCache.clear();
+    for (const [k, v] of recent) {
+      memoryCache.set(k, v);
+    }
+  }
+}
+
+// ============================================================================
 // TTS SYNTHESIS FUNCTIONS
 // ============================================================================
 
-async function synthesizeHuggingFaceTTS(text: string): Promise<Blob | null> {
-  if (!HF_TOKEN) {
-    console.log("TIER 1 HF: HF_TOKEN is missing!");
-    return null;
-  }
-
+async function callHuggingFace(text: string): Promise<Blob | null> {
+  if (!HF_TOKEN) return null;
   try {
-    console.log("TIER 1 HF: Synthesizing text:", text.substring(0, 100));
-    
-    const response = await fetch(
+    const res = await fetch(
       "https://api-inference.huggingface.co/models/ai4bharat/indic-parler-tts",
       {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${HF_TOKEN}`,
-          "Content-Type": "application/json",
-        },
+        headers: { "Authorization": `Bearer ${HF_TOKEN}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           inputs: text,
-          parameters: {
-            description: "Rohit's voice is clear and natural, with a moderate pace. The recording is of very high quality, with no background noise."
-          }
+          parameters: { description: "Rohit's voice is clear and natural, with a moderate pace. The recording is of very high quality, with no background noise." }
         }),
         signal: AbortSignal.timeout(30000)
       }
     );
-
-    console.log("TIER 1 HF: Response status:", response.status);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.log("TIER 1 HF: FAILED - Status:", response.status, "Error:", errorText.substring(0, 200));
-      if (response.status === 429) {
-        console.log("TIER 1 HF: Rate limited - falling back to Tier 2");
-      }
+    if (!res.ok) {
+      if (res.status === 429) console.log("[HF RATE LIMIT]");
       return null;
     }
-
-    const audioBlob = await response.blob();
-    console.log("TIER 1 HF: Audio generated, size:", audioBlob.size, "bytes");
-    return audioBlob;
-    
-  } catch (e: any) {
-    console.log("TIER 1 HF: Exception:", e?.message || String(e));
+    return await res.blob();
+  } catch (e) {
+    console.log("[HF ERROR]", e);
     return null;
   }
 }
 
-async function synthesizeSarvamTTS(text: string): Promise<Blob | null> {
-  if (!SARVAM_API_KEY) {
-    console.log("TIER 2 SARVAM: API KEY MISSING");
-    return null;
-  }
-
+async function callSarvam(text: string): Promise<Blob | null> {
+  if (!SARVAM_API_KEY) return null;
   try {
-    console.log("TIER 2 SARVAM: Synthesizing text:", text.substring(0, 100));
-    
     const res = await fetch("https://api.sarvam.ai/text-to-speech", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-subscription-key": SARVAM_API_KEY,
-      },
-      body: JSON.stringify({
-        text: text,
-        language_code: "hi-IN",
-        speaker: "shubh",
-        pace: 1.1,
-        speech_sample_rate: 24000,
-        model: "bulbul:v3",
-      }),
+      headers: { "Content-Type": "application/json", "api-subscription-key": SARVAM_API_KEY },
+      body: JSON.stringify({ text, language_code: "hi-IN", speaker: "shubh", pace: 1.1, speech_sample_rate: 24000, model: "bulbul:v3" }),
       signal: AbortSignal.timeout(15000)
     });
-
-    console.log("TIER 2 SARVAM: Response status:", res.status);
-    
-    if (res.ok) {
-      const data = await res.json();
-      console.log("TIER 2 SARVAM: Response received");
-      
-      if (data.audios?.[0]) {
-        const audio = Buffer.from(data.audios[0], "base64");
-        console.log("TIER 2 SARVAM: Audio generated, size:", audio.length, "bytes");
-        return new Blob([audio], { type: "audio/wav" });
-      } else if (data.audio) {
-        const audio = Buffer.from(data.audio, "base64");
-        console.log("TIER 2 SARVAM: Audio generated (alt format), size:", audio.length, "bytes");
-        return new Blob([audio], { type: "audio/wav" });
-      } else {
-        console.log("TIER 2 SARVAM: No audio in response, keys:", Object.keys(data));
-      }
-    } else {
-      const errorText = await res.text();
-      console.log("TIER 2 SARVAM: FAILED - Status:", res.status, "Error:", errorText.substring(0, 200));
-    }
-  } catch (e: any) {
-    console.log("TIER 2 SARVAM: Exception:", e?.message || String(e));
+    if (!res.ok) return null;
+    const data = await res.json();
+    const audio = data.audios?.[0] || data.audio;
+    if (audio) return new Blob([Buffer.from(audio, "base64")], { type: "audio/wav" });
+  } catch (e) {
+    console.log("[SARVAM ERROR]", e);
   }
   return null;
 }
 
-function getNativeTTSResponse(text: string): string {
-  return JSON.stringify({
-    type: "native",
-    text: text,
-    voice: "hi-IN-MadhurNeural",
-    rate: 1.1
-  });
-}
-
 // ============================================================================
-// CORE TTS FUNCTION WITH BUILT-IN CACHING AND DEDUPLICATION
+// MAIN TTS FUNCTION WITH DEDUPLICATION
 // ============================================================================
 
-/**
- * Get TTS audio for text with caching and request deduplication
- * This is the SINGLE entry point for all TTS synthesis
- */
-async function getTTSAudio(text: string): Promise<{ blob: Blob; tier: string } | null> {
-  // Generate cache key
+// Track pending requests to prevent duplicate API calls
+const pending: Map<string, Promise<Blob>> = new Map();
+
+async function getTTS(text: string): Promise<Blob> {
   const cacheKey = await generateCacheKey(text);
   
-  // === STEP 1: Check cache ===
-  const cached = ttsCache.get(cacheKey);
+  // 1. Check memory cache
+  const cached = memoryCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < 86400000) {
-    console.log("[CACHE HIT] for:", text.substring(0, 50));
-    return { blob: cached.blob, tier: "cached" };
+    console.log("[MEMORY CACHE HIT]", text.substring(0, 40));
+    return cached.blob;
   }
   
-  // === STEP 2: Check for pending request (deduplication) ===
-  if (pendingRequests.has(cacheKey)) {
-    console.log("[DEDUP] Waiting for pending request for:", text.substring(0, 50));
-    const existingPromise = pendingRequests.get(cacheKey)!;
-    const result = await existingPromise;
-    
-    // The pending request should have cached the result, but let's verify
-    const cachedAfter = ttsCache.get(cacheKey);
-    if (cachedAfter) {
-      return { blob: cachedAfter.blob, tier: cachedAfter.blob.type.includes("json") ? "native" : "cached" };
-    }
-    
-    // Fallback: return the result directly
-    return { blob: result, tier: "deduped" };
+  // 2. Check if same request is already in progress
+  if (pending.has(cacheKey)) {
+    console.log("[DEDUP]", text.substring(0, 40));
+    return await pending.get(cacheKey)!;
   }
   
-  // === STEP 3: Create pending request promise ===
-  console.log("[NEW REQUEST] for:", text.substring(0, 50));
-  
-  const ttsPromise = (async (): Promise<Blob> => {
+  // 3. Create new request
+  console.log("[NEW API CALL]", text.substring(0, 40));
+  const promise = (async () => {
     let blob: Blob | null = null;
-    let tier: string = "none";
     
-    // Try Tier 1: Hugging Face
-    blob = await synthesizeHuggingFaceTTS(text);
-    if (blob) {
-      tier = "1";
-      console.log("[TIER 1 SUCCESS] Hugging Face");
-    } else {
-      // Try Tier 2: Sarvam
-      blob = await synthesizeSarvamTTS(text);
-      if (blob) {
-        tier = "2";
-        console.log("[TIER 2 SUCCESS] Sarvam AI");
-      } else {
-        // Fallback to Tier 3: Native
-        console.log("[TIER 3 FALLBACK] Device Native");
-        const nativeJson = getNativeTTSResponse(text);
-        blob = new Blob([nativeJson], { type: "application/json" });
-        tier = "3";
-      }
-    }
+    // Try Tier 1
+    blob = await callHuggingFace(text);
+    if (blob) { console.log("[TIER 1 OK]"); return blob; }
     
-    // Cache the result
-    if (blob) {
-      ttsCache.set(cacheKey, { blob, timestamp: Date.now(), text });
-      console.log("[CACHED] tier:", tier);
-    }
+    // Try Tier 2
+    blob = await callSarvam(text);
+    if (blob) { console.log("[TIER 2 OK]"); return blob; }
     
-    return blob!;
+    // Fallback to Tier 3
+    console.log("[TIER 3 FALLBACK]");
+    const json = JSON.stringify({ type: "native", text, voice: "hi-IN-MadhurNeural", rate: 1.1 });
+    return new Blob([json], { type: "application/json" });
   })();
   
-  // Store the promise for deduplication
-  pendingRequests.set(cacheKey, ttsPromise);
+  pending.set(cacheKey, promise);
+  const result = await promise;
+  pending.delete(cacheKey);
   
-  try {
-    const blob = await ttsPromise;
-    return { blob, tier: blob.type.includes("json") ? "3" : "1" };
-  } finally {
-    // Clean up pending request
-    pendingRequests.delete(cacheKey);
-  }
+  // Cache the result
+  memoryCache.set(cacheKey, { blob: result, timestamp: Date.now() });
+  cleanupMemoryCache();
+  
+  return result;
 }
 
 // ============================================================================
-// MAIN HANDLER
+// REQUEST HANDLER
 // ============================================================================
 
 export async function POST(req: NextRequest) {
   try {
-    // Parse request
     let text: string | null = null;
     try {
       const body = await req.json();
       text = body.text?.trim() || null;
-    } catch (_) {
+    } catch {
       const { searchParams } = new URL(req.url);
       text = searchParams.get("text")?.trim() ?? null;
     }
-
-    if (!text) {
-      console.log("TTS: No text provided");
-      return new NextResponse("Missing text", { status: 400 });
-    }
-
-    // Clean and convert text
+    
+    if (!text) return new NextResponse("Missing text", { status: 400 });
+    
+    // Process text
     text = cleanText(text);
     text = convertHinglishToDevanagari(text);
     
-    console.log("Processed text:", text.substring(0, 100));
+    // Get TTS with caching and deduplication
+    const blob = await getTTS(text);
     
-    // Clean up cache periodically
-    cleanupCache();
-
-    // Get TTS audio (with built-in caching and deduplication)
-    const result = await getTTSAudio(text);
-    
-    if (!result) {
-      console.log("TTS: Failed to generate audio");
-      return new NextResponse("Failed to generate audio", { status: 500 });
-    }
-
-    // Return the audio
-    return new Response(result.blob, {
+    return new Response(blob, {
       status: 200,
       headers: {
-        "Content-Type": result.blob.type || "audio/wav",
-        "X-TTS-Tier": result.tier,
-        "X-Cache": result.tier === "cached" || result.tier === "deduped" ? "HIT" : "MISS",
-        "Cache-Control": result.tier === "3" ? "no-store" : "public, max-age=86400"
+        "Content-Type": blob.type,
+        "Cache-Control": blob.type === "application/json" ? "no-store" : "public, max-age=86400"
       }
     });
-
   } catch (err: any) {
-    console.log("TTS HANDLER ERROR:", err?.message || String(err));
+    console.log("ERROR:", err?.message || String(err));
     return new NextResponse("TTS error: " + (err?.message || String(err)), { status: 500 });
   }
 }
