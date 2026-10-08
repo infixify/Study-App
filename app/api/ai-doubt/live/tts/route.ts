@@ -93,7 +93,7 @@ function normalizeForFastSmoothSpeech(raw: string): string {
  */
 async function synthesizeEdgeTTS(
   cleanText: string,
-  timeoutMs = 2800
+  timeoutMs = 12000
 ): Promise<Blob | null> {
   try {
     const secMsGec = await generateSecMsGec(TRUSTED_CLIENT_TOKEN);
@@ -257,11 +257,19 @@ async function synthesizeEdgeTTS(
   }
 }
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const text = searchParams.get("text")?.trim();
-    const provider = searchParams.get("provider") || "auto";
+    let text: string | null = null;
+    let provider = "auto";
+    try {
+      const body = await req.json();
+      if (typeof body?.text === "string") text = body.text.trim();
+      if (typeof body?.provider === "string") provider = body.provider;
+    } catch (_) {
+      const { searchParams } = new URL(req.url);
+      text = searchParams.get("text")?.trim() ?? null;
+      provider = searchParams.get("provider") || "auto";
+    }
 
     if (!text) {
       return new NextResponse("Missing text parameter", { status: 400 });
@@ -272,7 +280,7 @@ export async function GET(req: NextRequest) {
     // TIER 1: MICROSOFT EDGE NEURAL TTS
     if (provider !== "sarvam") {
       try {
-        const edgeBlob = await synthesizeEdgeTTS(cleanText, 2500);
+        const edgeBlob = await synthesizeEdgeTTS(cleanText, 12000);
         if (edgeBlob && edgeBlob.size > 200) {
           return new Response(edgeBlob, {
             status: 200,
@@ -356,4 +364,9 @@ export async function GET(req: NextRequest) {
   } catch (err: any) {
     return new NextResponse("TTS internal error", { status: 500 });
   }
+}
+
+// Backwards-compatible GET endpoint (short texts only)
+export async function GET(req: NextRequest) {
+  return POST(req);
 }
