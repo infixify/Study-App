@@ -303,6 +303,7 @@ export default function LiveVideoCallModal({
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioQueueRef = useRef<string[]>([]);
   const isAudioQueuePlayingRef = useRef(false);
+  const speechInterruptRef = useRef(false);
   const transcriptRef = useRef("");
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
@@ -495,85 +496,133 @@ export default function LiveVideoCallModal({
   }, []);
 
   // 6. Audio Player Queue & TTS (Edge Speech API)
-  const playAudioChunk = useCallback(
-    async (textToSpeak: string, msgId: string) => {
-      if (isMuted) return;
+    // Split long AI replies into natural sentence-based chunks for reliable TTS
+  const splitIntoSpeechChunks = (text: string, maxLen = 300): string[] => {
+    const parts = text.match(/[^.!?।]+[.!?।]*/g) || [text];
+    const chunks: string[] = [];
+    let current = "";
+    for (const part of parts) {
+      const p = part.trim();
+      if (!p) continue;
+      if (current && (current + " " + p).length > maxLen) {
+        chunks.push(current);
+        current = p;
+      } else {
+        current = current ? current + " " + p : p;
+      }
+    }
+    if (current) chunks.push(current);
+    return chunks;
+  };
 
-      const cleanedSpeech = cleanTextForSpeech(textToSpeak);
-      if (!cleanedSpeech) return;
-
+  // Play one chunk via server TTS; falls back to browser speechSynthesis if the route fails
+  const playSingleChunk = (chunk: string): Promise<void> => {
+    return new Promise<void>(async (resolve) => {
+      let settled = false;
+      const done = () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      };
       try {
-        setIsAiSpeaking(true);
-        setActiveSpeechMessageId(msgId);
-
-        // Check cache first
-        const cacheKey = `${AUDIO_CACHE_PREFIX}${msgId}`;
-        const cachedUrl = audioCache[cacheKey];
-
-        if (cachedUrl) {
-          if (currentAudioRef.current) {
-            currentAudioRef.current.pause();
-          }
-          const audio = new Audio(cachedUrl);
+        const res = await fetch("/api/ai-doubt/live/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunk }),
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          const audio = new Audio(URL.createObjectURL(blob));
           currentAudioRef.current = audio;
-          audio.onended = () => {
-            setIsAiSpeaking(false);
-            setActiveSpeechMessageId(null);
-          };
+          audio.onended = done;
+          audio.onerror = done;
+          audio.onpause = done;
           await audio.play();
           return;
         }
-
-        // Fetch from Edge TTS Route
-        const res = await fetch(
-          `/api/ai-doubt/live/tts?text=${encodeURIComponent(cleanedSpeech)}`
-        );
-
-        if (!res.ok) {
-          throw new Error("TTS Route Failed");
+      } catch (_) {}
+      try {
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          const utterance = new SpeechSynthesisUtterance(chunk);
+          utterance.lang = "hi-IN";
+          utterance.rate = 1.05;
+          // Chromium 15s garbage-collection cutoff keep-alive (pause+resume heartbeat every 8s)
+          const heartbeat = setInterval(() => {
+            try {
+              if (window.speechSynthesis.speaking) {
+                window.speechSynthesis.pause();
+                window.speechSynthesis.resume();
+              }
+            } catch (_) {}
+          }, 8000);
+          const finish = () => {
+            clearInterval(heartbeat);
+            done();
+          };
+          utterance.onend = finish;
+          utterance.onerror = finish;
+          window.speechSynthesis.speak(utterance);
+          return;
         }
+      } catch (_) {}
+      done();
+    });
+  };
 
-        const blob = await res.blob();
-        const audioUrl = URL.createObjectURL(blob);
+  const playAudioChunk = useCallback(
+    async (textToSpeak: string, msgId: string) => {
+      if (isMuted) return;
+      const cleanedSpeech = cleanTextForSpeech(textToSpeak);
+      if (!cleanedSpeech) return;
 
-        // Cache in memory and 24h storage
-        setAudioCache((prev) => ({ ...prev, [cacheKey]: audioUrl }));
-        try {
-          // Store blob url or mark timestamp in localStorage
-          localStorage.setItem(
-            cacheKey,
-            JSON.stringify({ timestamp: Date.now() })
-          );
-        } catch (_) {}
-
-        if (currentAudioRef.current) {
-          currentAudioRef.current.pause();
+      // Stop any in-flight speech session before starting a new one
+      try {
+        if (currentAudioRef.current) currentAudioRef.current.pause();
+      } catch (_) {}
+      try {
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
         }
+      } catch (_) {}
+      currentAudioRef.current = null;
+      speechInterruptRef.current = false;
+      setIsAiSpeaking(true);
+      setActiveSpeechMessageId(msgId);
 
-        const audio = new Audio(audioUrl);
-        currentAudioRef.current = audio;
-        audio.onended = () => {
-          setIsAiSpeaking(false);
-          setActiveSpeechMessageId(null);
-        };
-        await audio.play();
-      } catch (err) {
-        console.error("[LiveVideoCallModal] TTS play error:", err);
-        setIsAiSpeaking(false);
-        setActiveSpeechMessageId(null);
+      // Queue and play chunks sequentially (no URL length limits)
+      const chunks = splitIntoSpeechChunks(cleanedSpeech, 300);
+      audioQueueRef.current = chunks;
+      isAudioQueuePlayingRef.current = true;
+      for (const chunk of chunks) {
+        if (speechInterruptRef.current) break;
+        await playSingleChunk(chunk);
       }
+      isAudioQueuePlayingRef.current = false;
+      audioQueueRef.current = [];
+      setIsAiSpeaking(false);
+      setActiveSpeechMessageId(null);
     },
-    [isMuted, audioCache]
+    [isMuted]
   );
 
-  const stopSpeaking = useCallback(() => {
-    if (currentAudioRef.current) {
-      currentAudioRef.current.pause();
-      currentAudioRef.current.currentTime = 0;
-    }
-    setIsAiSpeaking(false);
-    setActiveSpeechMessageId(null);
-  }, []);
+const stopSpeaking = useCallback(() => {
+      speechInterruptRef.current = true;
+      try {
+        if (currentAudioRef.current) {
+          currentAudioRef.current.pause();
+          currentAudioRef.current.currentTime = 0;
+        }
+      } catch (_) {}
+      currentAudioRef.current = null;
+      try {
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
+        }
+      } catch (_) {}
+      setIsAiSpeaking(false);
+      setActiveSpeechMessageId(null);
+    }, []);
 
   // 7. Push-To-Talk Handlers (Hold To Talk)
   const handleHoldStart = useCallback(() => {
