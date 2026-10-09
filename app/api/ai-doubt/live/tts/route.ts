@@ -1,22 +1,22 @@
+// app/api/ai-doubt/live/tts/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "edge";
 
-// API keys
 const SARVAM_API_KEY = process.env.SARVAM_API_KEY || process.env.NEXT_PUBLIC_SARVAM_API_KEY;
 const HF_TOKEN = process.env.HF_TOKEN;
 
 // ============================================================================
-// HELPER: Base64 to Uint8Array for Cloudflare Edge Runtime (Zero Node Buffer Dependency)
+// HELPER: Base64 to ArrayBuffer for Cloudflare Edge (Zero Node Buffer Dependency)
 // ============================================================================
-function base64ToUint8Array(base64: string): Uint8Array {
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
   const binaryString = atob(base64);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
     bytes[i] = binaryString.charCodeAt(i);
   }
-  return bytes;
+  return bytes.buffer as ArrayBuffer;
 }
 
 // ============================================================================
@@ -116,9 +116,9 @@ async function callTier2(text: string): Promise<Blob | null> {
     const data = await res.json();
     const audio = data.audios?.[0] || data.audio;
     if (audio) {
-      // Cloudflare Edge compatible blob creation
-      const audioBytes = base64ToUint8Array(audio);
-      return new Blob([audioBytes], { type: "audio/wav" });
+      // Cloudflare Edge & TypeScript strict compatible blob creation
+      const buffer = base64ToArrayBuffer(audio);
+      return new Blob([buffer as any], { type: "audio/wav" });
     }
   } catch { return null; }
   return null;
