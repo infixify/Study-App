@@ -165,6 +165,94 @@ function purgeExpiredSessionData() {
 }
 
 // ============================================================================
+// 24-HOUR TTS AUDIO CACHE (Zero API requests on "Listen Again" replays)
+// ============================================================================
+function ttsHash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36) + "_" + text.length;
+}
+
+function base64ToBlob(base64: string, type: string): Blob {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
+
+function getCacheAudio(chunk: string): { base64: string; type: string } | null {
+  try {
+    const key = AUDIO_CACHE_PREFIX + ttsHash(chunk);
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.base64) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    if (parsed.timestamp && Date.now() - parsed.timestamp > CACHE_EXPIRY_MS) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return { base64: parsed.base64, type: parsed.type || "audio/wav" };
+  } catch (_) {
+    return null;
+  }
+}
+
+function evictOldestCachedAudio() {
+  try {
+    let oldestKey: string | null = null;
+    let oldestTs = Infinity;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(AUDIO_CACHE_PREFIX)) {
+        try {
+          const ts = JSON.parse(localStorage.getItem(key) || "{}").timestamp || 0;
+          if (ts < oldestTs) {
+            oldestTs = ts;
+            oldestKey = key;
+          }
+        } catch (_) {
+          if (key) localStorage.removeItem(key);
+        }
+      }
+    }
+    if (oldestKey) localStorage.removeItem(oldestKey);
+  } catch (_) {}
+}
+
+function cacheAudioBlob(chunk: string, blob: Blob) {
+  try {
+    blob.arrayBuffer().then((buf) => {
+      try {
+        const bytes = new Uint8Array(buf);
+        let bin = "";
+        const step = 0x8000;
+        for (let i = 0; i < bytes.length; i += step) {
+          bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + step)) as any);
+        }
+        const base64 = btoa(bin);
+        if (base64.length > 4 * 1024 * 1024) return;
+        const key = AUDIO_CACHE_PREFIX + ttsHash(chunk);
+        const payload = JSON.stringify({ timestamp: Date.now(), type: blob.type, base64 });
+        try {
+          localStorage.setItem(key, payload);
+        } catch (_) {
+          evictOldestCachedAudio();
+          try {
+            localStorage.setItem(key, payload);
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+// ============================================================================
 // NATURAL SPOKEN SCRIPT FILTER & ACADEMIC PRONUNCIATION NORMALIZER
 // ============================================================================
 function cleanTextForSpeech(raw: string): string {
@@ -496,17 +584,22 @@ export default function LiveVideoCallModal({
   }, []);
 
   // 6. Audio Player Queue & TTS (Edge Speech API)
-    // Split long AI replies into natural sentence-based chunks for reliable TTS
-  const splitIntoSpeechChunks = (text: string, maxLen = 300): string[] => {
-    const parts = text.match(/[^.!?।]+[.!?।]*/g) || [text];
+    // Progressive chunk sizes: early chunks small so speech starts fast,
+  // later chunks large so long solutions need far fewer TTS API calls.
+  const PROGRESSIVE_CHUNK_SIZES = [140, 240, 420, 650, 900];
+  const splitIntoSpeechChunks = (text: string): string[] => {
+    const parts = text.match(/[^.!?।॥]+[.!?।॥]*/g) || [text];
     const chunks: string[] = [];
     let current = "";
+    let chunkIdx = 0;
     for (const part of parts) {
       const p = part.trim();
       if (!p) continue;
+      const maxLen = PROGRESSIVE_CHUNK_SIZES[Math.min(chunkIdx, PROGRESSIVE_CHUNK_SIZES.length - 1)];
       if (current && (current + " " + p).length > maxLen) {
         chunks.push(current);
         current = p;
+        chunkIdx++;
       } else {
         current = current ? current + " " + p : p;
       }
@@ -515,7 +608,26 @@ export default function LiveVideoCallModal({
     return chunks;
   };
 
-  // Play one chunk via server TTS; falls back to browser speechSynthesis if the route fails
+  // Prefetch: fetch + cache a chunk in the background WITHOUT playing it,
+  // so the next chunk is ready by the time the current one finishes playing.
+  const prefetchChunk = (chunk: string) => {
+    if (getCacheAudio(chunk)) return; // already cached, no request needed
+    fetch("/api/ai-doubt/live/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: chunk }),
+    })
+      .then((res) => (res.ok ? res.blob() : null))
+      .then((blob) => {
+        if (blob && blob.type && blob.type !== "application/json") {
+          cacheAudioBlob(chunk, blob);
+        }
+      })
+      .catch(() => {});
+  };
+
+  // Play one chunk via server TTS, served from the 24h audio cache when available.
+  // Falls back to browser speechSynthesis if the route fails.
   const playSingleChunk = (chunk: string): Promise<void> => {
     return new Promise<void>(async (resolve) => {
       let settled = false;
@@ -525,6 +637,28 @@ export default function LiveVideoCallModal({
           resolve();
         }
       };
+
+      const playBlob = async (blob: Blob) => {
+        const audio = new Audio(URL.createObjectURL(blob));
+        currentAudioRef.current = audio;
+        audio.onended = done;
+        audio.onerror = done;
+        audio.onpause = done;
+        await audio.play();
+      };
+
+      // 1. CACHE HIT: replay cached audio with zero API requests
+      const cached = getCacheAudio(chunk);
+      if (cached) {
+        try {
+          await playBlob(base64ToBlob(cached.base64, cached.type));
+          return;
+        } catch (_) {
+          try { localStorage.removeItem(AUDIO_CACHE_PREFIX + ttsHash(chunk)); } catch (_) {}
+        }
+      }
+
+      // 2. CACHE MISS: fetch from server TTS and store for 24h
       try {
         const res = await fetch("/api/ai-doubt/live/tts", {
           method: "POST",
@@ -533,12 +667,10 @@ export default function LiveVideoCallModal({
         });
         if (res.ok) {
           const blob = await res.blob();
-          const audio = new Audio(URL.createObjectURL(blob));
-          currentAudioRef.current = audio;
-          audio.onended = done;
-          audio.onerror = done;
-          audio.onpause = done;
-          await audio.play();
+          if (blob.type && blob.type !== "application/json") {
+            cacheAudioBlob(chunk, blob);
+          }
+          await playBlob(blob);
           return;
         }
       } catch (_) {}
@@ -547,7 +679,6 @@ export default function LiveVideoCallModal({
           const utterance = new SpeechSynthesisUtterance(chunk);
           utterance.lang = "hi-IN";
           utterance.rate = 1.05;
-          // Chromium 15s garbage-collection cutoff keep-alive (pause+resume heartbeat every 8s)
           const heartbeat = setInterval(() => {
             try {
               if (window.speechSynthesis.speaking) {
@@ -590,13 +721,16 @@ export default function LiveVideoCallModal({
       setIsAiSpeaking(true);
       setActiveSpeechMessageId(msgId);
 
-      // Queue and play chunks sequentially (no URL length limits)
-      const chunks = splitIntoSpeechChunks(cleanedSpeech, 300);
+      // Queue and play chunks sequentially (progressive sizes, no URL length limits)
+      const chunks = splitIntoSpeechChunks(cleanedSpeech);
       audioQueueRef.current = chunks;
       isAudioQueuePlayingRef.current = true;
-      for (const chunk of chunks) {
+      // While a chunk plays, prefetch the next one in the background
+      if (chunks[1]) prefetchChunk(chunks[1]);
+      for (let i = 0; i < chunks.length; i++) {
         if (speechInterruptRef.current) break;
-        await playSingleChunk(chunk);
+        if (chunks[i + 1]) prefetchChunk(chunks[i + 1]);
+        await playSingleChunk(chunks[i]);
       }
       isAudioQueuePlayingRef.current = false;
       audioQueueRef.current = [];
