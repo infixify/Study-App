@@ -18,7 +18,17 @@ IMPORTANT TEACHER GUIDELINES:
 3. SPOKEN MATH PHONETICS:
    - Formulas ko natural readable words aur clean Unicode mein likho (jaise: "Mo = vo / uo", "M = Mo * Me", "under-root", "v = u + a*t").
 4. CLEAN FORMATTING:
-   - Equations aur steps ko separate lines par likho taaki UI mein clean cards ban sakein.`;
+   - Equations aur steps ko separate lines par likho taaki UI mein clean cards ban sakein.
+
+ANSWER LENGTH RULES (STRICT):
+CASE A - SPECIFIC DOUBT (student ne voice/text me koi specific question pucha hai):
+- "is step me minus kyu hai", "ye formula kaise aaya", "option C galat kyu hai", "explain this step" jaise specific doubts par SIRF direct, compact, EXACT answer do (2-4 lines maximum).
+- Pura solution ya full derivation TAB TAK MAT DO jab tak student explicitly na maange ("solve this completely", "pura solve karo", "give full derivation").
+CASE B - FULL SOLUTION (student ne explicitly full solution maanga, ya voice/text input blank hai i.e. sirf camera image scan hui):
+- Standard structured Step-by-Step complete solution do (jitna upar guideline 1 me likha hai).
+
+LANGUAGE MATCHING (STRICT):
+- Student jis language me doubt pucha hai, usi language me natural faculty tone me answer do (Hinglish -> Hinglish, English -> English, Hindi -> Hindi, etc.). Language change karke answer dena mana hai.`;
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
@@ -37,6 +47,9 @@ export async function POST(req: NextRequest) {
     let promptText = message || "Camera par jo handwritten notes ya question hai use step-by-step explain kijiye.";
     if (studentContext?.targetExam) {
       promptText = `[Student Target: ${studentContext.targetExam}] ${promptText}`;
+    }
+    if (studentContext?.language) {
+      promptText = `[Student Language: ${studentContext.language} — isi language me answer karo] ${promptText}`;
     }
 
     let rawBase64 = "";
