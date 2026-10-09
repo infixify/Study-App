@@ -102,6 +102,8 @@ interface Message {
   sender: "user" | "ai";
   text: string;
   time: string;
+  // Native-script speech text (API tts_text); UI always shows text.
+  ttsText?: string;
   timestamp?: number;
 }
 
@@ -831,6 +833,7 @@ const stopSpeaking = useCallback(() => {
           id: aiMsgId,
           sender: "ai",
           text: aiReply,
+          ttsText: data.tts_text || aiReply,
           time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           timestamp: Date.now(),
         },
@@ -841,7 +844,7 @@ const stopSpeaking = useCallback(() => {
 
       // Play Voice Output automatically
       if (!isMuted) {
-        playAudioChunk(aiReply, aiMsgId);
+        playAudioChunk(data.tts_text || aiReply, aiMsgId);
       }
     } catch (e: any) {
       console.error("[LiveVideoCallModal] Request error:", e);
@@ -1114,7 +1117,7 @@ const stopSpeaking = useCallback(() => {
                             if (activeSpeechMessageId === m.id && isAiSpeaking) {
                               stopSpeaking();
                             } else {
-                              playAudioChunk(m.text, m.id);
+                              playAudioChunk(m.ttsText || m.text, m.id);
                             }
                           }}
                           className={`flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
