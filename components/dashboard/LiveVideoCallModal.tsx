@@ -101,6 +101,8 @@ interface Message {
   id: string;
   sender: "user" | "ai";
   text: string;
+  // Native-script speech text (API tts_text); UI always shows text.
+  ttsText?: string;
   time: string;
   timestamp?: number;
 }
@@ -683,7 +685,16 @@ export default function LiveVideoCallModal({
       try {
         if (typeof window !== "undefined" && "speechSynthesis" in window) {
           const utterance = new SpeechSynthesisUtterance(chunk);
-          utterance.lang = "hi-IN";
+          // Detect language from script so non-Hindi fallback speech also pronounces right
+          if (/[ঀ-৿]/.test(chunk)) utterance.lang = "bn-IN";
+          else if (/[઀-૿]/.test(chunk)) utterance.lang = "gu-IN";
+          else if (/[஀-௿]/.test(chunk)) utterance.lang = "ta-IN";
+          else if (/[ఀ-౿]/.test(chunk)) utterance.lang = "te-IN";
+          else if (/[ಀ-೿]/.test(chunk)) utterance.lang = "kn-IN";
+          else if (/[ഀ-ൿ]/.test(chunk)) utterance.lang = "ml-IN";
+          else if (/[਀-੿]/.test(chunk)) utterance.lang = "pa-IN";
+          else if (/[ऀ-ॿ]/.test(chunk)) utterance.lang = "hi-IN";
+          else utterance.lang = "en-IN";
           utterance.rate = 1.05;
           const heartbeat = setInterval(() => {
             try {
@@ -844,6 +855,7 @@ const stopSpeaking = useCallback(() => {
           id: aiMsgId,
           sender: "ai",
           text: aiReply,
+          ttsText: data.tts_text || aiReply,
           time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           timestamp: Date.now(),
         },
@@ -854,7 +866,7 @@ const stopSpeaking = useCallback(() => {
 
       // Play Voice Output automatically
       if (!isMuted) {
-        playAudioChunk(aiReply, aiMsgId);
+        playAudioChunk(data.tts_text || aiReply, aiMsgId);
       }
     } catch (e: any) {
       console.error("[LiveVideoCallModal] Request error:", e);
@@ -1128,7 +1140,7 @@ const stopSpeaking = useCallback(() => {
                             if (activeSpeechMessageId === m.id && isAiSpeaking) {
                               stopSpeaking();
                             } else {
-                              playAudioChunk(m.text, m.id);
+                              playAudioChunk(m.ttsText || m.text, m.id);
                             }
                           }}
                           className={`flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${

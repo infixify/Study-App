@@ -4,6 +4,38 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "edge";
 
 const SARVAM_API_KEY = process.env.SARVAM_API_KEY || process.env.NEXT_PUBLIC_SARVAM_API_KEY;
+
+// ============================================================================
+// SCRIPT AUTO-DETECTION: Unicode ranges -> BCP-47 language code for TTS tiers.
+// Input text is already in native script (Gemini tts_text), so detection is reliable.
+// ============================================================================
+function detectLangCode(text: string): string {
+  if (/[\u0980-\u09FF]/.test(text)) return "bn-IN";
+  if (/[\u0A00-\u0A7F]/.test(text)) return "pa-IN";
+  if (/[\u0A80-\u0AFF]/.test(text)) return "gu-IN";
+  if (/[\u0B00-\u0B7F]/.test(text)) return "or-IN";
+  if (/[\u0B80-\u0BFF]/.test(text)) return "ta-IN";
+  if (/[\u0C00-\u0C7F]/.test(text)) return "te-IN";
+  if (/[\u0C80-\u0CFF]/.test(text)) return "kn-IN";
+  if (/[\u0D00-\u0D7F]/.test(text)) return "ml-IN";
+  if (/[\u0900-\u097F]/.test(text)) return "hi-IN";
+  if (/[\u0600-\u06FF]/.test(text)) return "ur-IN";
+  return "en-IN";
+}
+
+// Browser-native (Tier 3) voices per language
+const NATIVE_VOICES: Record<string, string> = {
+  "hi-IN": "hi-IN-MadhurNeural",
+  "en-IN": "en-IN-PrabhatNeural",
+  "bn-IN": "bn-IN-BashkarNeural",
+  "gu-IN": "gu-IN-NiranjanNeural",
+  "ta-IN": "ta-IN-PallaviNeural",
+  "te-IN": "te-IN-MohanNeural",
+  "kn-IN": "kn-IN-GaganNeural",
+  "ml-IN": "ml-IN-MidhunNeural",
+  "pa-IN": "pa-IN-PrabhatNeural",
+  "or-IN": "or-IN-SubhasiniNeural",
+};
 const HF_TOKEN = process.env.HF_TOKEN;
 
 // ============================================================================
@@ -80,7 +112,7 @@ function cleanText(text: string): string {
 // CACHE KEY GENERATION (SHA-256 hash of processed text)
 // ============================================================================
 async function getCacheKey(text: string): Promise<string> {
-  const processed = cleanText(convertHinglishToDevanagari(text));
+  const processed = cleanText(text);
   const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(processed));
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
@@ -95,7 +127,7 @@ async function callTier1(text: string): Promise<Blob | null> {
     const res = await fetch("https://api-inference.huggingface.co/models/ai4bharat/indic-parler-tts", {
       method: "POST",
       headers: { "Authorization": `Bearer ${HF_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ inputs: text, parameters: { description: "Rohit's voice is clear and natural, with a moderate pace. The recording is of very high quality, with no background noise." } }),
+      body: JSON.stringify({ inputs: text, parameters: { description: "A clear and natural speaker delivers the speech at a moderate pace. The recording is of very high quality, with no background noise." } }),
       signal: AbortSignal.timeout(30000)
     });
     if (!res.ok) return null;
@@ -109,7 +141,7 @@ async function callTier2(text: string): Promise<Blob | null> {
     const res = await fetch("https://api.sarvam.ai/text-to-speech", {
       method: "POST",
       headers: { "Content-Type": "application/json", "api-subscription-key": SARVAM_API_KEY },
-      body: JSON.stringify({ text, language_code: "hi-IN", speaker: "shubh", pace: 1.1, speech_sample_rate: 24000, model: "bulbul:v3" }),
+      body: JSON.stringify({ text, language_code: detectLangCode(text), speaker: "shubh", pace: 1.1, speech_sample_rate: 24000, model: "bulbul:v3" }),
       signal: AbortSignal.timeout(15000)
     });
     if (!res.ok) return null;
@@ -159,7 +191,9 @@ export async function GET(req: NextRequest) {
     console.log("[NEW REQUEST] Processing text");
     const promise = (async () => {
       let blob: Blob | null = null;
-      const processedText = cleanText(convertHinglishToDevanagari(text));
+      // Input arrives in native script from Gemini tts_text; old dictionary
+      // converter caused mispronunciations and is intentionally not applied.
+      const processedText = cleanText(text);
       
       // Try Tier 1
       blob = await callTier1(processedText);
@@ -171,7 +205,8 @@ export async function GET(req: NextRequest) {
       
       // Fallback to Tier 3
       console.log("[TIER 3 FALLBACK]");
-      const json = JSON.stringify({ type: "native", text: processedText, voice: "hi-IN-MadhurNeural", rate: 1.1 });
+      const lang = detectLangCode(processedText);
+      const json = JSON.stringify({ type: "native", text: processedText, voice: NATIVE_VOICES[lang] || NATIVE_VOICES["hi-IN"], lang, rate: 1.1 });
       return new Blob([json], { type: "application/json" });
     })();
     
