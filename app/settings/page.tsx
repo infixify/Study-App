@@ -1,4 +1,4 @@
-// app/profile/page.tsx
+// app/settings/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -26,7 +26,7 @@ interface UserProfile {
   batchName: string;
 }
 
-export default function ProfilePage() {
+export function SettingsPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -68,9 +68,10 @@ export default function ProfilePage() {
       const resolvedEmail = data?.email ?? user.email ?? "";
       const resolvedClass = ((data?.class_level as ClassLevel) || "11") as ClassLevel;
       const resolvedExam = ((data?.target_exam as TargetExam) || "JEE") as TargetExam;
-      const resolvedWantsBoards = data?.wants_boards !== undefined && data?.wants_boards !== null 
-        ? Boolean(data.wants_boards) 
-        : true;
+      const resolvedWantsBoards =
+        data?.wants_boards !== undefined && data?.wants_boards !== null
+          ? Boolean(data.wants_boards)
+          : true;
       const resolvedMode = (data?.study_mode ?? "Online") as StudyMode;
       const resolvedBatch = data?.batch_name ?? "";
 
@@ -124,7 +125,11 @@ export default function ProfilePage() {
     setSavingBatch(false);
   }
 
-  async function handleSaveAcademic(nextClass: ClassLevel, nextExam: TargetExam, nextWantsBoards: boolean) {
+  async function handleSaveAcademic(
+    nextClass: ClassLevel,
+    nextExam: TargetExam,
+    nextWantsBoards: boolean
+  ) {
     setSavingAcademic(true);
     const effectiveWantsBoards = nextClass === "Dropper" ? false : nextWantsBoards;
     const res = await updateEditableProfile({
@@ -156,7 +161,7 @@ export default function ProfilePage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] flex items-center justify-center text-xs font-bold text-slate-400">
-        Loading Profile…
+        Loading Settings…
       </div>
     );
   }
@@ -164,7 +169,7 @@ export default function ProfilePage() {
   if (!profile) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] flex items-center justify-center p-6 text-xs text-slate-400">
-        Could not load profile. Please try again.
+        Could not load settings. Please try again.
       </div>
     );
   }
@@ -191,10 +196,13 @@ export default function ProfilePage() {
       <AppHeader />
       <div className="max-w-md mx-auto px-5 py-6">
         <h1 className="font-display text-2xl font-black mb-0.5 tracking-tight text-slate-900 dark:text-white">
-          My Profile
+          Settings & Profile
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 font-medium">
-          Signed in as <span className="font-semibold text-slate-800 dark:text-slate-200">{profile.email}</span>
+          Signed in as{" "}
+          <span className="font-semibold text-slate-800 dark:text-slate-200">
+            {profile.email}
+          </span>
         </p>
 
         {/* Section 1: Study Info (Class, Target Exam, School Prep) */}
@@ -273,7 +281,7 @@ export default function ProfilePage() {
           />
         )}
 
-        {/* Section 3: Personal Settings */}
+        {/* Section 3: Personal Details */}
         <div className="flex items-center justify-between mt-6 mb-2.5">
           <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Personal Details
@@ -320,6 +328,8 @@ export default function ProfilePage() {
     </div>
   );
 }
+
+export default SettingsPage;
 
 function RowCard({
   label,
@@ -412,7 +422,6 @@ function AcademicEditor({
         </span>
       </div>
 
-      {/* Class Level Selection (without Class 10th) */}
       <div>
         <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1.5">
           Select Class
@@ -441,7 +450,6 @@ function AcademicEditor({
         </div>
       </div>
 
-      {/* Target Exam Selection (JEE / NEET) */}
       <div>
         <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1.5">
           Target Exam
@@ -467,7 +475,6 @@ function AcademicEditor({
         </div>
       </div>
 
-      {/* School / Boards Prep Toggle */}
       <div>
         <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1.5">
           {schoolLabel}
@@ -509,20 +516,19 @@ function AcademicEditor({
         )}
       </div>
 
-      {/* Actions */}
       <div className="flex gap-2 pt-2">
         <button
           type="button"
           disabled={saving}
           onClick={() => onSave(classVal, examVal, boardsVal)}
-          className="flex-1 py-2.5 bg-teal text-white font-bold text-xs rounded-xl shadow-xs"
+          className="flex-1 py-2.5 bg-teal text-white font-bold text-xs rounded-xl shadow-xs hover:opacity-90 transition-opacity"
         >
           {saving ? "Saving…" : "Save Changes"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2.5 text-xs font-bold text-slate-400"
+          className="px-4 py-2.5 text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors"
         >
           Cancel
         </button>
@@ -548,14 +554,14 @@ function BatchEditor({
   const [selectedBatch, setSelectedBatch] = useState<string>(currentBatch);
   const [customBatch, setCustomBatch] = useState<string>("");
 
-  const rawOptions: any[] =
+  const rawOptions: string[] =
     mode === "Online"
-      ? (ONLINE_BATCHES as any)
+      ? ONLINE_BATCHES.map((b) => `${b.institute} - ${b.name}`)
       : mode === "Offline"
-      ? (OFFLINE_INSTITUTES as any)
+      ? OFFLINE_INSTITUTES
       : [];
 
-  const isCustom = !rawOptions.includes(selectedBatch) && selectedBatch !== "";
+  const isCustom = !rawOptions.includes(selectedBatch) && selectedBatch !== "" && selectedBatch !== "Self Study";
 
   return (
     <div className="rounded-2xl border border-teal/30 p-4 mb-4 bg-white dark:bg-[#151D2A] shadow-md space-y-3">
@@ -585,18 +591,18 @@ function BatchEditor({
 
       {mode !== "Self" && (
         <div className="space-y-1.5 max-h-40 overflow-y-auto">
-          {rawOptions.map((opt: any) => (
+          {rawOptions.map((opt) => (
             <button
-              key={String(opt)}
+              key={opt}
               type="button"
-              onClick={() => setSelectedBatch(String(opt))}
+              onClick={() => setSelectedBatch(opt)}
               className={`w-full text-left p-2.5 rounded-xl text-xs font-semibold border transition-all ${
-                selectedBatch === String(opt)
+                selectedBatch === opt
                   ? "bg-teal/15 dark:bg-teal/20 text-teal dark:text-[#2DD4BF] border-teal/40 font-bold"
                   : "bg-slate-50 dark:bg-white/5 border-slate-200/60 dark:border-white/5 text-slate-700 dark:text-slate-300"
               }`}
             >
-              {String(opt)}
+              {opt}
             </button>
           ))}
           <button
