@@ -18,7 +18,29 @@ IMPORTANT TEACHER GUIDELINES:
 3. SPOKEN MATH PHONETICS:
    - Formulas ko natural readable words aur clean Unicode mein likho (jaise: "Mo = vo / uo", "M = Mo * Me", "under-root", "v = u + a*t").
 4. CLEAN FORMATTING:
-   - Equations aur steps ko separate lines par likho taaki UI mein clean cards ban sakein.`;
+   - Equations aur steps ko separate lines par likho taaki UI mein clean cards ban sakein.
+
+OUTPUT FORMAT (STRICT — follow exactly):
+Respond ONLY with a single valid JSON object, no markdown fences, no extra text:
+{"reply": "...", "tts_text": "..."}
+- "reply": your full answer in the SAME language and script the student used. Hinglish (Roman) input -> natural Hinglish (Roman). English -> English. Devanagari Hindi -> Devanagari Hindi. Marathi/Tamil/etc likewise.
+- "tts_text": the SAME answer rewritten for text-to-speech in the NATIVE script of that language (Hinglish/Hindi -> shuddh Devanagari; English -> English; other Indian languages -> their own script). Keep technical terms (Newton, force, equation, lens) in English. NO markdown, NO LaTeX, NO asterisks. Write formulas as spoken words, e.g. "v equals u plus a t", "under root of 2". Flowing natural speech text only.`;
+
+// Parse Gemini dual-output JSON; fall back to raw text if JSON parsing fails
+function parseDual(raw: string): { reply: string; tts_text: string } {
+  try {
+    const cleaned = raw.replace(/```json|```/g, "").trim();
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      const j = JSON.parse(cleaned.slice(start, end + 1));
+      if (j && j.reply) {
+        return { reply: String(j.reply), tts_text: j.tts_text ? String(j.tts_text) : String(j.reply) };
+      }
+    }
+  } catch (_) {}
+  return { reply: raw, tts_text: raw };
+}
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
@@ -89,7 +111,7 @@ export async function POST(req: NextRequest) {
             contents: [{ parts }],
             generationConfig: {
               temperature: 0.35,
-              maxOutputTokens: 1200,
+              maxOutputTokens: 2500,
             },
           }),
         });
@@ -98,7 +120,7 @@ export async function POST(req: NextRequest) {
         if (res.ok) {
           const data = await res.json();
           const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-          if (reply) return { ok: true, status: 200, text: reply };
+          if (reply) { const d = parseDual(reply); return { ok: true, status: 200, text: d.reply, ttsText: d.tts_text }; }
         }
 
         let errDetail = "";
@@ -137,6 +159,7 @@ export async function POST(req: NextRequest) {
       if (resA1.ok && resA1.text) {
         return NextResponse.json({
           reply: resA1.text,
+            tts_text: resA1.ttsText,
           model: `Google Gemini (${MODEL_A})`,
           provider: "google",
           success: true,
@@ -151,6 +174,7 @@ export async function POST(req: NextRequest) {
         if (resB1.ok && resB1.text) {
           return NextResponse.json({
             reply: resB1.text,
+            tts_text: resB1.ttsText,
             model: `Google Gemini (${MODEL_B})`,
             provider: "google",
             success: true,
@@ -166,6 +190,7 @@ export async function POST(req: NextRequest) {
             if (resA2.ok && resA2.text) {
               return NextResponse.json({
                 reply: resA2.text,
+            tts_text: resA2.ttsText,
                 model: `Google Gemini (${MODEL_A} - Key 2)`,
                 provider: "google",
                 success: true,
@@ -178,6 +203,7 @@ export async function POST(req: NextRequest) {
             if (resB2.ok && resB2.text) {
               return NextResponse.json({
                 reply: resB2.text,
+            tts_text: resB2.ttsText,
                 model: `Google Gemini (${MODEL_B} - Key 2)`,
                 provider: "google",
                 success: true,
@@ -193,6 +219,7 @@ export async function POST(req: NextRequest) {
         if (resB1.ok && resB1.text) {
           return NextResponse.json({
             reply: resB1.text,
+            tts_text: resB1.ttsText,
             model: `Google Gemini (${MODEL_B})`,
             provider: "google",
             success: true,
@@ -208,6 +235,7 @@ export async function POST(req: NextRequest) {
             if (resA2.ok && resA2.text) {
               return NextResponse.json({
                 reply: resA2.text,
+            tts_text: resA2.ttsText,
                 model: `Google Gemini (${MODEL_A} - Key 2)`,
                 provider: "google",
                 success: true,
@@ -220,6 +248,7 @@ export async function POST(req: NextRequest) {
             if (resB2.ok && resB2.text) {
               return NextResponse.json({
                 reply: resB2.text,
+            tts_text: resB2.ttsText,
                 model: `Google Gemini (${MODEL_B} - Key 2)`,
                 provider: "google",
                 success: true,
@@ -235,6 +264,7 @@ export async function POST(req: NextRequest) {
             if (resB2.ok && resB2.text) {
               return NextResponse.json({
                 reply: resB2.text,
+            tts_text: resB2.ttsText,
                 model: `Google Gemini (${MODEL_B} - Key 2)`,
                 provider: "google",
                 success: true,
@@ -295,8 +325,10 @@ export async function POST(req: NextRequest) {
           const groqData = await groqRes.json();
           const groqReply = groqData?.choices?.[0]?.message?.content?.trim();
           if (groqReply) {
+            const gd = parseDual(groqReply);
             return NextResponse.json({
-              reply: groqReply,
+              reply: gd.reply,
+              tts_text: gd.tts_text,
               model: "Groq Live LPU (qwen3.8-27b)",
               provider: "groq",
               success: true,
