@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import StepRail from "@/components/onboarding/StepRail";
 import StepLogin from "@/components/onboarding/StepLogin";
 import StepClass from "@/components/onboarding/StepClass";
-import StepExam from "@/components/onboarding/StepExam";
+import { StepExam } from "@/components/onboarding/StepExam";
 import StepMode from "@/components/onboarding/StepMode";
 import {
   supabase,
