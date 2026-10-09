@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
     const MODEL_B = "gemini-3.5-flash-lite";
 
     // Helper to call Google Gemini
-    async function tryGemini(key: string, model: string): Promise<{ ok: boolean; status: number; text?: string; err?: string }> {
+    async function tryGemini(key: string, model: string): Promise<{ ok: boolean; status: number; text?: string; ttsText?: string; err?: string }> {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3800);
       try {
