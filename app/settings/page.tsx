@@ -1,7 +1,7 @@
 // app/settings/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, ChangeEvent } from "react";
 import {
   supabase,
   ClassLevel,
@@ -26,7 +26,7 @@ interface UserProfile {
   batchName: string;
 }
 
-export function SettingsPage() {
+export default function SettingsPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -103,21 +103,31 @@ export function SettingsPage() {
     const { data: authData } = await supabase.auth.getUser();
     const user = authData?.user;
     if (user) {
-      await supabase.from("users").update({ name: newName.trim() }).eq("uid", user.id);
-      await supabase.auth.updateUser({ data: { full_name: newName.trim() } });
-      setProfile((prev) => (prev ? { ...prev, name: newName.trim() } : null));
-      setEditingName(false);
+      const { error } = await supabase
+        .from("users")
+        .update({ name: newName.trim() })
+        .eq("uid", user.id);
+
+      if (!error) {
+        setProfile((prev: UserProfile | null) => (prev ? { ...prev, name: newName.trim() } : null));
+        setEditingName(false);
+      } else {
+        alert("Failed to update name.");
+      }
     }
     setSavingName(false);
   }
 
   async function saveEditableModeAndBatch(nextMode: StudyMode, nextBatch: string) {
     setSavingBatch(true);
-    const res = await updateEditableProfile({ studyMode: nextMode, batchOrBranch: nextBatch });
+    const res = await updateEditableProfile({
+      studyMode: nextMode,
+      batchOrBranch: nextBatch,
+    });
     if (res && res.success) {
       setStudyMode(nextMode);
       setBatch(nextBatch);
-      setProfile((prev) => (prev ? { ...prev, studyMode: nextMode, batchName: nextBatch } : null));
+      setProfile((prev: UserProfile | null) => (prev ? { ...prev, studyMode: nextMode, batchName: nextBatch } : null));
       setEditingBatch(false);
     } else {
       alert("Failed to update study settings.");
@@ -141,7 +151,7 @@ export function SettingsPage() {
       setSelectedClass(nextClass);
       setSelectedTargetExam(nextExam);
       setWantsBoards(effectiveWantsBoards);
-      setProfile((prev) =>
+      setProfile((prev: UserProfile | null) =>
         prev
           ? {
               ...prev,
@@ -188,25 +198,30 @@ export function SettingsPage() {
     profile.classLevel === "Dropper"
       ? "Not applicable (Dropper)"
       : profile.wantsBoards
-      ? "Yes (Enabled)"
-      : "No (Disabled)";
+      ? "Enabled (Tracking ON)"
+      : "Disabled";
+
+  const batchDisplay =
+    profile.studyMode === "Self"
+      ? "Self Study"
+      : profile.batchName || "Not assigned";
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] text-slate-900 dark:text-slate-100 pb-28">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#090E17] text-slate-900 dark:text-white pb-24 transition-colors">
       <AppHeader />
-      <div className="max-w-md mx-auto px-5 py-6">
-        <h1 className="font-display text-2xl font-black mb-0.5 tracking-tight text-slate-900 dark:text-white">
-          Settings & Profile
-        </h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 font-medium">
-          Signed in as{" "}
-          <span className="font-semibold text-slate-800 dark:text-slate-200">
-            {profile.email}
-          </span>
-        </p>
 
-        {/* Section 1: Study Info (Class, Target Exam, School Prep) */}
-        <div className="flex items-center justify-between mb-2.5">
+      <div className="max-w-md mx-auto p-4 space-y-6">
+        <div>
+          <h1 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">
+            Settings & Profile
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Manage your academic targets, coaching, and personal information.
+          </p>
+        </div>
+
+        {/* Section 1: Study Info & Target Exam */}
+        <div className="flex items-center justify-between mt-4 mb-2.5">
           <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Study Info & Target
           </span>
@@ -259,16 +274,15 @@ export function SettingsPage() {
 
         <RowCard
           label="Study Mode"
-          value={studyMode}
+          value={profile.studyMode}
           isEditable
-          onClick={() => setEditingBatch((v) => !v)}
+          onClick={() => setEditingBatch(!editingBatch)}
         />
-
         <RowCard
-          label="Batch / Institute"
-          value={batch || "Self Study"}
+          label="Batch / Coaching"
+          value={batchDisplay}
           isEditable
-          onClick={() => setEditingBatch((v) => !v)}
+          onClick={() => setEditingBatch(!editingBatch)}
         />
 
         {editingBatch && (
@@ -281,43 +295,48 @@ export function SettingsPage() {
           />
         )}
 
-        {/* Section 3: Personal Details */}
+        {/* Section 3: Personal Info */}
         <div className="flex items-center justify-between mt-6 mb-2.5">
           <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            Personal Details
-          </span>
-          <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-teal/10 dark:bg-teal/20 text-teal dark:text-[#2DD4BF]">
-            Editable
+            Personal Information
           </span>
         </div>
 
+        <RowCard label="Email" value={profile.email} isLocked />
+
         {editingName ? (
-          <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-3.5 mb-2.5 bg-white dark:bg-[#121A29] flex items-center gap-2 shadow-sm">
+          <div className="p-4 rounded-2xl bg-white dark:bg-[#121A29] border border-teal/40 space-y-3 shadow-md">
+            <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+              Your Full Name
+            </label>
             <input
               type="text"
               value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="flex-1 text-sm font-bold bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white border border-slate-200 dark:border-white/10 rounded-xl p-2.5 focus:outline-none focus:border-teal"
-              placeholder="Enter your name"
-              autoFocus
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
+              className="w-full text-xs font-semibold p-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white outline-none focus:border-teal"
+              placeholder="Enter name"
             />
-            <button
-              onClick={handleSaveName}
-              disabled={savingName}
-              className="bg-teal text-white text-xs font-bold px-3.5 py-2.5 rounded-xl shadow-xs"
-            >
-              {savingName ? "…" : "Save"}
-            </button>
-            <button
-              onClick={() => setEditingName(false)}
-              className="text-xs font-bold text-slate-400 px-2 py-2"
-            >
-              Cancel
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={savingName || !newName.trim()}
+                onClick={handleSaveName}
+                className="flex-1 py-2 bg-teal text-white font-bold text-xs rounded-xl shadow-xs hover:opacity-90 transition-opacity"
+              >
+                {savingName ? "Saving…" : "Save Name"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingName(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-400"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         ) : (
           <RowCard
-            label="Full Name"
+            label="Name"
             value={profile.name}
             isEditable
             onClick={() => setEditingName(true)}
@@ -328,8 +347,6 @@ export function SettingsPage() {
     </div>
   );
 }
-
-export default SettingsPage;
 
 function RowCard({
   label,
@@ -350,16 +367,20 @@ function RowCard({
         <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
           {label}
         </div>
-        <div className="text-sm font-bold mt-0.5 text-slate-900 dark:text-white">
+        <div className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
           {value}
         </div>
       </div>
       {isEditable && (
-        <span className="text-xs font-bold text-teal dark:text-[#2DD4BF] flex items-center gap-1 hover:underline">
-          Edit ✎
+        <span className="text-xs text-teal font-black flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
+          Edit <span>✏️</span>
         </span>
       )}
-      {isLocked && <span className="text-xs opacity-70">🔒</span>}
+      {isLocked && (
+        <span className="text-xs text-slate-400" title="Locked">
+          🔒
+        </span>
+      )}
     </div>
   );
 
@@ -368,7 +389,7 @@ function RowCard({
       <button
         type="button"
         onClick={onClick}
-        className="w-full text-left rounded-2xl border border-slate-200 dark:border-white/10 p-3.5 mb-2.5 bg-white dark:bg-[#121A29] hover:border-teal dark:hover:border-teal/50 shadow-sm transition-all active:scale-[0.99]"
+        className="w-full text-left p-3.5 mb-2 rounded-2xl bg-white dark:bg-[#121A29] border border-slate-200/80 dark:border-white/10 shadow-xs hover:border-teal/40 dark:hover:border-teal/40 transition-all group"
       >
         {content}
       </button>
@@ -376,7 +397,7 @@ function RowCard({
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200/80 dark:border-white/10 p-3.5 mb-2.5 bg-white/70 dark:bg-[#121A29]/70 backdrop-blur-xs shadow-xs">
+    <div className="w-full text-left p-3.5 mb-2 rounded-2xl bg-white dark:bg-[#121A29] border border-slate-200/80 dark:border-white/10 shadow-xs">
       {content}
     </div>
   );
@@ -486,7 +507,7 @@ function AcademicEditor({
         ) : (
           <button
             type="button"
-            onClick={() => setBoardsVal((prev) => !prev)}
+            onClick={() => setBoardsVal(!boardsVal)}
             className={`w-full p-2.5 rounded-xl border flex items-center justify-between transition-all ${
               boardsVal
                 ? "bg-teal/10 dark:bg-teal/20 border-teal/40"
@@ -523,12 +544,12 @@ function AcademicEditor({
           onClick={() => onSave(classVal, examVal, boardsVal)}
           className="flex-1 py-2.5 bg-teal text-white font-bold text-xs rounded-xl shadow-xs hover:opacity-90 transition-opacity"
         >
-          {saving ? "Saving…" : "Save Changes"}
+          {saving ? "Saving…" : "Save Study Info"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2.5 text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors"
+          className="px-4 py-2.5 text-xs font-bold text-slate-400 hover:text-slate-600 dark:hover:text-white"
         >
           Cancel
         </button>
@@ -556,7 +577,7 @@ function BatchEditor({
 
   const rawOptions: string[] =
     mode === "Online"
-      ? ONLINE_BATCHES.map((b) => `${b.institute} - ${b.name}`)
+      ? ONLINE_BATCHES.map((b: { institute: string; name: string }) => `${b.institute} - ${b.name}`)
       : mode === "Offline"
       ? OFFLINE_INSTITUTES
       : [];
@@ -564,58 +585,70 @@ function BatchEditor({
   const isCustom = !rawOptions.includes(selectedBatch) && selectedBatch !== "" && selectedBatch !== "Self Study";
 
   return (
-    <div className="rounded-2xl border border-teal/30 p-4 mb-4 bg-white dark:bg-[#151D2A] shadow-md space-y-3">
-      <h3 className="text-xs font-bold text-slate-900 dark:text-white">
-        Change Study Mode & Batch
-      </h3>
+    <div className="rounded-2xl border border-teal/40 p-4 mb-4 bg-white dark:bg-[#151D2A] shadow-md space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-white">
+          Edit Coaching & Batch
+        </h3>
+      </div>
 
-      <div className="grid grid-cols-3 gap-1.5">
-        {(["Online", "Offline", "Self"] as StudyMode[]).map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => {
-              setMode(m);
-              setSelectedBatch(m === "Self" ? "Self Study" : "");
-            }}
-            className={`py-2 text-xs font-bold rounded-xl border transition-all ${
-              mode === m
-                ? "bg-teal text-white border-teal shadow-xs"
-                : "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300"
-            }`}
-          >
-            {m}
-          </button>
-        ))}
+      <div>
+        <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1.5">
+          Study Mode
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          {(["Online", "Offline", "Self"] as StudyMode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setMode(m);
+                setSelectedBatch(m === "Self" ? "Self Study" : "");
+              }}
+              className={`py-2 text-xs font-bold rounded-xl border text-center transition-all ${
+                mode === m
+                  ? "bg-teal/15 dark:bg-teal/20 text-teal dark:text-[#2DD4BF] border-teal/50 shadow-xs"
+                  : "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300"
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
       </div>
 
       {mode !== "Self" && (
-        <div className="space-y-1.5 max-h-40 overflow-y-auto">
-          {rawOptions.map((opt) => (
+        <div>
+          <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1.5">
+            Select {mode === "Online" ? "Batch" : "Institute"}
+          </label>
+          <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto pr-1">
+            {rawOptions.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setSelectedBatch(opt)}
+                className={`p-2.5 text-xs text-left rounded-xl border font-semibold transition-all ${
+                  selectedBatch === opt
+                    ? "bg-teal/10 dark:bg-teal/20 border-teal text-teal dark:text-[#2DD4BF]"
+                    : "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300"
+                }`}
+              >
+                {opt}
+              </button>
+            ))}
             <button
-              key={opt}
               type="button"
-              onClick={() => setSelectedBatch(opt)}
-              className={`w-full text-left p-2.5 rounded-xl text-xs font-semibold border transition-all ${
-                selectedBatch === opt
-                  ? "bg-teal/15 dark:bg-teal/20 text-teal dark:text-[#2DD4BF] border-teal/40 font-bold"
-                  : "bg-slate-50 dark:bg-white/5 border-slate-200/60 dark:border-white/5 text-slate-700 dark:text-slate-300"
+              onClick={() => setSelectedBatch(BATCH_OTHER)}
+              className={`p-2.5 text-xs text-left rounded-xl border font-semibold transition-all ${
+                selectedBatch === BATCH_OTHER || isCustom
+                  ? "bg-teal/10 dark:bg-teal/20 border-teal text-teal dark:text-[#2DD4BF]"
+                  : "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300"
               }`}
             >
-              {opt}
+              {BATCH_OTHER}
             </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setSelectedBatch(BATCH_OTHER)}
-            className={`w-full text-left p-2.5 rounded-xl text-xs font-semibold border transition-all ${
-              selectedBatch === BATCH_OTHER || isCustom
-                ? "bg-teal/15 dark:bg-teal/20 text-teal dark:text-[#2DD4BF] border-teal/40 font-bold"
-                : "bg-slate-50 dark:bg-white/5 border-slate-200/60 dark:border-white/5 text-slate-700 dark:text-slate-300"
-            }`}
-          >
-            {BATCH_OTHER}
-          </button>
+          </div>
         </div>
       )}
 
@@ -624,7 +657,7 @@ function BatchEditor({
           type="text"
           placeholder="Enter coaching/batch name"
           value={customBatch}
-          onChange={(e) => setCustomBatch(e.target.value)}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setCustomBatch(e.target.value)}
           className="w-full text-xs font-semibold p-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#1A2438] text-slate-900 dark:text-white outline-none focus:border-teal"
         />
       )}
