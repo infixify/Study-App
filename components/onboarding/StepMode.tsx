@@ -182,3 +182,5 @@ export default function StepMode({ onFinish, onBack }: StepModeProps) {
     </div>
   );
 }
+
+export { StepMode };
