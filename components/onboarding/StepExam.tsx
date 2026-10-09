@@ -19,7 +19,7 @@ export function StepExam({
   onBack,
 }: StepExamProps) {
   const [exam, setExam] = useState<TargetExam | null>(selectedExam);
-
+  
   // Droppers don't have school/board exams; all others default to true (Boards/School prep is ON by default)
   const isDropper = classLevel === "Dropper";
   const includeSchool = !isDropper;
@@ -27,7 +27,6 @@ export function StepExam({
   return (
     <div>
       <BackButton onClick={onBack} />
-
       <h2 className="font-display text-2xl font-semibold mt-4">
         What are you targeting?
       </h2>
