@@ -393,6 +393,8 @@ export default function LiveVideoCallModal({
   const isAudioQueuePlayingRef = useRef(false);
   const speechInterruptRef = useRef(false);
   const transcriptRef = useRef("");
+  // Committed (isFinal) speech text only — survives interim-result overwrites
+  const finalTranscriptRef = useRef("");
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -561,19 +563,23 @@ export default function LiveVideoCallModal({
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-IN"; // English-India / Hinglish optimized
+    // Dynamic language: student's selected language if provided, else English-India
+    recognition.lang = studentContext?.language || "en-IN";
 
+    // FIXED: accumulate committed (isFinal) speech across events and only
+    // overlay the current interim text — earlier words are never overwritten.
     recognition.onresult = (event: any) => {
-      let finalTranscript = "";
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
+      let interim = "";
+      for (let i = 0; i < event.results.length; ++i) {
+        const res = event.results[i];
+        if (res.isFinal) {
+          finalTranscriptRef.current += res[0].transcript + " ";
         } else {
-          finalTranscript += event.results[i][0].transcript;
+          interim += res[0].transcript;
         }
       }
-      setTranscript(finalTranscript);
-      transcriptRef.current = finalTranscript;
+      transcriptRef.current = (finalTranscriptRef.current + " " + interim).trim();
+      setTranscript(transcriptRef.current);
     };
 
     recognition.onerror = (e: any) => {
@@ -581,7 +587,7 @@ export default function LiveVideoCallModal({
     };
 
     return recognition;
-  }, []);
+  }, [studentContext]);
 
   // 6. Audio Player Queue & TTS (Edge Speech API)
     // Progressive chunk sizes: early chunks small so speech starts fast,
@@ -765,6 +771,7 @@ const stopSpeaking = useCallback(() => {
     setIsHoldingMic(true);
     setTranscript("");
     transcriptRef.current = "";
+    finalTranscriptRef.current = "";
 
     try {
       if (!recognitionRef.current) {
@@ -781,6 +788,10 @@ const stopSpeaking = useCallback(() => {
     try {
       recognitionRef.current?.stop();
     } catch (_) {}
+
+    // GRACE PERIOD: recognition ke final onresult buffer ko catch karne ke liye
+    // thoda wait karo warna last spoken words miss ho jate hain
+    await new Promise((resolve) => setTimeout(resolve, 250));
 
     const queryText = transcriptRef.current.trim();
     // Trigger visual shutter flash
@@ -813,7 +824,9 @@ const stopSpeaking = useCallback(() => {
         body: JSON.stringify({
           frame,
           message: queryText,
-          studentContext,
+          studentContext: studentContext?.language
+            ? { ...studentContext, language: studentContext.language }
+            : studentContext,
         }),
       });
 
@@ -862,6 +875,7 @@ const stopSpeaking = useCallback(() => {
       setIsAnalyzing(false);
       setTranscript("");
       transcriptRef.current = "";
+      finalTranscriptRef.current = "";
     }
   }, [
     isHoldingMic,
@@ -1206,8 +1220,10 @@ const stopSpeaking = useCallback(() => {
             type="button"
             onMouseDown={handleHoldStart}
             onMouseUp={handleHoldEnd}
-            onTouchStart={handleHoldStart}
-            onTouchEnd={handleHoldEnd}
+            onTouchStart={(e) => { e.preventDefault(); handleHoldStart(); }}
+            onTouchEnd={(e) => { e.preventDefault(); handleHoldEnd(); }}
+            onContextMenu={(e) => e.preventDefault()}
+            style={{ touchAction: "none" }}
             disabled={isAnalyzing}
             className={`px-8 py-3.5 rounded-full flex items-center space-x-2.5 font-bold transition-all shadow-2xl select-none active:scale-95 ${
               isHoldingMic
