@@ -1,3 +1,4 @@
+// app/api/ai-doubt/live/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { getLiveGeminiKeys, getImageGeminiKeys, getGroqKey } from "@/lib/ai-key-manager";
 
@@ -201,7 +202,32 @@ export async function POST(req: NextRequest) {
         lastGoogleError = resB1.err || "Model B failed on Key 1";
 
         if (isTrafficSpike(resB1.status)) {
-          // Rule 2: ANY 1 MODEL TRAFFIC ON KEY 1 -> TRY ANOTHER -> IF BOTH TRAFFIC THEN DON'T USE KEY 2!
+          // Timeout / Traffic Spike on Key 1 -> Fallback to Key 2!
+          if (key2) {
+            const resA2 = await tryGemini(key2, MODEL_A);
+            if (resA2.ok && resA2.text) {
+              return NextResponse.json({
+                reply: resA2.text,
+                model: `Google Gemini (${MODEL_A} - Key 2)`,
+                provider: "google",
+                success: true,
+                latencyMs: Date.now() - startTime,
+              });
+            }
+            lastGoogleError = resA2.err || "Key 2 Model A failed";
+
+            const resB2 = await tryGemini(key2, MODEL_B);
+            if (resB2.ok && resB2.text) {
+              return NextResponse.json({
+                reply: resB2.text,
+                model: `Google Gemini (${MODEL_B} - Key 2)`,
+                provider: "google",
+                success: true,
+                latencyMs: Date.now() - startTime,
+              });
+            }
+            lastGoogleError = resB2.err || "Key 2 Model B failed";
+          }
         } else if (isRateLimit(resB1.status)) {
           // Rule 3: 1st MODEL TRAFFIC ON KEY 1 AND 2nd MODEL RATE LIMIT -> TRY RATE LIMITED MODEL ON KEY 2!
           if (key2) {
@@ -230,6 +256,7 @@ export async function POST(req: NextRequest) {
       process.env.GROQ_API_KEY_LIVE?.replace(/["'\r\n]/g, "").trim() ||
       getGroqKey();
 
+    let groqFailReason = "";
     if (groqKey) {
       const groqController = new AbortController();
       const groqTimeout = setTimeout(() => groqController.abort(), 4500);
@@ -277,17 +304,31 @@ export async function POST(req: NextRequest) {
               latencyMs: Date.now() - startTime,
             });
           }
+        } else {
+          let errText = "";
+          try {
+            const errData = await groqRes.json();
+            errText = errData?.error?.message || "";
+          } catch {
+            errText = groqRes.statusText;
+          }
+          groqFailReason = `Groq HTTP ${groqRes.status}: ${errText.slice(0, 80)}`;
         }
       } catch (err: any) {
         clearTimeout(groqTimeout);
+        groqFailReason = err?.name === "AbortError" ? "Groq Timeout (>4.5s)" : (err?.message || "Groq connection error");
       }
+    } else {
+      groqFailReason = "GROQ_API_KEY_LIVE not configured";
     }
+
+    const finalErrMsg = [lastGoogleError, groqFailReason].filter(Boolean).join(" | ");
 
     return NextResponse.json(
       {
-        reply: `Network connection slow hai ya provider unavailable hai. Kripya dubara puchiye. (${lastGoogleError || "Server busy"}).`,
+        reply: `Network connection slow hai ya provider unavailable hai. Kripya dubara puchiye. (${finalErrMsg || "Server busy"}).`,
         success: false,
-        failoverReason: lastGoogleError,
+        failoverReason: finalErrMsg,
         latencyMs: Date.now() - startTime,
       },
       { status: 200 }
