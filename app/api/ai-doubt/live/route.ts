@@ -1,6 +1,6 @@
 // app/api/ai-doubt/live/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { getLiveGeminiKeys, getImageGeminiKeys, getGroqKey } from "@/lib/ai-key-manager";
+import { getLiveGeminiKeys, getImageGeminiKeys, getGroqKey, getCloudflareWorkersAiConfig, getCloudflareImageAiConfig } from "@/lib/ai-key-manager";
 
 export const runtime = "edge";
 
@@ -166,129 +166,54 @@ export async function POST(req: NextRequest) {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // DUAL-KEY / DUAL-MODEL SMART CIRCUIT-BREAKER LOGIC
+    // SMART CIRCUIT-BREAKER (v2):
+    // - RATE-LIMIT (429) / TIMEOUT (408) → key-level issue → same model retry on Key 2
+    // - OVERLOADED / SPIKE (503/500/502/504) → model-level issue → Key 2 par retry
+    //   KARNA BEKAR HAI (spike wahan bhi hoga) → seedha next provider shift
     // ─────────────────────────────────────────────────────────────
+    const geminiOk = (r: { text?: string; ttsText?: string }, model: string, keyLabel: string) =>
+      NextResponse.json({
+        reply: r.text,
+        tts_text: r.ttsText,
+        model: `Google Gemini (${model}${keyLabel === "Key 2" ? " - Key 2" : ""})`,
+        provider: "google",
+        success: true,
+        latencyMs: Date.now() - startTime,
+      });
+
     if (key1) {
-      // 1. Try Model A on Key 1
       const resA1 = await tryGemini(key1, MODEL_A);
-      if (resA1.ok && resA1.text) {
-        return NextResponse.json({
-          reply: resA1.text,
-            tts_text: resA1.ttsText,
-          model: `Google Gemini (${MODEL_A})`,
-          provider: "google",
-          success: true,
-          latencyMs: Date.now() - startTime,
-        });
-      }
+      if (resA1.ok && resA1.text) return geminiOk(resA1, MODEL_A, "Key 1");
       lastGoogleError = resA1.err || "Model A failed on Key 1";
 
-      if (isRateLimit(resA1.status)) {
-        // Model A got Rate Limited (429) on Key 1: Try Model B on Key 1
-        const resB1 = await tryGemini(key1, MODEL_B);
-        if (resB1.ok && resB1.text) {
-          return NextResponse.json({
-            reply: resB1.text,
-            tts_text: resB1.ttsText,
-            model: `Google Gemini (${MODEL_B})`,
-            provider: "google",
-            success: true,
-            latencyMs: Date.now() - startTime,
-          });
-        }
-        lastGoogleError = resB1.err || "Model B failed on Key 1";
+      const overloaded = resA1.status === 503 || resA1.status === 500 || resA1.status === 502 || resA1.status === 504;
 
-        if (isRateLimit(resB1.status)) {
-          // Rule 1: BOTH MODELS RATE LIMIT ON KEY 1 -> TRY BOTH ON KEY 2
-          if (key2) {
-            const resA2 = await tryGemini(key2, MODEL_A);
-            if (resA2.ok && resA2.text) {
-              return NextResponse.json({
-                reply: resA2.text,
-            tts_text: resA2.ttsText,
-                model: `Google Gemini (${MODEL_A} - Key 2)`,
-                provider: "google",
-                success: true,
-                latencyMs: Date.now() - startTime,
-              });
-            }
-            lastGoogleError = resA2.err || "Key 2 Model A failed";
-
+      if (overloaded) {
+        // SPIKE: Key 2 / Model B retry ka koi sense nahi — seedha next provider
+        lastGoogleError = `SPIKE: ${lastGoogleError} — Gemini skip, next provider`;
+      } else if (isRateLimit(resA1.status) || resA1.status === 408) {
+        // Key-level issue → same model retry on Key 2
+        if (key2) {
+          const resA2 = await tryGemini(key2, MODEL_A);
+          if (resA2.ok && resA2.text) return geminiOk(resA2, MODEL_A, "Key 2");
+          lastGoogleError = resA2.err || "Key 2 Model A failed";
+          const retryable = isRateLimit(resA2.status) || resA2.status === 408 || resA2.status >= 500;
+          if (retryable) {
             const resB2 = await tryGemini(key2, MODEL_B);
-            if (resB2.ok && resB2.text) {
-              return NextResponse.json({
-                reply: resB2.text,
-            tts_text: resB2.ttsText,
-                model: `Google Gemini (${MODEL_B} - Key 2)`,
-                provider: "google",
-                success: true,
-                latencyMs: Date.now() - startTime,
-              });
-            }
+            if (resB2.ok && resB2.text) return geminiOk(resB2, MODEL_B, "Key 2");
             lastGoogleError = resB2.err || "Key 2 Model B failed";
           }
+        } else {
+          // Key 2 nahi hai → Model B on Key 1 last Gemini chance
+          const resB1 = await tryGemini(key1, MODEL_B);
+          if (resB1.ok && resB1.text) return geminiOk(resB1, MODEL_B, "Key 1");
+          lastGoogleError = resB1.err || "Model B failed on Key 1";
         }
-      } else if (isTrafficSpike(resA1.status)) {
-        // Model A had Traffic Spike on Key 1 -> TRY MODEL B
+      } else {
+        // Other error (4xx/parse) → Model B on Key 1 try
         const resB1 = await tryGemini(key1, MODEL_B);
-        if (resB1.ok && resB1.text) {
-          return NextResponse.json({
-            reply: resB1.text,
-            tts_text: resB1.ttsText,
-            model: `Google Gemini (${MODEL_B})`,
-            provider: "google",
-            success: true,
-            latencyMs: Date.now() - startTime,
-          });
-        }
+        if (resB1.ok && resB1.text) return geminiOk(resB1, MODEL_B, "Key 1");
         lastGoogleError = resB1.err || "Model B failed on Key 1";
-
-        if (isTrafficSpike(resB1.status)) {
-          // Timeout / Traffic Spike on Key 1 -> Fallback to Key 2!
-          if (key2) {
-            const resA2 = await tryGemini(key2, MODEL_A);
-            if (resA2.ok && resA2.text) {
-              return NextResponse.json({
-                reply: resA2.text,
-            tts_text: resA2.ttsText,
-                model: `Google Gemini (${MODEL_A} - Key 2)`,
-                provider: "google",
-                success: true,
-                latencyMs: Date.now() - startTime,
-              });
-            }
-            lastGoogleError = resA2.err || "Key 2 Model A failed";
-
-            const resB2 = await tryGemini(key2, MODEL_B);
-            if (resB2.ok && resB2.text) {
-              return NextResponse.json({
-                reply: resB2.text,
-            tts_text: resB2.ttsText,
-                model: `Google Gemini (${MODEL_B} - Key 2)`,
-                provider: "google",
-                success: true,
-                latencyMs: Date.now() - startTime,
-              });
-            }
-            lastGoogleError = resB2.err || "Key 2 Model B failed";
-          }
-        } else if (isRateLimit(resB1.status)) {
-          // Rule 3: 1st MODEL TRAFFIC ON KEY 1 AND 2nd MODEL RATE LIMIT -> TRY RATE LIMITED MODEL ON KEY 2!
-          if (key2) {
-            const resB2 = await tryGemini(key2, MODEL_B);
-            if (resB2.ok && resB2.text) {
-              return NextResponse.json({
-                reply: resB2.text,
-            tts_text: resB2.ttsText,
-                model: `Google Gemini (${MODEL_B} - Key 2)`,
-                provider: "google",
-                success: true,
-                latencyMs: Date.now() - startTime,
-              });
-            }
-            lastGoogleError = resB2.err || "Key 2 Model B rate-limit fallback failed";
-          }
-        }
       }
     } else {
       lastGoogleError = "No Gemini API keys configured in environment";
@@ -369,7 +294,63 @@ export async function POST(req: NextRequest) {
       groqFailReason = "GROQ_API_KEY_LIVE not configured";
     }
 
-    const finalErrMsg = [lastGoogleError, groqFailReason].filter(Boolean).join(" | ");
+    // ─────────────────────────────────────────────────────────────
+    // TIER 3: CLOUDFLARE WORKERS AI FAILOVER (Account 2 — same key as image doubts)
+    // Vision models for camera frames, text models for voice-only doubts
+    // ─────────────────────────────────────────────────────────────
+    let cfFailReason = "";
+    try {
+      const cfConfig = rawBase64 ? getCloudflareImageAiConfig() : getCloudflareWorkersAiConfig();
+      if (cfConfig) {
+        const cfModels = rawBase64
+          ? ["@cf/meta/llama-3.2-11b-vision-instruct", "@cf/llava-hf/llava-1.5-7b-hf"]
+          : ["@cf/meta/llama-3.1-8b-instruct", "@cf/mistral/mistral-7b-instruct-v0.1"];
+        for (const model of cfModels) {
+          try {
+            const endpoint = `https://api.cloudflare.com/client/v4/accounts/${cfConfig.accountId}/ai/run/${model}`;
+            let body: any;
+            if (rawBase64) {
+              const binary = atob(rawBase64);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+              body = { prompt: `${LIVE_FACULTY_PROMPT}\n\nQuestion: ${promptText}`, image: Array.from(bytes) };
+            } else {
+              body = { messages: [
+                { role: "system", content: LIVE_FACULTY_PROMPT },
+                { role: "user", content: promptText },
+              ] };
+            }
+            const cfRes = await fetch(endpoint, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${cfConfig.apiToken}`, "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(6000),
+            });
+            if (!cfRes.ok) { cfFailReason = `${model} HTTP ${cfRes.status}`; continue; }
+            const cfData = await cfRes.json();
+            const cfReply = cfData?.result?.response?.trim() || cfData?.result?.description?.trim();
+            if (cfReply) {
+              const cd = parseDual(cfReply);
+              return NextResponse.json({
+                reply: cd.reply,
+                tts_text: cd.tts_text,
+                model: `Cloudflare Workers AI (${model})`,
+                provider: "cloudflare",
+                success: true,
+                failoverReason: [lastGoogleError, groqFailReason].filter(Boolean).join(" | ") || undefined,
+                latencyMs: Date.now() - startTime,
+              });
+            }
+          } catch (cfErr: any) {
+            cfFailReason = cfErr?.name === "TimeoutError" ? `${model} Timeout (>6s)` : (cfErr?.message || "CF error");
+          }
+        }
+      } else {
+        cfFailReason = "Cloudflare AI config missing";
+      }
+    } catch (_) {}
+
+    const finalErrMsg = [lastGoogleError, groqFailReason, cfFailReason].filter(Boolean).join(" | ");
 
     return NextResponse.json(
       {
