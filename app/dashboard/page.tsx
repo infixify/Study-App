@@ -44,6 +44,20 @@ function getMemCache<T>(key: string): T | null {
   return null;
 }
 
+// ─── AI MENTOR REPORT PERSISTENCE (last refresh survives page refresh/back) ───
+function saveMentorReportLocal(userId: string, report: any, studentContext: any) {
+  try {
+    localStorage.setItem(`pw_ai_mentor_report_${userId}`, JSON.stringify({ report, studentContext }));
+  } catch (_) {}
+}
+function loadMentorReportLocal(userId: string): { report: any; studentContext: any } | null {
+  try {
+    const raw = localStorage.getItem(`pw_ai_mentor_report_${userId}`);
+    if (raw) return JSON.parse(raw);
+  } catch (_) {}
+  return null;
+}
+
 function setMemCache<T>(key: string, data: T): void {
   const payload = { timestamp: Date.now(), data };
   globalMemoryCache[key] = payload;
@@ -1013,7 +1027,16 @@ export default function DashboardPage() {
       }
       const currentUser = session.user;
       const uid = currentUser.id;
-      if (!isCancelled) setUser(currentUser);
+      if (!isCancelled) {
+        setUser(currentUser);
+        // INSTANT HYDRATE: last refresh ka mentor report turant dikha do —
+        // DB fetch complete hone tak card khaali nahi dikhega.
+        const localMentor = loadMentorReportLocal(uid);
+        if (localMentor?.report) {
+          setMentorReport(localMentor.report);
+          if (localMentor.studentContext) setStudentContext(localMentor.studentContext);
+        }
+      }
 
       const { data: uProf } = await supabase.from("users").select("*").eq("uid", uid).maybeSingle();
       if (!uProf || isCancelled) return;
@@ -1221,10 +1244,25 @@ export default function DashboardPage() {
 
       setLoading(false);
 
-      // AI Mentor: strictly read-only from DB — never auto-generate.
+      // AI Mentor: strictly read-only — never auto-generate.
+      // DB ka latest report chalega; agar DB me null hai to last refresh ka
+      // localStorage copy dikhega (card refresh/back par khaali nahi hoga).
       if (!isCancelled) {
-        setMentorReport(uProf?.ai_mentor_report ?? null);
-        setStudentContext(uProf?.ai_student_context ?? null);
+        const dbReport = uProf?.ai_mentor_report ?? null;
+        if (dbReport) {
+          setMentorReport(dbReport);
+          setStudentContext(uProf?.ai_student_context ?? null);
+          saveMentorReportLocal(uid, dbReport, uProf?.ai_student_context ?? null);
+        } else {
+          const local = loadMentorReportLocal(uid);
+          if (local?.report) {
+            setMentorReport(local.report);
+            setStudentContext(local.studentContext ?? null);
+          } else {
+            setMentorReport(null);
+            setStudentContext(null);
+          }
+        }
       }
     }
 
@@ -1584,6 +1622,7 @@ export default function DashboardPage() {
                   const data = await res.json();
                   setMentorReport(data.report);
                   if (data.studentContext) setStudentContext(data.studentContext);
+                  if (data.report) saveMentorReportLocal(user.id, data.report, data.studentContext ?? null);
                 }
               } catch (_) {}
               finally { setMentorLoading(false); }
