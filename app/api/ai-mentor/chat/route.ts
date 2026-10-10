@@ -4,32 +4,78 @@ import { getGroqKey, getChatGeminiKeys } from "@/lib/ai-key-manager";
 
 export const runtime = "edge";
 
-// Language detection keywords
-const LANGUAGE_DETECT = {
-  hindi: ["hai", "main", "mujhe", "kya", "hain", "thi", "the", "ka", "ki", "mein"],
-  hinglish: ["bro", "bhai", "yaar", "ar", "hai", "main", "mujhe", "kya"],
-  english: ["the", "and", "for", "are", "this", "that", "with"],
+// Language detection: Unicode ranges for Indian scripts
+const SCRIPT_DETECT: Record<string, { regex: RegExp; code: string }> = {
+  hindi: { regex: /[\u0900-\u097F]/, code: "hi" },        // Devanagari
+  bengali: { regex: /[\u0980-\u09FF]/, code: "bn" },     // Bengali
+  tamil: { regex: /[\u0B80-\u0BFF]/, code: "ta" },        // Tamil
+  telugu: { regex: /[\u0C00-\u0C7F]/, code: "te" },       // Telugu
+  marathi: { regex: /[\u0900-\u097F]/, code: "mr" },      // Devanagari (same as Hindi)
+  gujarati: { regex: /[\u0A80-\u0AFF]/, code: "gu" },     // Gujarati
+  punjabi: { regex: /[\u0A00-\u0A7F]/, code: "pa" },      // Gurmukhi
+  malayalam: { regex: /[\u0D00-\u0D7F]/, code: "ml" },    // Malayalam
+  kannada: { regex: /[\u0C80-\u0CFF]/, code: "kn" },       // Kannada
+  odia: { regex: /[\u0B00-\u0B7F]/, code: "or" },         // Odia
+};
+
+// Language detection keywords for Roman script languages
+const LANGUAGE_KEYWORDS: Record<string, string[]> = {
+  hindi: ["hai", "main", "mujhe", "kya", "hain", "thi", "ka", "ki", "mein", "aap", "hum"],
+  hinglish: ["bro", "bhai", "yaar", "ar", "hai", "main", "mujhe", "kya", "bhaiya", "didi", "behen"],
+  english: ["the", "and", "for", "are", "this", "that", "with", "what", "how", "why"],
+  bengali: ["ami", "tomar", "kotha", "ki", "hoyeche", "bolte", "parbe"],
+  tamil: ["naan", "un", "enna", "yaaru", "eppadi", "varum", "seyyum"],
+  telugu: ["nenu", "nuvv", "emi", "eppudi", "cheyyali", "varu"],
+  marathi: ["mi", "tumhi", "kay", "ka", "karayche", "ahe"],
+  gujarati: ["hu", "tame", "shu", "kay", "karu", "che"],
+  punjabi: ["main", "tusi", "ki", "kya", "karna", "hai"],
+  malayalam: ["njan", "ninte", "enth", "kaaryam", "cheyyanam"],
+  kannada: ["naanu", "nimage", "eni", "hege", "maaduvudi"],
+  odia: ["mu", "tume", "ki", "kaana", "kariba"],
 };
 
 // Detect language from text
 function detectLanguage(text: string): string {
   const lowerText = text.toLowerCase();
   
-  // Check for Hindi/Devanagari script
-  if (/[\u0900-\u097F]/.test(text)) {
-    return "hi"; // Hindi
+  // Check for script-based languages (Devanagari, Bengali, Tamil, etc.)
+  for (const [lang, { regex, code }] of Object.entries(SCRIPT_DETECT)) {
+    if (regex.test(text)) {
+      return code;
+    }
   }
   
-  // Check for Hinglish keywords
-  const hinglishMatches = LANGUAGE_DETECT.hinglish.filter(word => lowerText.includes(word));
-  const englishMatches = LANGUAGE_DETECT.english.filter(word => lowerText.includes(word));
+  // Check for Roman script languages using keywords
+  let bestMatch = "en";
+  let maxMatches = 0;
   
-  if (hinglishMatches.length >= 2 && hinglishMatches.length > englishMatches.length) {
-    return "hi-IN"; // Hinglish
+  for (const [lang, keywords] of Object.entries(LANGUAGE_KEYWORDS)) {
+    const matches = keywords.filter(word => lowerText.includes(word));
+    if (matches.length > maxMatches) {
+      maxMatches = matches.length;
+      bestMatch = lang === "hinglish" ? "hi-IN" : (lang === "hindi" ? "hi" : lang);
+    }
   }
   
-  return "en"; // Default to English
+  // Default to English
+  return bestMatch;
 }
+
+// Get language code mapping
+const LANGUAGE_CODES: Record<string, string> = {
+  en: "en",     // English
+  hi: "hi",     // Hindi (Devanagari)
+  "hi-IN": "hi-IN", // Hinglish (Roman Hindi)
+  bn: "bn",     // Bengali
+  ta: "ta",     // Tamil
+  te: "te",     // Telugu
+  mr: "mr",     // Marathi
+  gu: "gu",     // Gujarati
+  pa: "pa",     // Punjabi
+  ml: "ml",     // Malayalam
+  kn: "kn",     // Kannada
+  or: "or",     // Odia
+};
 
 // Get GenZ tone based on gender
 function getGenZTone(gender?: string): string {
@@ -37,18 +83,36 @@ function getGenZTone(gender?: string): string {
   return "bro";
 }
 
-// Get tone phrase
+// Get tone phrase for each language
 function getTonePhrase(tone: string, language: string): string {
   const tones: Record<string, Record<string, string>> = {
     bro: {
       en: "Bro",
       hi: "Bhai",
       "hi-IN": "Yaar",
+      bn: "Bhai",
+      ta: "Machan",
+      te: "Anna",
+      mr: "Bhai",
+      gu: "Bhai",
+      pa: "Bhai",
+      ml: "Kuttan",
+      kn: "Anna",
+      or: "Bhai",
     },
     behen: {
       en: "Sis",
       hi: "Behen",
       "hi-IN": "Didi",
+      bn: "Apu",
+      ta: "Akka",
+      te: "Akka",
+      mr: "Bahin",
+      gu: "Ben",
+      pa: "Bhen",
+      ml: "Chechi",
+      kn: "Akka",
+      or: "Bhauji",
     },
   };
   return tones[tone]?.[language] || tones.bro[language] || "Bro";
@@ -80,18 +144,31 @@ function buildChatPrompt(
     .map((msg) => `${msg.role === "user" ? "Student" : tonePhrase}: ${msg.content}`)
     .join("\n");
 
-  // Language-specific instructions
+  // Language-specific instructions - IMPORTANT: input = output = TTS language
   const languageInstructions: Record<string, string> = {
-    en: `Answer in natural English with a friendly, supportive tone. Use "bro", "dude", "mate" style language.`,
-    hi: `Hindi mein jawab do. Natural, supportive tone ka use karein.`,
-    "hi-IN": `Hinglish (Roman Hindi) mein natural jawab do. "yaar", "bro", "bhai" style language ka use karein.`,
+    en: `Answer ONLY in natural English. Use "bro", "dude", "mate" style language. NEVER translate to any other language.`,
+    hi: `ONLY Hindi (Devanagari script) mein jawab do. Natural, supportive tone ka use karein. NEVER use Roman script or English.`,
+    "hi-IN": `ONLY Hinglish (Roman Hindi script) mein natural jawab do. "yaar", "bro", "bhai" style language ka use karein. NEVER use Devanagari.`,
+    bn: `ONLY Bengali script mein jawab do. Natural Bengali tone. NEVER translate or change script.`,
+    ta: `ONLY Tamil script mein jawab do. Natural Tamil tone. NEVER translate or change script.`,
+    te: `ONLY Telugu script mein jawab do. Natural Telugu tone. NEVER translate or change script.`,
+    mr: `ONLY Marathi (Devanagari script) mein jawab do. Natural Marathi tone. NEVER translate or change script.`,
+    gu: `ONLY Gujarati script mein jawab do. Natural Gujarati tone. NEVER translate or change script.`,
+    pa: `ONLY Punjabi (Gurmukhi script) mein jawab do. Natural Punjabi tone. NEVER translate or change script.`,
+    ml: `ONLY Malayalam script mein jawab do. Natural Malayalam tone. NEVER translate or change script.`,
+    kn: `ONLY Kannada script mein jawab do. Natural Kannada tone. NEVER translate or change script.`,
+    or: `ONLY Odia script mein jawab do. Natural Odia tone. NEVER translate or change script.`,
   };
 
   const langInstruction = languageInstructions[language] || languageInstructions.en;
 
   return `
 You are a GenZ AI Mentor for PrepWise, helping students with ${targetExam} preparation.
+
+STRICT LANGUAGE RULE: input language = output text language = TTS language (ALL THREE MUST MATCH EXACTLY)
 ${langInstruction}
+
+IMPORTANT: Technical terms (Newton, force, equation, lens, voltage, current, energy, power, etc.) MUST ALWAYS remain in English in ALL languages.
 
 Student Info:
 - Name: ${studentName}
@@ -104,7 +181,7 @@ ${historyText}
 Student Message: "${message}"
 
 Respond naturally, conversationally, and supportively. Keep answers concise but helpful.
-Return ONLY a JSON object with: {"reply": "your response", "tts_text": "text for TTS", "language": "${language}"}
+Return ONLY a JSON object with: {"reply": "your response", "tts_text": "EXACT same as reply", "language": "${language}"}
   `.trim();
 }
 
@@ -124,7 +201,7 @@ async function callGroqChat(
     if (index === 0 && msg.role === "system") {
       return {
         ...msg,
-        content: `You are a GenZ AI Mentor. Use ${tone} tone. Respond in ${language} language. ${msg.content}`,
+        content: `You are a GenZ AI Mentor. Use ${tone} tone. Respond in ${language} language. STRICT: input=output=TTS language. ${msg.content}`,
       };
     }
     return msg;
@@ -187,13 +264,6 @@ async function callGeminiChat(
   const json = await res.json();
   const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error("Gemini chat empty response");
-  return text;
-}
-
-// Generate TTS text (convert to native script for TTS)
-function generateTTSText(text: string, language: string): string {
-  // For Hindi/Devanagari, we'd need a transliteration library
-  // For now, return the same text (TTS engines usually handle this)
   return text;
 }
 
@@ -276,9 +346,9 @@ export async function POST(req: NextRequest) {
       };
     }
 
-    // Generate TTS text if not provided
+    // Ensure tts_text is EXACT same as reply (no conversion)
     if (!parsed.tts_text) {
-      parsed.tts_text = generateTTSText(parsed.reply, language);
+      parsed.tts_text = parsed.reply;
     }
     if (!parsed.language) {
       parsed.language = language;
