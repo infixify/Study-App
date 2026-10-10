@@ -23,6 +23,7 @@ export default function AiMentorCard({
   loading,
   onRefresh,
   onOpenAiTalk,
+  studentContext,
 }: AiMentorCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
