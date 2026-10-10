@@ -578,7 +578,22 @@ export default function LiveVideoCallModal({
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         const res = event.results[i];
         if (res.isFinal) {
-          finalTranscriptRef.current += res[0].transcript + " ";
+          // CUMULATIVE-FINAL GUARD: kuch Android engines har final me pura utterance
+          // dobara bhejte hain ("explain me" -> "explain me the" -> ...). Us case me
+          // naive append se text quadratically duplicate ho jata hai. Guard:
+          const t = res[0].transcript.trim();
+          if (!t) continue;
+          const committed = finalTranscriptRef.current.trim();
+          if (!committed) {
+            finalTranscriptRef.current = t + " ";
+          } else if (committed.toLowerCase().includes(t.toLowerCase())) {
+            // Ye final pehle se covered hai — duplicate, skip
+          } else if (t.toLowerCase().includes(committed.toLowerCase())) {
+            // Engine ne pura (extended) utterance resend kiya — replace karo
+            finalTranscriptRef.current = t + " ";
+          } else {
+            finalTranscriptRef.current += t + " ";
+          }
         } else {
           interim += res[0].transcript;
         }
