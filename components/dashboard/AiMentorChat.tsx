@@ -49,7 +49,6 @@ export default function AiMentorChat({
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
-        // Filter out messages older than 24 hours
         const now = Date.now();
         const recentMessages = parsed.filter(
           (msg: Message) => now - new Date(msg.timestamp).getTime() < TTS_CACHE_TTL
@@ -193,7 +192,6 @@ export default function AiMentorChat({
       return;
     }
 
-    // Cancel any ongoing speech
     window.speechSynthesis.cancel();
     
     const utterance = new SpeechSynthesisUtterance(text);
@@ -236,7 +234,6 @@ export default function AiMentorChat({
     setError(null);
 
     try {
-      // Build request with student context
       const requestBody = {
         userId,
         message: text,
@@ -249,7 +246,7 @@ export default function AiMentorChat({
         timestamp: new Date().toISOString(),
       };
 
-      const response = await fetch("/api/ai-mentor", {
+      const response = await fetch("/api/ai-mentor/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
@@ -261,9 +258,7 @@ export default function AiMentorChat({
 
       const data = await response.json();
       
-      // Handle both direct response and report format
-      const aiText = data.reply || data.report?.diagnostic_summary || 
-                   data.report?.overall_status || "I'm here to help you with your studies!";
+      const aiText = data.reply || "I'm here to help you with your studies!";
       
       const aiMessage: Message = {
         id: `msg_${Date.now()}_ai`,
@@ -275,7 +270,7 @@ export default function AiMentorChat({
 
       setMessages((prev) => [...prev, aiMessage]);
 
-      // Auto-speak the response (GenZ tone)
+      // Auto-speak the response
       setTimeout(() => {
         speakText(aiText, data.language || language);
       }, 500);
@@ -319,14 +314,14 @@ export default function AiMentorChat({
         <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 text-white">
           <div className="flex items-center gap-3">
             <span className="w-8 h-8 rounded-xl bg-white/20 text-white flex items-center justify-center text-sm shadow-md font-bold">
-              4693FB
+              👨‍🏫
             </span>
             <div>
               <h3 className="text-sm font-black tracking-tight text-white">
                 AI Mentor Chat
               </h3>
               <p className="text-[10px] text-white/80 font-medium">
-                {getGenZTone(studentContext?.gender)} mode 924924
+                {getGenZTone(studentContext?.gender)} mode 🤤🤤
               </p>
             </div>
           </div>
@@ -335,7 +330,7 @@ export default function AiMentorChat({
             onClick={onClose}
             className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/20 text-sm font-bold transition-all"
           >
-            895
+            ✕
           </button>
         </div>
 
@@ -344,7 +339,7 @@ export default function AiMentorChat({
           {messages.length === 0 ? (
             <div className="text-center py-8">
               <div className="w-16 h-16 rounded-full bg-indigo-100 flex items-center justify-center mx-auto mb-3">
-                <span className="text-3xl">9161F91A</span>
+                <span className="text-3xl">💬</span>
               </div>
               <p className="text-slate-500 text-sm font-medium">
                 Start a conversation with your AI Mentor
@@ -361,7 +356,7 @@ export default function AiMentorChat({
               >
                 {msg.sender === "ai" && (
                   <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm shrink-0">
-                    4693FB
+                    👨‍🏫
                   </div>
                 )}
                 <div
@@ -380,14 +375,14 @@ export default function AiMentorChat({
                         className="text-[12px] text-indigo-600 hover:text-indigo-800 transition-colors"
                         title="Replay"
                       >
-                        501
+                        🔁
                       </button>
                     )}
                   </div>
                 </div>
                 {msg.sender === "user" && (
                   <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-600 flex items-center justify-center text-sm shrink-0">
-                    464
+                    👤
                   </div>
                 )}
               </div>
@@ -395,7 +390,7 @@ export default function AiMentorChat({
           {isLoading && (
             <div className="flex justify-start gap-2">
               <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm shrink-0">
-                4693FB
+                👨‍🏫
               </div>
               <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-sm px-4 py-2.5">
                 <div className="flex gap-1">
@@ -435,9 +430,9 @@ export default function AiMentorChat({
                   : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700"
               }`}
             >
-              <span className="text-lg">3A2</span>
+              <span className="text-lg">🎢</span>
               <span>{isRecording ? "Recording... Release to Send" : "HOLD TO SPEAK"}</span>
-              <span className="text-lg">3A2</span>
+              <span className="text-lg">🎢</span>
             </button>
             <p className="text-[10px] text-slate-500 text-center mt-1">
               Speak your doubt, release to get instant answer
@@ -457,14 +452,14 @@ export default function AiMentorChat({
               }`}
               title="Speech to Text"
             >
-              3A4
+              🎤
             </button>
             <div className="flex-1 relative">
               <textarea
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isSpeaking ? "Listening..." : `Type your message or use voice input...`}
+                placeholder={isSpeaking ? "Listening..." : "Type your message or use voice input..."}
                 rows={1}
                 className="w-full p-3 pr-10 border border-slate-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all bg-white"
                 disabled={isLoading || isSpeaking}
@@ -474,7 +469,7 @@ export default function AiMentorChat({
                   onClick={() => sendMessage(inputText)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 transition-colors"
                 >
-                  6D2
+                  🛒
                 </button>
               )}
               {isSpeaking && (
@@ -482,7 +477,7 @@ export default function AiMentorChat({
                   onClick={stopSpeaking}
                   className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-rose-600 text-white flex items-center justify-center hover:bg-rose-700 transition-colors"
                 >
-                  53D
+                  🔽
                 </button>
               )}
             </div>
