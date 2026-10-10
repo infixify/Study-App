@@ -29,26 +29,43 @@ CASE B - FULL SOLUTION (student ne explicitly full solution maanga, ya voice/tex
 
 LANGUAGE MATCHING (STRICT — MOST IMPORTANT RULE):
 - STUDENT ke doubt ki language detect karo aur usi language me answer do. Yeh prompt ki language (Hinglish) COPY mat karo.
+- IMPORTANT: input language = output text language = TTS language (ALL THREE MUST MATCH)
 - Student ne English me pucha -> POORA answer English me (sirf faculty tone me). "Dekhiye bacchon" jaise Hinglish phrases English answers me NAHI.
-- Student ne Hinglish pucha -> natural Hinglish answer.
-- Student ne shuddh Hindi (Devanagari) pucha -> shuddh Hindi answer.
-- Technical terms (Newton, force, equation) har language me English me hi rahenge.
+- Student ne Hinglish pucha -> natural Hinglish answer in Roman script.
+- Student ne shuddh Hindi (Devanagari) pucha -> shuddh Hindi answer in Devanagari script.
+- Student ne Bengali pucha -> Bengali answer in Bengali script.
+- Student ne Tamil pucha -> Tamil answer in Tamil script.
+- Student ne Telugu pucha -> Telugu answer in Telugu script.
+- Student ne Marathi pucha -> Marathi answer in Devanagari script.
+- Student ne Gujarati pucha -> Gujarati answer in Gujarati script.
+- Student ne Punjabi pucha -> Punjabi answer in Gurmukhi script.
+- Student ne Malayalam pucha -> Malayalam answer in Malayalam script.
+- Student ne Kannada pucha -> Kannada answer in Kannada script.
+- Student ne Odia pucha -> Odia answer in Odia script.
+- Technical terms (Newton, force, equation, lens, voltage, current) ALWAYS remain in English in ALL languages.
 
 OUTPUT FORMAT (STRICT — follow exactly):
 Respond ONLY with a single valid JSON object, no markdown fences, no extra text:
-{"reply": "...", "tts_text": "..."}
-- "reply": your full answer in the SAME language and script the student used (Hinglish Roman -> Hinglish Roman, English -> English, etc.).
-- "tts_text": the SAME answer rewritten for text-to-speech in the NATIVE script of that language (Hinglish/Hindi -> shuddh Devanagari; English -> English; Marathi/Tamil/etc. -> their own script). Keep technical terms (Newton, force, equation, lens) in English. NO markdown, NO LaTeX, NO asterisks. Write formulas as spoken words, e.g. "v equals u plus a t", "under root of 2". Flowing natural speech text only.`;
+{"reply": "...", "tts_text": "...", "language": "..."}
+- "reply": your full answer in the SAME language and script the student used. NEVER translate or change script.
+- "tts_text": EXACT same text as "reply" (no script conversion, no translation). Keep it identical for TTS.
+- "language": detected language code (en, hi, bn, ta, te, mr, gu, pa, ml, kn, or).
+- Technical terms MUST remain in English. NO markdown, NO LaTeX, NO asterisks. Write formulas as spoken words, e.g. "v equals u plus a t", "under root of 2". Flowing natural speech text only.
+
 
 // Parse Gemini dual-output JSON; fall back to raw text if parsing fails
-function parseDual(raw: string): { reply: string; tts_text: string } {
+function parseDual(raw: string): { reply: string; tts_text: string; language?: string } {
   try {
     const cleaned = raw.replace(/```json|```/g, "").trim();
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
     if (start !== -1 && end > start) {
       const j = JSON.parse(cleaned.slice(start, end + 1));
-      if (j && j.reply) return { reply: String(j.reply), tts_text: j.tts_text ? String(j.tts_text) : String(j.reply) };
+      if (j && j.reply) return { 
+        reply: String(j.reply), 
+        tts_text: j.tts_text ? String(j.tts_text) : String(j.reply),
+        language: j.language || undefined 
+      };
     }
   } catch (_) {}
   return { reply: raw, tts_text: raw };
