@@ -568,11 +568,14 @@ export default function LiveVideoCallModal({
     // Dynamic language: student's selected language if provided, else English-India
     recognition.lang = studentContext?.language || "en-IN";
 
-    // FIXED: accumulate committed (isFinal) speech across events and only
-    // overlay the current interim text — earlier words are never overwritten.
+    // FIXED (v2): SpeechRecognition continuous mode me har event par event.results
+    // me PURANE final results bhi rehte hain. Pehle hum 0 se loop karke unhe dobara
+    // add kar rahe the -> "explain explain explain..." duplicates. Ab:
+    // - Sirf resultIndex se aage ke NAYE results hi commit karo (no duplicates).
+    // - Interim display ke liye poora scan theek hai (wo commit nahi hota).
     recognition.onresult = (event: any) => {
       let interim = "";
-      for (let i = 0; i < event.results.length; ++i) {
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
         const res = event.results[i];
         if (res.isFinal) {
           finalTranscriptRef.current += res[0].transcript + " ";
@@ -580,7 +583,12 @@ export default function LiveVideoCallModal({
           interim += res[0].transcript;
         }
       }
-      transcriptRef.current = (finalTranscriptRef.current + " " + interim).trim();
+      // Interim display: committed finals + current interim overlay
+      let interimOnly = "";
+      for (let i = 0; i < event.results.length; ++i) {
+        if (!event.results[i].isFinal) interimOnly += event.results[i][0].transcript;
+      }
+      transcriptRef.current = (finalTranscriptRef.current + " " + interimOnly).trim();
       setTranscript(transcriptRef.current);
     };
 
@@ -804,7 +812,13 @@ const stopSpeaking = useCallback(() => {
     // thoda wait karo warna last spoken words miss ho jate hain
     await new Promise((resolve) => setTimeout(resolve, 250));
 
-    const queryText = transcriptRef.current.trim();
+    // Duplicate consecutive-word collapse (engine kabhi-kabhi same final do baar deta hai)
+    const collapsed = transcriptRef.current
+      .trim()
+      .split(/\s+/)
+      .filter((w, i, arr) => i === 0 || w.toLowerCase() !== arr[i - 1].toLowerCase())
+      .join(" ");
+    const queryText = collapsed;
     // Trigger visual shutter flash
     setFlashTrigger(true);
     setTimeout(() => setFlashTrigger(false), 300);
