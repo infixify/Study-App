@@ -2,6 +2,7 @@
 export const runtime = 'edge';
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { getCloudflareWorkersAiConfig } from "@/lib/ai-key-manager";
 
 const apiKey =
   process.env.GEMINI_API_KEY_MENTOR || process.env.GEMINI_API_KEY || "";
@@ -91,6 +92,45 @@ function computePracticeRatio(studyLogs: any[]): number | null {
   const totalPractice = (studyLogs ?? []).reduce((sum: number, l: any) => sum + (l.practice_minutes || 0), 0);
   if (totalStudy === 0) return null;
   return Math.round((totalPractice / totalStudy) * 100);
+}
+
+// BACKUP: Cloudflare Workers AI text models (Account 2 — same key/models as
+// text-only doubt route). Gemini cascade poora fail ho tab ye chalega.
+async function callCloudflareMentor(prompt: string): Promise<string> {
+  const config = getCloudflareWorkersAiConfig();
+  if (!config) throw new Error("Cloudflare Text AI credentials missing");
+
+  const models = ["@cf/meta/llama-3.1-8b-instruct", "@cf/mistral/mistral-7b-instruct-v0.1"];
+  let lastErr = "";
+  for (const model of models) {
+    try {
+      const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/run/${model}`;
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: "user", content: prompt },
+          ]
+        }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) {
+        lastErr = `${model} HTTP ${res.status}`;
+        continue;
+      }
+      const data = await res.json();
+      const text = data?.result?.response?.trim();
+      if (text) return text;
+      lastErr = `${model} empty response`;
+    } catch (e: any) {
+      lastErr = e?.name === "TimeoutError" ? `${model} Timeout` : (e?.message || String(e));
+    }
+  }
+  throw new Error(lastErr || "Cloudflare mentor backup failed");
 }
 
 export async function POST(req: Request) {
@@ -267,7 +307,14 @@ Required JSON Output (strict schema):
 }
 `;
 
-    const rawJson = await generateWithFallback(prompt, apiKey);
+    let rawJson: string;
+    try {
+      rawJson = await generateWithFallback(prompt, apiKey);
+    } catch (genErr: any) {
+      // BACKUP: Gemini cascade fail -> Cloudflare Workers AI (Account 2, text doubt models)
+      console.warn("Gemini mentor cascade failed, trying Cloudflare backup:", genErr?.message);
+      rawJson = await callCloudflareMentor(prompt);
+    }
     const cleaned = rawJson.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleaned);
 
