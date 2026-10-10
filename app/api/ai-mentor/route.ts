@@ -98,7 +98,7 @@ function computePracticeRatio(studyLogs: any[]): number | null {
 // — guaranteed schema-valid JSON, 128k context, fast LPU. Gemini cascade fail
 // hone par ye chalega. Alag mentor key (GROQ_API_KEY_MENTOR) use hoti hai agar set hai,
 // warna existing Groq key fallback.
-function getMentorGroqKey(): string {
+function getMentorGroqKey(): string | null {
   const dedicated = (process.env.GROQ_API_KEY_MENTOR || "").replace(/["\r\n]/g, "").trim();
   return dedicated || getGroqKey();
 }
