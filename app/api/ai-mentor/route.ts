@@ -58,6 +58,33 @@ function computeQuestionsPerHour(questionLogs: any[], studyLogs: any[]): number 
   return Math.round(totalQuestions / totalStudyHours);
 }
 
+// Compute 90-day aggregates for LONG-TERM CONTEXT — 2 lines me pura trend,
+// bina hazaron tokens bheje. Prompt cost same, insight zyada.
+function computeLongTermAggregates(pastLogs: any[], questionLogs: any[], testLogs: any[]): string {
+  const totalStudyHrs = (pastLogs ?? []).reduce((s: number, l: any) => s + (l.study_time_minutes || 0), 0) / 60;
+  if (totalStudyHrs < 1) return "No significant long-term history yet.";
+  const days = new Set((pastLogs ?? []).map((l: any) => l.log_date)).size || 1;
+  const totalQuestions = (questionLogs ?? []).reduce((s: number, l: any) => s + (l.question_count || 0), 0);
+  const totalPractice = (pastLogs ?? []).reduce((s: number, l: any) => s + (l.practice_minutes || 0), 0);
+  const totalVerified = (pastLogs ?? []).reduce((s: number, l: any) => s + (l.verified_minutes || 0), 0);
+  const avgHrsDay = (totalStudyHrs / days).toFixed(1);
+  const practicePct = Math.round((totalPractice / (totalStudyHrs * 60)) * 100);
+  const verifiedPct = Math.round((totalVerified / (totalStudyHrs * 60)) * 100);
+  const qph = Math.round(totalQuestions / totalStudyHrs);
+  let bestStreak = 0;
+  (pastLogs ?? []).forEach((l: any) => { if ((l.streak_count || 0) > bestStreak) bestStreak = l.streak_count || 0; });
+  const testAvg = (testLogs ?? []).length
+    ? Math.round(((testLogs ?? []).reduce((s: number, t: any) => s + (t.total_marks || 0), 0) /
+        Math.max((testLogs ?? []).reduce((s: number, t: any) => s + (t.max_marks || 0), 0), 1)) * 100)
+    : null;
+  return [
+    `90-day window (${days} active days): avg ${avgHrsDay} hrs/day,`,
+    `practice ${practicePct}% of study time, verified(focus-cam) ${verifiedPct}% of study time,`,
+    `overall Q/hr ${qph}, best streak ${bestStreak} days,`,
+    testAvg !== null ? `avg mock-test score ${testAvg}%` : "no mock data",
+  ].join(" ");
+}
+
 // Compute practice vs theory ratio from daily_logs
 function computePracticeRatio(studyLogs: any[]): number | null {
   const totalStudy = (studyLogs ?? []).reduce((sum: number, l: any) => sum + (l.study_time_minutes || 0), 0);
@@ -113,19 +140,19 @@ export async function POST(req: Request) {
         .select("study_time_minutes, theory_minutes, practice_minutes, revision_minutes, verified_minutes, streak_count, log_date")
         .eq("user_id", userId)
         .order("log_date", { ascending: false })
-        .limit(14),
+        .limit(90),
       supabase
         .from("question_logs")
         .select("question_count, log_date")
         .eq("user_id", userId)
         .order("log_date", { ascending: false })
-        .limit(14),
+        .limit(90),
       supabase
         .from("test_logs")
         .select("test_name, total_marks, max_marks, accuracy, test_date")
         .eq("user_id", userId)
         .order("test_date", { ascending: false })
-        .limit(5),
+        .limit(10),
       supabase
         .from("tasks")
         .select("title, priority, due_date")
@@ -166,6 +193,11 @@ export async function POST(req: Request) {
     const actualQph = computeQuestionsPerHour(questionLogs || [], pastLogs || []);
     const actualPracticeRatio = computePracticeRatio(pastLogs || []);
 
+    // Recent 14-day FULL logs prompt me jayenge; 90-day ka sirf aggregate line (cost same, trend milta hai)
+    const recentLogs = (pastLogs || []).slice(0, 14);
+    const recentQuestions = (questionLogs || []).slice(0, 14);
+    const longTermContext = computeLongTermAggregates(pastLogs || [], questionLogs || [], recentTests || []);
+
     // Days remaining to exam
     let daysToExam: number | null = null;
     let examLabel: string | null = null;
@@ -186,8 +218,10 @@ Student Context:
 - Class Level: ${classLevel}
 - Days Remaining to Exam: ${daysToExam !== null ? `${daysToExam} days (${examLabel})` : "Exam date not set"}
 - Active Pending Backlogs: ${JSON.stringify(pendingBacklogs || [])}
-- Recent 14-day study logs (theory_minutes, practice_minutes, revision_minutes, verified_minutes = time with face-cam + app-blocker ON): ${JSON.stringify(pastLogs || [])}
-- Recent 14-day question solving numbers: ${JSON.stringify(questionLogs || [])}
+- Recent 14-day study logs (theory_minutes, practice_minutes, revision_minutes, verified_minutes = time with face-cam + app-blocker ON): ${JSON.stringify(recentLogs)}
+- Recent 14-day question solving numbers: ${JSON.stringify(recentQuestions)}
+- LONG-TERM CONTEXT (90-day aggregate — trend/pattern insights ke liye use karo): ${longTermContext}
+  (Agar long-term numbers recent 14-day se kaafi alag hain — jaise practice ratio gir raha hai — to recommendations me ye trend highlight karo.)
 - Computed Actual Q/hr Pace: ${actualQph !== null ? `${actualQph} questions/hour` : "Not enough data yet"}
 - Computed Actual Practice Ratio: ${actualPracticeRatio !== null ? `${actualPracticeRatio}% of study time is practice` : "Not enough data yet"}
 - Last 5 Mock Test Results: ${JSON.stringify(recentTests || [])}
