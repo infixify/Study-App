@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import AiMentorChat from "./AiMentorChat";
 
 interface AiMentorCardProps {
   userId: string;
@@ -10,6 +11,7 @@ interface AiMentorCardProps {
   loading: boolean;
   onRefresh: () => void;
   onOpenAiTalk?: () => void;
+  studentContext?: any;
 }
 
 const LAST_REFRESH_KEY = "pw_ai_mentor_last_refreshed";
@@ -23,6 +25,7 @@ export default function AiMentorCard({
   onOpenAiTalk,
 }: AiMentorCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"daily" | "subjects" | "swot" | "rank">("daily");
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
 
@@ -173,11 +176,11 @@ export default function AiMentorCard({
 
           <button
             type="button"
-            onClick={onOpenAiTalk}
+            onClick={() => setChatOpen(true)}
             className="py-4 px-3 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-black text-sm flex flex-col items-center justify-center gap-1 shadow-md active:scale-[0.98] transition-all tracking-wide"
           >
-            <span className="text-lg">🎙️</span>
-            <span>AI TALK</span>
+            <span className="text-lg">💬</span>
+            <span>CHAT</span>
           </button>
         </div>
       </div>
@@ -491,6 +494,16 @@ export default function AiMentorCard({
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI Mentor Chat Modal */}
+      {chatOpen && (
+        <AiMentorChat
+          userId={userId}
+          onClose={() => setChatOpen(false)}
+          targetExam={targetExam}
+          studentContext={studentContext}
+        />
       )}
     </>
   );
