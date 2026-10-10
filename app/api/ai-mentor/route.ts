@@ -2,7 +2,7 @@
 export const runtime = 'edge';
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { getCloudflareWorkersAiConfig } from "@/lib/ai-key-manager";
+import { getGroqKey } from "@/lib/ai-key-manager";
 
 const apiKey =
   process.env.GEMINI_API_KEY_MENTOR || process.env.GEMINI_API_KEY || "";
@@ -94,43 +94,45 @@ function computePracticeRatio(studyLogs: any[]): number | null {
   return Math.round((totalPractice / totalStudy) * 100);
 }
 
-// BACKUP: Cloudflare Workers AI text models (Account 2 — same key/models as
-// text-only doubt route). Gemini cascade poora fail ho tab ye chalega.
-async function callCloudflareMentor(prompt: string): Promise<string> {
-  const config = getCloudflareWorkersAiConfig();
-  if (!config) throw new Error("Cloudflare Text AI credentials missing");
+// BACKUP: Groq llama-3.3-70b-versatile with NATIVE JSON MODE (structured outputs)
+// — guaranteed schema-valid JSON, 128k context, fast LPU. Gemini cascade fail
+// hone par ye chalega. Alag mentor key (GROQ_API_KEY_MENTOR) use hoti hai agar set hai,
+// warna existing Groq key fallback.
+function getMentorGroqKey(): string {
+  const dedicated = (process.env.GROQ_API_KEY_MENTOR || "").replace(/["\r\n]/g, "").trim();
+  return dedicated || getGroqKey();
+}
 
-  const models = ["@cf/meta/llama-3.1-8b-instruct", "@cf/mistral/mistral-7b-instruct-v0.1"];
-  let lastErr = "";
-  for (const model of models) {
-    try {
-      const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/run/${model}`;
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.apiToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: [
-            { role: "user", content: prompt },
-          ]
-        }),
-        signal: AbortSignal.timeout(12000),
-      });
-      if (!res.ok) {
-        lastErr = `${model} HTTP ${res.status}`;
-        continue;
-      }
-      const data = await res.json();
-      const text = data?.result?.response?.trim();
-      if (text) return text;
-      lastErr = `${model} empty response`;
-    } catch (e: any) {
-      lastErr = e?.name === "TimeoutError" ? `${model} Timeout` : (e?.message || String(e));
-    }
+async function callGroqMentor(prompt: string): Promise<string> {
+  const groqKey = getMentorGroqKey();
+  if (!groqKey) throw new Error("No Groq API key configured (GROQ_API_KEY_MENTOR / GROQ_API_KEY)");
+
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${groqKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "user", content: prompt },
+      ],
+      // JSON MODE: Groq schema ke hisaab se GUARANTEED valid JSON return karta hai
+      response_format: { type: "json_object" },
+      temperature: 0.4,
+      max_tokens: 4096,
+    }),
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Groq mentor HTTP ${res.status}: ${errText.slice(0, 200)}`);
   }
-  throw new Error(lastErr || "Cloudflare mentor backup failed");
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("Groq mentor empty response");
+  return text;
 }
 
 export async function POST(req: Request) {
@@ -311,9 +313,9 @@ Required JSON Output (strict schema):
     try {
       rawJson = await generateWithFallback(prompt, apiKey);
     } catch (genErr: any) {
-      // BACKUP: Gemini cascade fail -> Cloudflare Workers AI (Account 2, text doubt models)
-      console.warn("Gemini mentor cascade failed, trying Cloudflare backup:", genErr?.message);
-      rawJson = await callCloudflareMentor(prompt);
+      // BACKUP: Gemini cascade fail -> Groq llama-3.3-70b (native JSON mode)
+      console.warn("Gemini mentor cascade failed, trying Groq JSON-mode backup:", genErr?.message);
+      rawJson = await callGroqMentor(prompt);
     }
     const cleaned = rawJson.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleaned);
