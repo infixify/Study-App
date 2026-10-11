@@ -50,7 +50,7 @@ Respond ONLY with a single valid JSON object, no markdown fences, no extra text:
 - "reply": your full answer in the SAME language and script the student used. NEVER translate or change script.
 - "tts_text": EXACT same text as "reply" (no script conversion, no translation). Keep it identical for TTS.
 - "language": detected language code (en, hi, bn, ta, te, mr, gu, pa, ml, kn, or).
-- Technical terms MUST remain in English. NO markdown, NO LaTeX, NO asterisks. Write formulas as spoken words, e.g. "v equals u plus a t", "under root of 2". Flowing natural speech text only.
+- Technical terms MUST remain in English. NO markdown, NO LaTeX, NO asterisks. Write formulas as spoken words, e.g. "v equals u plus a t", "under root of 2". Flowing natural speech text only.`;
 
 
 // Parse Gemini dual-output JSON; fall back to raw text if parsing fails

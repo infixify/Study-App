@@ -386,7 +386,8 @@ export default function AiMentorChat({
                   </div>
                 )}
               </div>
-            ))}
+            ))
+          )}
           {isLoading && (
             <div className="flex justify-start gap-2">
               <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm shrink-0">
