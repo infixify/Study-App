@@ -31,8 +31,7 @@ const LANGUAGE_KEYWORDS: Record<string, string[]> = {
   punjabi: ["main", "tusi", "ki", "kya", "karna", "hai"],
   malayalam: ["njan", "ninte", "enth", "kaaryam", "cheyyanam"],
   kannada: ["naanu", "nimage", "eni", "hege", "maaduvudi"],
-  odia: ["mu", "tume", "ki
-", "kaana", "kariba"],
+  odia: ["mu", "tume", "ki", "kaana", "kariba"],
 };
 
 // Detect language from text
@@ -112,8 +111,7 @@ function getTonePhrase(tone: string, language: string): string {
       gu: "Ben",
       pa: "Bhen",
       ml: "Chechi",
-      kn:
- "Akka",
+      kn: "Akka",
       or: "Bhauji",
     },
   };
@@ -156,8 +154,7 @@ function buildChatPrompt(
     te: `ONLY Telugu script mein jawab do. Natural Telugu tone. NEVER translate or change script.`,
     mr: `ONLY Marathi (Devanagari script) mein jawab do. Natural Marathi tone. NEVER translate or change script.`,
     gu: `ONLY Gujarati script mein jawab do. Natural Gujarati tone. NEVER translate or change script.`,
-    pa:
- `ONLY Punjabi (Gurmukhi script) mein jawab do. Natural Punjabi tone. NEVER translate or change script.`,
+    pa: `ONLY Punjabi (Gurmukhi script) mein jawab do. Natural Punjabi tone. NEVER translate or change script.`,
     ml: `ONLY Malayalam script mein jawab do. Natural Malayalam tone. NEVER translate or change script.`,
     kn: `ONLY Kannada script mein jawab do. Natural Kannada tone. NEVER translate or change script.`,
     or: `ONLY Odia script mein jawab do. Natural Odia tone. NEVER translate or change script.`,
@@ -211,8 +208,7 @@ async function callGroqChat(
   });
 
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST
-",
+    method: "POST",
     headers: {
       Authorization: `Bearer ${groqKey}`,
       "Content-Type": "application/json",
@@ -283,8 +279,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Detect or use provided language
-    const language = studentContext?.language || detectLangu
-age(message);
+    const language = studentContext?.language || detectLanguage(message);
     const tone = getGenZTone(studentContext?.gender);
 
     // Build conversation history (for now, just current message)
@@ -347,8 +342,7 @@ age(message);
       parsed = {
         reply: rawJson,
         tts_text: rawJson,
-        la
-nguage,
+        language,
       };
     }
 
