@@ -49,9 +49,12 @@ export default function AiMentorChat({
       try {
         const parsed = JSON.parse(cached);
         const now = Date.now();
-        const recentMessages = parsed.filter(
-          (msg: Message) => now - new Date(msg.timestamp).getTime() < TTS_CACHE_TTL
-        );
+        // Revive timestamps: JSON.parse turns Date into an ISO string, which would crash formatTime()
+        const recentMessages = parsed
+          .filter(
+            (msg: Message) => now - new Date(msg.timestamp).getTime() < TTS_CACHE_TTL
+          )
+          .map((msg: Message) => ({ ...msg, timestamp: new Date(msg.timestamp) }));
         if (recentMessages.length > 0) {
           setMessages(recentMessages);
         }
