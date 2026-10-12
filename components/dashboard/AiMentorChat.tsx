@@ -38,9 +38,8 @@ export default function AiMentorChat({
   const [error, setError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const baseTextRef = useRef<string>("");
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   // Load cached chat history
@@ -84,10 +83,12 @@ export default function AiMentorChat({
       if (utteranceRef.current) {
         window.speechSynthesis.cancel();
       }
-      if (mediaRecorderRef.current?.state !== "inactive") {
-        mediaRecorderRef.current?.stop();
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (_) {}
+        recognitionRef.current = null;
       }
-      audioChunksRef.current = [];
     };
   }, []);
 
@@ -104,86 +105,101 @@ export default function AiMentorChat({
     return "bro";
   }, []);
 
-  // Speech to text using Web Speech API
-  const startSpeechToText = useCallback(async () => {
+  // Real-time speech to text using Web Speech API
+  const stopRecognition = useCallback(() => {
+    const rec = recognitionRef.current;
+    if (rec) {
+      try {
+        rec.onstart = null;
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        rec.stop();
+      } catch (_) {}
+      recognitionRef.current = null;
+    }
+    setIsRecording(false);
+  }, []);
+
+  const startRecognition = useCallback(() => {
+    if (isRecording) return;
     if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
       setError("Speech recognition not supported in your browser");
       return;
     }
-
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = language === "auto" ? navigator.language : language;
-
-    recognition.onstart = () => {
-      setIsRecording(true);
-      setError(null);
-    };
-
-    recognition.onerror = (event: any) => {
-      setIsRecording(false);
-      setError("Speech recognition error. Please try again.");
-      console.error("Speech recognition error:", event.error);
-    };
-
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInputText((prev) => prev + " " + transcript);
-      setIsRecording(false);
-    };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
-
-    recognition.start();
-  }, [language]);
-
-  // Hold to speak recording
-  const startHoldToSpeak = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      audioChunksRef.current = [];
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+      recognition.lang = language === "auto" ? navigator.language : language;
 
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+      baseTextRef.current = inputText;
+
+      recognition.onstart = () => {
+        setIsRecording(true);
+        setError(null);
+      };
+
+      recognition.onresult = (event: any) => {
+        let transcript = "";
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        transcript = transcript.trim();
+        if (!transcript) return;
+        const base = baseTextRef.current.trim();
+        setInputText(base ? base + " " + transcript : transcript);
+      };
+
+      recognition.onerror = (event: any) => {
+        const err = event && event.error;
+        if (err === "not-allowed" || err === "service-not-allowed") {
+          setError("Microphone permission denied. Please allow mic access.");
+        } else if (err === "no-speech" || err === "aborted" || err === "network") {
+          // Nothing to show: user stopped or no speech was detected
+        } else {
+          setError("Speech recognition error. Please try again.");
+        }
+        console.error("Speech recognition error:", err);
+        setIsRecording(false);
+      };
+
+      recognition.onend = () => {
+        setIsRecording(false);
+        if (recognitionRef.current === recognition) {
+          recognitionRef.current = null;
         }
       };
 
-      mediaRecorderRef.current.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        
-        // Convert audio to text using speech recognition
-        await startSpeechToText();
-        
-        // Cleanup
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorderRef.current.start();
-      setIsRecording(true);
-      setError(null);
-    } catch (err) {
-      setError("Could not access microphone. Please check permissions.");
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (e) {
+      console.error("Speech recognition start error:", e);
       setIsRecording(false);
-      console.error("Microphone access error:", err);
     }
-  }, [startSpeechToText]);
+  }, [isRecording, inputText, language]);
 
+  // Tap mic: toggle real-time speech to text
+  const startSpeechToText = useCallback(() => {
+    if (isRecording) {
+      stopRecognition();
+    } else {
+      startRecognition();
+    }
+  }, [isRecording, startRecognition, stopRecognition]);
+
+  // Hold to speak: start recognition immediately on press
+  const startHoldToSpeak = useCallback(() => {
+    if (isRecording) return;
+    startRecognition();
+  }, [isRecording, startRecognition]);
+
+  // Release hold: stop recognition
   const stopHoldToSpeak = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  }, []);
+    stopRecognition();
+  }, [stopRecognition]);
 
   // Text to speech
   const speakText = useCallback((text: string, lang?: string) => {
@@ -445,13 +461,12 @@ export default function AiMentorChat({
             <button
               type="button"
               onClick={startSpeechToText}
-              disabled={isRecording}
               className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md transition-all shrink-0 ${
                 isRecording
-                  ? "bg-rose-400 cursor-not-allowed"
+                  ? "bg-rose-500 hover:bg-rose-600"
                   : "bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700"
               }`}
-              title="Speech to Text"
+              title={isRecording ? "Stop listening" : "Speech to Text"}
             >
               🎤
             </button>

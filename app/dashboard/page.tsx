@@ -1607,6 +1607,21 @@ export default function DashboardPage() {
           <AiMentorCard
             userId={user?.id}
             targetExam={profile?.target_exam || "JEE"}
+            studentContext={{
+              ...(studentContext || {}),
+              targetExam: profile?.target_exam || "JEE",
+              studyHoursToday: Math.round((todayStudyMins / 60) * 10) / 10,
+              dailyGoalMins,
+              streak,
+              strongSubjects: (mentorReport?.subject_analysis || [])
+                .filter((s: any) => (s?.health || 0) >= 75 && s?.name)
+                .map((s: any) => s.name),
+              weakSubjects:
+                studentContext?.weakSubjects ||
+                (mentorReport?.subject_analysis || [])
+                  .filter((s: any) => (s?.health || 0) > 0 && (s?.health || 0) <= 60 && s?.name)
+                  .map((s: any) => s.name),
+            }}
             report={mentorReport}
             loading={mentorLoading}
             onRefresh={async () => {

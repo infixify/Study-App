@@ -129,6 +129,14 @@ function buildChatPrompt(
     name?: string;
     language?: string;
     previousMessages?: Array<{ role: string; content: string }>;
+    studyHoursToday?: number;
+    dailyGoalMins?: number;
+    streak?: number;
+    syllabusCoverage?: number;
+    weakSubjects?: string[];
+    strongSubjects?: string[];
+    daysToExam?: number;
+    pendingBacklogCount?: number;
   }
 ): string {
   const language = context.language || detectLanguage(message);
@@ -162,6 +170,39 @@ function buildChatPrompt(
 
   const langInstruction = languageInstructions[language] || languageInstructions.en;
 
+  // Study telemetry from the student's own logs (a helpful signal, may be inaccurate)
+  const telemetryLines: string[] = [];
+  if (typeof context.studyHoursToday === "number") {
+    telemetryLines.push("- Study hours today: " + context.studyHoursToday + "h");
+  }
+  if (typeof context.dailyGoalMins === "number") {
+    telemetryLines.push("- Daily study goal: " + Math.round((context.dailyGoalMins / 60) * 10) / 10 + "h");
+  }
+  if (typeof context.streak === "number") {
+    telemetryLines.push("- Current streak: " + context.streak + " day(s)");
+  }
+  if (typeof context.syllabusCoverage === "number") {
+    telemetryLines.push("- Syllabus coverage: " + context.syllabusCoverage + "%");
+  }
+  if (Array.isArray(context.weakSubjects) && context.weakSubjects.length > 0) {
+    telemetryLines.push("- Weak subjects: " + context.weakSubjects.join(", "));
+  }
+  if (Array.isArray(context.strongSubjects) && context.strongSubjects.length > 0) {
+    telemetryLines.push("- Strong subjects: " + context.strongSubjects.join(", "));
+  }
+  if (typeof context.daysToExam === "number") {
+    telemetryLines.push("- Days to exam: " + context.daysToExam);
+  }
+  if (typeof context.pendingBacklogCount === "number") {
+    telemetryLines.push("- Pending backlogs: " + context.pendingBacklogCount);
+  }
+  const telemetryBlock =
+    telemetryLines.length > 0
+      ? "\nStudy Telemetry (student's own logs - a helpful signal, NOT a scoreboard; may be inaccurate):\n" +
+        telemetryLines.join("\n") +
+        "\n"
+      : "";
+
   return `
 You are a GenZ AI Mentor for PrepWise, helping students with ${targetExam} preparation.
 
@@ -170,11 +211,15 @@ ${langInstruction}
 
 IMPORTANT: Technical terms (Newton, force, equation, lens, voltage, current, energy, power, etc.) MUST ALWAYS remain in English in ALL languages.
 
+MENTORSHIP RULES (MUST FOLLOW):
+1. NO FORCED LOGGING RULE: Never nag, pressure, or force the student to log study entries or fill forms. Your only job is PURE academic strategy, mental support, and doubt mentorship. Logging is the student's own choice - never make them feel guilty about it.
+2. ANOMALY CROSS-CHECK RULE: The study telemetry below comes from the student's own logs and may be inaccurate. If it looks unrealistic (e.g. 18+ hours studied in a single day, or a sudden drastic spike or drop), do NOT blindly trust it and do NOT scold the student. Casually and empathetically cross-check with them (e.g. "bhai 18 ghante? sach mein ya bas mauj thi?") and then move on. Never make the student feel judged about their data.
+
 Student Info:
 - Name: ${studentName}
 - Target Exam: ${targetExam}
 - Tone: Use "${tonePhrase}" style addressing
-
+${telemetryBlock}
 Conversation Context:
 ${historyText}
 
