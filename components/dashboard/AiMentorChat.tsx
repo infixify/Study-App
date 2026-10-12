@@ -9,6 +9,7 @@ interface Message {
   sender: "user" | "ai";
   timestamp: Date;
   ttsAudio?: string;
+  ttsText?: string;
   language?: string;
 }
 
@@ -22,6 +23,133 @@ interface AiMentorChatProps {
 const TTS_CACHE_PREFIX = "pw_mentor_tts_";
 const CHAT_CACHE_PREFIX = "pw_mentor_chat_";
 const TTS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+// ============================================================================
+// 24-HOUR TTS AUDIO CACHE (server-TTS blobs cached by text hash; zero API
+// requests on replay — same approach as Live Doubt)
+// ============================================================================
+function ttsHash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36) + "_" + text.length;
+}
+
+function base64ToBlob(base64: string, type: string): Blob {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
+
+function getCachedTtsAudio(text: string): { base64: string; type: string } | null {
+  try {
+    const key = TTS_CACHE_PREFIX + ttsHash(text);
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.base64) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    if (parsed.timestamp && Date.now() - parsed.timestamp > TTS_CACHE_TTL) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return { base64: parsed.base64, type: parsed.type || "audio/wav" };
+  } catch (_) {
+    return null;
+  }
+}
+
+function evictOldestCachedTtsAudio() {
+  try {
+    let oldestKey: string | null = null;
+    let oldestTs = Infinity;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(TTS_CACHE_PREFIX)) {
+        try {
+          const ts = JSON.parse(localStorage.getItem(key) || "{}").timestamp || 0;
+          if (ts < oldestTs) {
+            oldestTs = ts;
+            oldestKey = key;
+          }
+        } catch (_) {
+          if (key) localStorage.removeItem(key);
+        }
+      }
+    }
+    if (oldestKey) localStorage.removeItem(oldestKey);
+  } catch (_) {}
+}
+
+function cacheTtsAudioBlob(text: string, blob: Blob) {
+  try {
+    blob.arrayBuffer().then((buf) => {
+      try {
+        const bytes = new Uint8Array(buf);
+        let bin = "";
+        const step = 0x8000;
+        for (let i = 0; i < bytes.length; i += step) {
+          bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + step)) as any);
+        }
+        const base64 = btoa(bin);
+        if (base64.length > 4 * 1024 * 1024) return;
+        const key = TTS_CACHE_PREFIX + ttsHash(text);
+        const payload = JSON.stringify({ timestamp: Date.now(), type: blob.type, base64 });
+        try {
+          localStorage.setItem(key, payload);
+        } catch (_) {
+          evictOldestCachedTtsAudio();
+          try {
+            localStorage.setItem(key, payload);
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+// ============================================================================
+// NATIVE VOICE LANGUAGE RESOLVER
+// "auto" is NOT a valid BCP-47 tag — passing it straight to
+// SpeechSynthesisUtterance made speechSynthesis fail with
+// SpeechSynthesisErrorEvent on mobile browsers.
+// ============================================================================
+function resolveNativeLang(text: string, lang?: string): string {
+  const l = (lang || "").trim();
+  if (l && l !== "auto") {
+    const map: Record<string, string> = {
+      en: "en-IN",
+      hi: "hi-IN",
+      "hi-IN": "hi-IN",
+      mr: "hi-IN",
+      bn: "bn-IN",
+      ta: "ta-IN",
+      te: "te-IN",
+      gu: "gu-IN",
+      pa: "pa-IN",
+      ml: "ml-IN",
+      kn: "kn-IN",
+      or: "or-IN",
+    };
+    return map[l] || l;
+  }
+  // Auto: detect from the text's script, else the browser language
+  if (/[\u0980-\u09FF]/.test(text)) return "bn-IN";
+  if (/[\u0A00-\u0A7F]/.test(text)) return "pa-IN";
+  if (/[\u0A80-\u0AFF]/.test(text)) return "gu-IN";
+  if (/[\u0B00-\u0B7F]/.test(text)) return "or-IN";
+  if (/[\u0B80-\u0BFF]/.test(text)) return "ta-IN";
+  if (/[\u0C00-\u0C7F]/.test(text)) return "te-IN";
+  if (/[\u0C80-\u0CFF]/.test(text)) return "kn-IN";
+  if (/[\u0D00-\u0D7F]/.test(text)) return "ml-IN";
+  if (/[\u0900-\u097F]/.test(text)) return "hi-IN";
+  return navigator.language || "en-IN";
+}
 
 export default function AiMentorChat({
   userId,
@@ -41,6 +169,9 @@ export default function AiMentorChat({
   const recognitionRef = useRef<any>(null);
   const baseTextRef = useRef<string>("");
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const speechSessionRef = useRef(0);
+  const speakTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load cached chat history
   useEffect(() => {
@@ -83,6 +214,15 @@ export default function AiMentorChat({
   // Cleanup audio on unmount
   useEffect(() => {
     return () => {
+      speechSessionRef.current++;
+      if (speakTimeoutRef.current) {
+        clearTimeout(speakTimeoutRef.current);
+        speakTimeoutRef.current = null;
+      }
+      try {
+        audioRef.current?.pause();
+      } catch (_) {}
+      audioRef.current = null;
       if (utteranceRef.current) {
         window.speechSynthesis.cancel();
       }
@@ -204,34 +344,136 @@ export default function AiMentorChat({
     stopRecognition();
   }, [stopRecognition]);
 
-  // Text to speech
-  const speakText = useCallback((text: string, lang?: string) => {
+  // Native browser voice (last-resort fallback when server TTS is unavailable)
+  const speakNative = useCallback((text: string, lang?: string) => {
     if (!("speechSynthesis" in window)) {
       setError("Text-to-speech not supported in your browser");
+      setIsSpeaking(false);
       return;
     }
-
-    window.speechSynthesis.cancel();
-    
+    try {
+      window.speechSynthesis.cancel();
+    } catch (_) {}
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang || language;
-    utterance.rate = 1;
+    utterance.lang = resolveNativeLang(text, lang);
+    utterance.rate = 1.05;
     utterance.pitch = 1;
-    
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = (event) => {
       setIsSpeaking(false);
       console.error("TTS error:", event);
     };
-
     utteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
-  }, [language]);
+  }, []);
+
+  // Text to speech: server-side 3-tier TTS (natural voice — same pipeline as
+  // Live Doubt: HuggingFace -> Sarvam -> native) with a 24h audio cache;
+  // falls back to the browser's native voice if the TTS API fails.
+  const speakText = useCallback(
+    async (text: string, lang?: string) => {
+      const speechText = (text || "").trim();
+      if (!speechText) return;
+
+      // New speech session: invalidates any in-flight playback/fetch
+      const session = ++speechSessionRef.current;
+      try {
+        audioRef.current?.pause();
+      } catch (_) {}
+      audioRef.current = null;
+      try {
+        window.speechSynthesis.cancel();
+      } catch (_) {}
+      setIsSpeaking(true);
+      const alive = () => session === speechSessionRef.current;
+
+      const playBlob = (blob: Blob): Promise<boolean> => {
+        return new Promise((resolve) => {
+          if (!alive()) {
+            resolve(false);
+            return;
+          }
+          try {
+            const audio = new Audio(URL.createObjectURL(blob));
+            audioRef.current = audio;
+            let settled = false;
+            const done = (ok: boolean) => {
+              if (settled) return;
+              settled = true;
+              if (audioRef.current === audio) audioRef.current = null;
+              try {
+                URL.revokeObjectURL(audio.src);
+              } catch (_) {}
+              if (alive()) setIsSpeaking(false);
+              resolve(ok);
+            };
+            audio.onended = () => done(true);
+            audio.onerror = () => done(false);
+            audio.play().catch(() => done(false));
+          } catch (_) {
+            resolve(false);
+          }
+        });
+      };
+
+      // 1. CACHE HIT: replay cached server-TTS audio with zero API requests
+      const cached = getCachedTtsAudio(speechText);
+      if (cached) {
+        const ok = await playBlob(base64ToBlob(cached.base64, cached.type));
+        if (ok || !alive()) return;
+        try {
+          localStorage.removeItem(TTS_CACHE_PREFIX + ttsHash(speechText));
+        } catch (_) {}
+      }
+
+      // 2. Server TTS (Tier 1: HuggingFace natural voice -> Tier 2: Sarvam ->
+      //    Tier 3: native-voice JSON handled below)
+      try {
+        const res = await fetch("/api/ai-doubt/live/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: speechText }),
+        });
+        if (!alive()) return;
+        if (res.ok) {
+          const blob = await res.blob();
+          if (!alive()) return;
+          if (blob.type && blob.type !== "application/json" && blob.size > 0) {
+            cacheTtsAudioBlob(speechText, blob);
+            const ok = await playBlob(blob);
+            if (ok || !alive()) return;
+          } else if (blob.type === "application/json") {
+            // Tier 3: server says speak natively with this language
+            try {
+              const info = JSON.parse(await blob.text());
+              if (info && info.type === "native") {
+                if (alive()) speakNative(String(info.text || speechText), info.lang);
+                return;
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (e) {
+        console.error("Mentor TTS API error:", e);
+      }
+
+      // 3. Final fallback: browser native voice
+      if (alive()) speakNative(speechText, lang);
+    },
+    [speakNative]
+  );
 
   // Stop speaking
   const stopSpeaking = useCallback(() => {
-    window.speechSynthesis.cancel();
+    speechSessionRef.current++;
+    try {
+      audioRef.current?.pause();
+    } catch (_) {}
+    audioRef.current = null;
+    try {
+      window.speechSynthesis.cancel();
+    } catch (_) {}
     setIsSpeaking(false);
   }, []);
 
@@ -276,12 +518,14 @@ export default function AiMentorChat({
       }
 
       const data = await response.json();
-      
+
       const aiText = data.reply || "I'm here to help you with your studies!";
-      
+      const aiTtsText = data.tts_text || aiText;
+
       const aiMessage: Message = {
         id: `msg_${Date.now()}_ai`,
         text: aiText,
+        ttsText: aiTtsText,
         sender: "ai",
         timestamp: new Date(),
         language: data.language || language,
@@ -289,9 +533,11 @@ export default function AiMentorChat({
 
       setMessages((prev) => [...prev, aiMessage]);
 
-      // Auto-speak the response
-      setTimeout(() => {
-        speakText(aiText, data.language || language);
+      // Auto-speak the response (server 3-tier TTS, native fallback)
+      if (speakTimeoutRef.current) clearTimeout(speakTimeoutRef.current);
+      speakTimeoutRef.current = setTimeout(() => {
+        speakTimeoutRef.current = null;
+        speakText(aiTtsText, data.language || language);
       }, 500);
 
     } catch (err) {
@@ -313,7 +559,7 @@ export default function AiMentorChat({
   // Replay TTS for a message
   const replayTTS = useCallback((message: Message) => {
     if (message.sender === "ai" && message.text) {
-      speakText(message.text, message.language);
+      speakText(message.ttsText || message.text, message.language);
     }
   }, [speakText]);
 
