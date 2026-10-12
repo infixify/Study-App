@@ -3,6 +3,84 @@
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 
+// ============================================================================
+// CLEAN INLINE SVG ICONS (Live Doubt style)
+// ============================================================================
+const CloseIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+  </svg>
+);
+
+const ChatBubbleIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+  </svg>
+);
+
+const ChevronDownIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+  </svg>
+);
+
+const ChevronUpIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+  </svg>
+);
+
+const MicActiveIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+  </svg>
+);
+
+const MicMutedIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-1.2 3.9M12 18a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5c0-.4.1-.8.2-1.2M9.4 4.3A3 3 0 0115 5v5.2M3 3l18 18" />
+  </svg>
+);
+
+const PlayTriangleIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
+  <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+    <path d="M8 5v14l11-7z" />
+  </svg>
+);
+
+const StopSquareIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
+  <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+    <rect x="6" y="6" width="12" height="12" rx="2" />
+  </svg>
+);
+
+const ExpandIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" />
+  </svg>
+);
+
+const CollapseIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5" />
+  </svg>
+);
+
+const SendIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+  </svg>
+);
+
+const TrashIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+  </svg>
+);
+
+// ============================================================================
+// TYPES & CONSTANTS
+// ============================================================================
 interface Message {
   id: string;
   text: string;
@@ -10,6 +88,13 @@ interface Message {
   timestamp: Date;
   ttsAudio?: string;
   ttsText?: string;
+  language?: string;
+}
+
+interface LiveReply {
+  id: string;
+  text: string;
+  ttsText: string;
   language?: string;
 }
 
@@ -23,6 +108,7 @@ interface AiMentorChatProps {
 const TTS_CACHE_PREFIX = "pw_mentor_tts_";
 const CHAT_CACHE_PREFIX = "pw_mentor_chat_";
 const TTS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const EQ_BAR_COUNT = 26;
 
 // ============================================================================
 // 24-HOUR TTS AUDIO CACHE (server-TTS blobs cached by text hash; zero API
@@ -151,6 +237,9 @@ function resolveNativeLang(text: string, lang?: string): string {
   return navigator.language || "en-IN";
 }
 
+// ============================================================================
+// MAIN COMPONENT: AiMentorChat (Live Doubt style — infinity orb + HUD drawer)
+// ============================================================================
 export default function AiMentorChat({
   userId,
   onClose,
@@ -159,15 +248,23 @@ export default function AiMentorChat({
 }: AiMentorChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [language, setLanguage] = useState<string>("auto");
   const [error, setError] = useState<string | null>(null);
+  // Mic (tap-to-fill chat box) and Hold-to-Speak are INDEPENDENT systems
+  const [isMicActive, setIsMicActive] = useState(false);
+  const [isHolding, setIsHolding] = useState(false);
+  const [holdTranscript, setHoldTranscript] = useState("");
+  const [hudMode, setHudMode] = useState<"compact" | "expanded">("compact");
+  const [liveReply, setLiveReply] = useState<LiveReply | null>(null);
+  const [pendingUserText, setPendingUserText] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const drawerBottomRef = useRef<HTMLDivElement>(null);
+  const micRecognitionRef = useRef<any>(null);
+  const holdRecognitionRef = useRef<any>(null);
   const baseTextRef = useRef<string>("");
+  const holdFinalRef = useRef<string>("");
+  const holdTranscriptRef = useRef<string>("");
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const speechSessionRef = useRef(0);
@@ -195,23 +292,27 @@ export default function AiMentorChat({
     }
   }, [userId]);
 
-  // Save chat to cache
+  // Save chat to cache (also clears storage when chat is emptied)
   useEffect(() => {
-    if (messages.length > 0) {
-      try {
+    try {
+      if (messages.length > 0) {
         localStorage.setItem(`${CHAT_CACHE_PREFIX}${userId}`, JSON.stringify(messages));
-      } catch (e) {
-        console.error("Failed to save chat cache:", e);
+      } else {
+        localStorage.removeItem(`${CHAT_CACHE_PREFIX}${userId}`);
       }
+    } catch (e) {
+      console.error("Failed to save chat cache:", e);
     }
   }, [messages, userId]);
 
-  // Scroll to bottom
+  // Scroll drawer to bottom on new messages (when expanded)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (hudMode === "expanded") {
+      drawerBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, hudMode]);
 
-  // Cleanup audio on unmount
+  // Cleanup audio + recognitions on unmount
   useEffect(() => {
     return () => {
       speechSessionRef.current++;
@@ -219,28 +320,29 @@ export default function AiMentorChat({
         clearTimeout(speakTimeoutRef.current);
         speakTimeoutRef.current = null;
       }
+      const stopRec = (rec: any) => {
+        if (rec) {
+          try {
+            rec.onstart = null;
+            rec.onresult = null;
+            rec.onerror = null;
+            rec.onend = null;
+            rec.stop();
+          } catch (_) {}
+        }
+      };
+      stopRec(micRecognitionRef.current);
+      stopRec(holdRecognitionRef.current);
+      micRecognitionRef.current = null;
+      holdRecognitionRef.current = null;
       try {
         audioRef.current?.pause();
       } catch (_) {}
       audioRef.current = null;
-      if (utteranceRef.current) {
+      try {
         window.speechSynthesis.cancel();
-      }
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (_) {}
-        recognitionRef.current = null;
-      }
+      } catch (_) {}
     };
-  }, []);
-
-  // Auto-detect language from browser
-  useEffect(() => {
-    const browserLang = navigator.language || "en";
-    const lang = browserLang.startsWith("hi") ? "hi" : 
-                browserLang.startsWith("en") ? "en" : "auto";
-    setLanguage(lang);
   }, []);
 
   const getGenZTone = useCallback((gender?: string): string => {
@@ -248,102 +350,37 @@ export default function AiMentorChat({
     return "bro";
   }, []);
 
-  // Real-time speech to text using Web Speech API
-  const stopRecognition = useCallback(() => {
-    const rec = recognitionRef.current;
-    if (rec) {
-      try {
-        rec.onstart = null;
-        rec.onresult = null;
-        rec.onerror = null;
-        rec.onend = null;
-        rec.stop();
-      } catch (_) {}
-      recognitionRef.current = null;
-    }
-    setIsRecording(false);
-  }, []);
-
-  const startRecognition = useCallback(() => {
-    if (isRecording) return;
-    if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
-      setError("Speech recognition not supported in your browser");
-      return;
-    }
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
+  // ==========================================================================
+  // SPEECH RECOGNITION FACTORY (Web Speech API) — used by BOTH mic & hold,
+  // each with its own instance so the two buttons never interfere.
+  // ==========================================================================
+  const createRecognition = useCallback(
+    (opts: {
+      continuous: boolean;
+      onResult: (event: any) => void;
+      onError: (err: string) => void;
+      onEnd: () => void;
+    }) => {
+      if (typeof window === "undefined") return null;
+      const SR =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SR) return null;
+      const recognition = new SR();
+      recognition.continuous = opts.continuous;
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
-      recognition.lang = language === "auto" ? navigator.language : language;
+      recognition.lang = navigator.language || "en-IN";
+      recognition.onresult = opts.onResult;
+      recognition.onerror = (e: any) => opts.onError(e?.error);
+      recognition.onend = opts.onEnd;
+      return recognition;
+    },
+    []
+  );
 
-      baseTextRef.current = inputText;
-
-      recognition.onstart = () => {
-        setIsRecording(true);
-        setError(null);
-      };
-
-      recognition.onresult = (event: any) => {
-        let transcript = "";
-        for (let i = 0; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
-        }
-        transcript = transcript.trim();
-        if (!transcript) return;
-        const base = baseTextRef.current.trim();
-        setInputText(base ? base + " " + transcript : transcript);
-      };
-
-      recognition.onerror = (event: any) => {
-        const err = event && event.error;
-        if (err === "not-allowed" || err === "service-not-allowed") {
-          setError("Microphone permission denied. Please allow mic access.");
-        } else if (err === "no-speech" || err === "aborted" || err === "network") {
-          // Nothing to show: user stopped or no speech was detected
-        } else {
-          setError("Speech recognition error. Please try again.");
-        }
-        console.error("Speech recognition error:", err);
-        setIsRecording(false);
-      };
-
-      recognition.onend = () => {
-        setIsRecording(false);
-        if (recognitionRef.current === recognition) {
-          recognitionRef.current = null;
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (e) {
-      console.error("Speech recognition start error:", e);
-      setIsRecording(false);
-    }
-  }, [isRecording, inputText, language]);
-
-  // Tap mic: toggle real-time speech to text
-  const startSpeechToText = useCallback(() => {
-    if (isRecording) {
-      stopRecognition();
-    } else {
-      startRecognition();
-    }
-  }, [isRecording, startRecognition, stopRecognition]);
-
-  // Hold to speak: start recognition immediately on press
-  const startHoldToSpeak = useCallback(() => {
-    if (isRecording) return;
-    startRecognition();
-  }, [isRecording, startRecognition]);
-
-  // Release hold: stop recognition
-  const stopHoldToSpeak = useCallback(() => {
-    stopRecognition();
-  }, [stopRecognition]);
-
+  // ==========================================================================
+  // TEXT TO SPEECH (server 3-tier natural voice + native fallback)
+  // ==========================================================================
   // Native browser voice (last-resort fallback when server TTS is unavailable)
   const speakNative = useCallback((text: string, lang?: string) => {
     if (!("speechSynthesis" in window)) {
@@ -477,91 +514,280 @@ export default function AiMentorChat({
     setIsSpeaking(false);
   }, []);
 
-  // Send message to AI mentor
-  const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || isLoading) return;
+  // ==========================================================================
+  // SEND MESSAGE (shared by typed chat & hold-to-speak)
+  // ==========================================================================
+  const sendMessage = useCallback(
+    async (text: string) => {
+      if (!text.trim() || isLoading) return;
 
-    const userMessage: Message = {
-      id: `msg_${Date.now()}_user`,
-      text: text.trim(),
-      sender: "user",
-      timestamp: new Date(),
-      language,
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInputText("");
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const requestBody = {
-        userId,
-        message: text,
-        studentContext: {
-          ...studentContext,
-          targetExam,
-          language,
-          tone: getGenZTone(studentContext?.gender),
-        },
-        timestamp: new Date().toISOString(),
-      };
-
-      const response = await fetch("/api/ai-mentor/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        throw new Error(`AI Mentor error: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      const aiText = data.reply || "I'm here to help you with your studies!";
-      const aiTtsText = data.tts_text || aiText;
-
-      const aiMessage: Message = {
-        id: `msg_${Date.now()}_ai`,
-        text: aiText,
-        ttsText: aiTtsText,
-        sender: "ai",
+      const userText = text.trim();
+      const userMessage: Message = {
+        id: `msg_${Date.now()}_user`,
+        text: userText,
+        sender: "user",
         timestamp: new Date(),
-        language: data.language || language,
       };
 
-      setMessages((prev) => [...prev, aiMessage]);
+      setMessages((prev) => [...prev, userMessage]);
+      setInputText("");
+      setIsLoading(true);
+      setError(null);
+      setLiveReply(null);
+      setPendingUserText(userText);
 
-      // Auto-speak the response (server 3-tier TTS, native fallback)
-      if (speakTimeoutRef.current) clearTimeout(speakTimeoutRef.current);
-      speakTimeoutRef.current = setTimeout(() => {
-        speakTimeoutRef.current = null;
-        speakText(aiTtsText, data.language || language);
-      }, 500);
+      try {
+        const requestBody = {
+          userId,
+          message: userText,
+          studentContext: {
+            ...studentContext,
+            targetExam,
+            tone: getGenZTone(studentContext?.gender),
+          },
+          timestamp: new Date().toISOString(),
+        };
 
-    } catch (err) {
-      setError("Failed to get response from AI Mentor. Please try again.");
-      console.error("AI Mentor API error:", err);
-    } finally {
-      setIsLoading(false);
+        const response = await fetch("/api/ai-mentor/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          throw new Error(`AI Mentor error: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        const aiText = data.reply || "I'm here to help you with your studies!";
+        const aiTtsText = data.tts_text || aiText;
+        const aiLang = data.language || undefined;
+
+        const aiMessage: Message = {
+          id: `msg_${Date.now()}_ai`,
+          text: aiText,
+          ttsText: aiTtsText,
+          sender: "ai",
+          timestamp: new Date(),
+          language: aiLang,
+        };
+
+        setMessages((prev) => [...prev, aiMessage]);
+        // Live output in the overlay (AI Live Doubt style)
+        setLiveReply({ id: aiMessage.id, text: aiText, ttsText: aiTtsText, language: aiLang });
+        setPendingUserText(null);
+
+        // Auto-speak the response (server 3-tier TTS, native fallback)
+        if (speakTimeoutRef.current) clearTimeout(speakTimeoutRef.current);
+        speakTimeoutRef.current = setTimeout(() => {
+          speakTimeoutRef.current = null;
+          speakText(aiTtsText, aiLang);
+        }, 500);
+      } catch (err) {
+        setError("Failed to get response from AI Mentor. Please try again.");
+        console.error("AI Mentor API error:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [userId, studentContext, targetExam, getGenZTone, speakText]
+  );
+
+  // ==========================================================================
+  // MIC BUTTON (tap toggle) — fills the chat input box with live text.
+  // Independent from Hold-to-Speak.
+  // ==========================================================================
+  const stopMicRecognition = useCallback(() => {
+    const rec = micRecognitionRef.current;
+    if (rec) {
+      try {
+        rec.onstart = null;
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        rec.stop();
+      } catch (_) {}
+      micRecognitionRef.current = null;
     }
-  }, [userId, language, studentContext, targetExam, getGenZTone, speakText]);
+    setIsMicActive(false);
+  }, []);
 
-  // Handle send on Enter
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey && inputText.trim()) {
-      e.preventDefault();
-      sendMessage(inputText);
+  const startMicRecognition = useCallback(() => {
+    if (isMicActive) return;
+    if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
+      setError("Speech recognition not supported in your browser");
+      return;
     }
-  }, [inputText, sendMessage]);
+    try {
+      const recognition = createRecognition({
+        continuous: false,
+        onResult: (event: any) => {
+          let transcript = "";
+          for (let i = 0; i < event.results.length; i++) {
+            transcript += event.results[i][0].transcript;
+          }
+          transcript = transcript.trim();
+          if (!transcript) return;
+          const base = baseTextRef.current.trim();
+          setInputText(base ? base + " " + transcript : transcript);
+        },
+        onError: (err) => {
+          if (err === "not-allowed" || err === "service-not-allowed") {
+            setError("Microphone permission denied. Please allow mic access.");
+          } else if (err !== "no-speech" && err !== "aborted" && err !== "network") {
+            setError("Speech recognition error. Please try again.");
+          }
+          setIsMicActive(false);
+        },
+        onEnd: () => {
+          if (micRecognitionRef.current === recognition) {
+            micRecognitionRef.current = null;
+          }
+          setIsMicActive(false);
+        },
+      });
+      if (!recognition) return;
+      baseTextRef.current = inputText;
+      micRecognitionRef.current = recognition;
+      recognition.start();
+      setIsMicActive(true);
+      setError(null);
+    } catch (e) {
+      console.error("Mic recognition start error:", e);
+      setIsMicActive(false);
+    }
+  }, [isMicActive, inputText, createRecognition]);
+
+  const toggleMic = useCallback(() => {
+    if (isMicActive) {
+      stopMicRecognition();
+    } else {
+      startMicRecognition();
+    }
+  }, [isMicActive, startMicRecognition, stopMicRecognition]);
+
+  // ==========================================================================
+  // HOLD TO SPEAK (top button) — live transcript in overlay, release to send.
+  // Independent from the mic button.
+  // ==========================================================================
+  const startHoldRecognition = useCallback(() => {
+    if (isHolding || isLoading) return;
+    if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
+      setError("Speech recognition not supported in your browser");
+      return;
+    }
+    // New hold session clears the live reply overlay
+    setLiveReply(null);
+    setHoldTranscript("");
+    holdFinalRef.current = "";
+    holdTranscriptRef.current = "";
+    try {
+      const recognition = createRecognition({
+        continuous: true,
+        onResult: (event: any) => {
+          // Guarded final-commit (same approach as Live Doubt): Android engines
+          // can resend whole utterances as finals — naive append duplicates text.
+          let interim = "";
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const res = event.results[i];
+            if (res.isFinal) {
+              const t = res[0].transcript.trim();
+              if (!t) continue;
+              const committed = holdFinalRef.current.trim();
+              if (!committed) {
+                holdFinalRef.current = t + " ";
+              } else if (committed.toLowerCase().includes(t.toLowerCase())) {
+                // duplicate final, skip
+              } else if (t.toLowerCase().includes(committed.toLowerCase())) {
+                holdFinalRef.current = t + " ";
+              } else {
+                holdFinalRef.current += t + " ";
+              }
+            } else {
+              interim += res[0].transcript;
+            }
+          }
+          let interimOnly = "";
+          for (let i = 0; i < event.results.length; ++i) {
+            if (!event.results[i].isFinal) interimOnly += event.results[i][0].transcript;
+          }
+          holdTranscriptRef.current = (holdFinalRef.current + " " + interimOnly).trim();
+          setHoldTranscript(holdTranscriptRef.current);
+        },
+        onError: (err) => {
+          if (err === "not-allowed" || err === "service-not-allowed") {
+            setError("Microphone permission denied. Please allow mic access.");
+          }
+          setIsHolding(false);
+        },
+        onEnd: () => {
+          if (holdRecognitionRef.current === recognition) {
+            holdRecognitionRef.current = null;
+          }
+          setIsHolding(false);
+        },
+      });
+      if (!recognition) return;
+      holdRecognitionRef.current = recognition;
+      recognition.start();
+      setIsHolding(true);
+      setError(null);
+    } catch (e) {
+      console.error("Hold recognition start error:", e);
+      setIsHolding(false);
+    }
+  }, [isHolding, isLoading, createRecognition]);
+
+  const endHoldAndSend = useCallback(async () => {
+    if (!isHolding) return;
+    try {
+      holdRecognitionRef.current?.stop();
+    } catch (_) {}
+    holdRecognitionRef.current = null;
+    setIsHolding(false);
+
+    // GRACE PERIOD: recognition ke final onresult buffer ko catch karne ke liye
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const text = holdTranscriptRef.current.trim();
+    holdFinalRef.current = "";
+    holdTranscriptRef.current = "";
+    setHoldTranscript("");
+    if (!text) return;
+    sendMessage(text);
+  }, [isHolding, sendMessage]);
 
   // Replay TTS for a message
-  const replayTTS = useCallback((message: Message) => {
-    if (message.sender === "ai" && message.text) {
-      speakText(message.ttsText || message.text, message.language);
-    }
-  }, [speakText]);
+  const replayTTS = useCallback(
+    (message: Message) => {
+      if (message.sender === "ai" && message.text) {
+        speakText(message.ttsText || message.text, message.language);
+      }
+    },
+    [speakText]
+  );
+
+  // Clear chat (drawer)
+  const clearChat = useCallback(() => {
+    setMessages([]);
+    setLiveReply(null);
+    setPendingUserText(null);
+    try {
+      localStorage.removeItem(`${CHAT_CACHE_PREFIX}${userId}`);
+    } catch (_) {}
+  }, [userId]);
+
+  // Handle send on Enter
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey && inputText.trim()) {
+        e.preventDefault();
+        sendMessage(inputText);
+      }
+    },
+    [inputText, sendMessage]
+  );
 
   // Format time
   const formatTime = (date: Date) => {
@@ -572,11 +798,51 @@ export default function AiMentorChat({
     });
   };
 
+  // ==========================================================================
+  // INFINITY ORB STATE — glows + frequencies when user speaks (teal) and
+  // changes colour when the AI speaks back (fuchsia)
+  // ==========================================================================
+  const orbState: "idle" | "user" | "ai" = isSpeaking
+    ? "ai"
+    : isHolding || isMicActive
+    ? "user"
+    : "idle";
+  const orbActive = orbState !== "idle";
+  const orbText =
+    orbState === "user"
+      ? "text-teal-300"
+      : orbState === "ai"
+      ? "text-fuchsia-300"
+      : "text-indigo-300";
+  const orbGlow =
+    orbState === "user"
+      ? "bg-teal-400/40"
+      : orbState === "ai"
+      ? "bg-fuchsia-500/40"
+      : "bg-indigo-500/25";
+  const orbCaption =
+    orbState === "user"
+      ? "Listening... bolte rahiye"
+      : orbState === "ai"
+      ? "Mentor bol raha hai..."
+      : "Hold to Speak ya neeche type karke puchiye";
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-      <div className="bg-white rounded-3xl max-w-md w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-300 overflow-hidden">
-        {/* Header */}
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 text-white">
+      <style>{`
+        @keyframes mentorEq {
+          0%, 100% { transform: scaleY(0.18); }
+          50% { transform: scaleY(1); }
+        }
+        .mentor-eq-bar {
+          transform-origin: bottom;
+          animation: mentorEq 1.7s ease-in-out infinite;
+        }
+      `}</style>
+      <div className="bg-slate-950 rounded-3xl max-w-md w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-800 overflow-hidden">
+
+        {/* ── Header: title + expand/collapse + close (no language dropdown) ── */}
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 text-white shrink-0">
           <div className="flex items-center gap-3">
             <span className="w-8 h-8 rounded-xl bg-white/20 text-white flex items-center justify-center text-sm shadow-md font-bold">
               👨‍🏫
@@ -590,176 +856,352 @@ export default function AiMentorChat({
               </p>
             </div>
           </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setHudMode((prev) => (prev === "expanded" ? "compact" : "expanded"))}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/20 transition-all"
+              title={hudMode === "expanded" ? "Collapse chat" : "Expand chat"}
+            >
+              {hudMode === "expanded" ? <CollapseIcon /> : <ExpandIcon />}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/20 transition-all"
+              title="Close"
+            >
+              <CloseIcon className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* ── HOLD TO SPEAK (top button) ── */}
+        <div className="p-4 pb-2 shrink-0">
           <button
             type="button"
-            onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/20 text-sm font-bold transition-all"
+            onMouseDown={startHoldRecognition}
+            onMouseUp={endHoldAndSend}
+            onMouseLeave={endHoldAndSend}
+            onTouchStart={(e) => {
+              e.preventDefault();
+              startHoldRecognition();
+            }}
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              endHoldAndSend();
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            style={{ touchAction: "none" }}
+            disabled={isLoading}
+            className={`w-full py-4 px-4 rounded-2xl text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg transition-all select-none ${
+              isHolding
+                ? "bg-rose-600 ring-4 ring-rose-500/30 animate-pulse"
+                : isLoading
+                ? "bg-slate-700 cursor-not-allowed"
+                : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700"
+            }`}
           >
-            ✕
+            <MicActiveIcon className="w-5 h-5" />
+            <span className="tracking-wider uppercase">
+              {isHolding
+                ? "Listening... chhodne pe bhejega"
+                : isLoading
+                ? "Mentor Soch Raha Hai..."
+                : "Hold To Speak"}
+            </span>
           </button>
+          <p className="text-[10px] text-slate-500 text-center mt-1">
+            Speak your doubt, release to get instant answer
+          </p>
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
-          {messages.length === 0 ? (
-            <div className="text-center py-8">
-              <div className="w-16 h-16 rounded-full bg-indigo-100 flex items-center justify-center mx-auto mb-3">
-                <span className="text-3xl">💬</span>
+        {/* ── Infinity Orb (default screen) + Live overlay ── */}
+        <div className="flex-1 relative flex flex-col items-center justify-center gap-3 min-h-[150px] px-4">
+
+          {/* Overlay: Listening (while holding) — live transcript */}
+          {isHolding && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
+              <div className="w-full max-w-sm bg-slate-900/95 border border-teal-500/50 backdrop-blur-md rounded-3xl shadow-2xl p-4 animate-in fade-in zoom-in duration-200">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-ping" />
+                  <span className="text-[11px] font-black text-teal-300 uppercase tracking-wider">
+                    Listening...
+                  </span>
+                </div>
+                <p className="text-sm font-medium text-teal-100 italic min-h-[1.5rem]">
+                  {holdTranscript || "Boliye... speak your doubt"}
+                </p>
               </div>
-              <p className="text-slate-500 text-sm font-medium">
-                Start a conversation with your AI Mentor
-              </p>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Type or use voice input below
-              </p>
             </div>
-          ) : (
-            messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"} gap-2`}
-              >
-                {msg.sender === "ai" && (
-                  <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm shrink-0">
-                    👨‍🏫
-                  </div>
-                )}
-                <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                    msg.sender === "user"
-                      ? "bg-indigo-600 text-white rounded-br-sm"
-                      : "bg-white border border-slate-200 rounded-bl-sm"
-                  }`}
-                >
-                  <p className="text-sm font-medium whitespace-pre-wrap">{msg.text}</p>
-                  <div className="flex items-center justify-between mt-1.5">
-                    <span className="text-[10px] text-slate-500">{formatTime(msg.timestamp)}</span>
-                    {msg.sender === "ai" && (
+          )}
+
+          {/* Overlay: Thinking (AI is generating the reply) */}
+          {!isHolding && isLoading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-[2px]">
+              <div className="w-full max-w-sm bg-slate-900/95 border border-indigo-500/40 rounded-3xl shadow-2xl p-4 flex items-center gap-3 animate-in fade-in zoom-in duration-200">
+                <span className="w-9 h-9 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-white">AI Mentor soch raha hai...</p>
+                  {pendingUserText && (
+                    <p className="text-[11px] text-slate-400 italic mt-0.5 truncate">
+                      &quot;{pendingUserText}&quot;
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Overlay: Live AI reply output */}
+          {!isHolding && !isLoading && liveReply && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
+              <div className="w-full max-w-sm bg-slate-900/95 border border-violet-500/40 backdrop-blur-md rounded-3xl shadow-2xl p-4 animate-in fade-in zoom-in duration-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-base">👨‍🏫</span>
+                  <span className="text-[11px] font-black text-violet-300 uppercase tracking-wider">
+                    AI Mentor
+                  </span>
+                  <div className="ml-auto flex items-center gap-1">
+                    {isSpeaking && (
                       <button
-                        onClick={() => replayTTS(msg)}
-                        className="text-[12px] text-indigo-600 hover:text-indigo-800 transition-colors"
-                        title="Replay"
+                        type="button"
+                        onClick={stopSpeaking}
+                        className="p-1.5 rounded-full bg-rose-500/20 text-rose-300 hover:bg-rose-500/40 transition-colors"
+                        title="Stop voice"
                       >
-                        🔁
+                        <StopSquareIcon />
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        speakText(liveReply.ttsText || liveReply.text, liveReply.language)
+                      }
+                      className="p-1.5 rounded-full bg-teal-500/20 text-teal-300 hover:bg-teal-500/40 transition-colors"
+                      title="Listen again"
+                    >
+                      <PlayTriangleIcon />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLiveReply(null)}
+                      className="p-1.5 rounded-full bg-slate-700/60 text-slate-300 hover:bg-slate-600 transition-colors"
+                      title="Close"
+                    >
+                      <CloseIcon className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
-                {msg.sender === "user" && (
-                  <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-600 flex items-center justify-center text-sm shrink-0">
-                    👤
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-          {isLoading && (
-            <div className="flex justify-start gap-2">
-              <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm shrink-0">
-                👨‍🏫
-              </div>
-              <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-sm px-4 py-2.5">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 rounded-full bg-slate-300 animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <div className="w-2 h-2 rounded-full bg-slate-300 animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <div className="w-2 h-2 rounded-full bg-slate-300 animate-bounce" style={{ animationDelay: "300ms" }} />
-                </div>
+                <p className="text-sm text-slate-100 whitespace-pre-wrap leading-relaxed">
+                  {liveReply.text}
+                </p>
               </div>
             </div>
           )}
-          <div ref={messagesEndRef} />
+
+          {/* Infinity symbol — glows + frequencies on user speech (teal),
+              colour change + frequencies when AI speaks (fuchsia) */}
+          <div
+            className={`relative flex items-center justify-center transition-transform duration-500 ${
+              orbActive ? "scale-110" : "scale-100"
+            }`}
+          >
+            <div
+              className={`absolute w-36 h-36 rounded-full blur-3xl ${orbGlow} ${
+                orbActive ? "animate-pulse" : "opacity-70"
+              }`}
+            />
+            <span
+              className={`relative text-8xl font-black ${orbText} drop-shadow-2xl select-none leading-none`}
+            >
+              ∞
+            </span>
+          </div>
+
+          {/* Frequency (equalizer) bars */}
+          <div
+            className={`flex items-end justify-center gap-[3px] h-8 ${orbText}`}
+            aria-hidden="true"
+          >
+            {Array.from({ length: EQ_BAR_COUNT }, (_, i) => (
+              <span
+                key={i}
+                className="mentor-eq-bar w-[3px] h-full rounded-full bg-current"
+                style={{
+                  animationDelay: `${-(i * 0.09).toFixed(2)}s`,
+                  animationDuration: orbActive ? "0.5s" : "1.7s",
+                  opacity: orbActive ? 0.95 : 0.35,
+                }}
+              />
+            ))}
+          </div>
+
+          <p className="text-[11px] text-slate-500 font-medium">{orbCaption}</p>
         </div>
 
-        {/* Error */}
+        {/* ── HUD Drawer: message popup (Live Doubt style, expand/collapse) ── */}
+        <div
+          className={`shrink-0 bg-slate-900 border-t border-slate-800 transition-all duration-300 flex flex-col overflow-hidden ${
+            hudMode === "expanded" ? "h-[42vh]" : "h-14"
+          }`}
+        >
+          <div
+            onClick={() => setHudMode((prev) => (prev === "expanded" ? "compact" : "expanded"))}
+            className="w-full py-2 px-4 flex items-center justify-between cursor-pointer border-b border-slate-800/60 hover:bg-slate-800/40 shrink-0"
+          >
+            <div className="flex items-center gap-2">
+              <ChatBubbleIcon className="w-4 h-4 text-teal-400" />
+              <span className="text-xs font-bold text-slate-200">Mentor Chat</span>
+              {messages.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 font-semibold">
+                  {messages.length}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {messages.length > 0 && hudMode === "expanded" && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearChat();
+                  }}
+                  className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-400 transition-colors"
+                  title="Clear chat"
+                >
+                  <TrashIcon />
+                  <span>Clear</span>
+                </button>
+              )}
+              <span className="text-slate-400">
+                {hudMode === "expanded" ? <ChevronDownIcon /> : <ChevronUpIcon />}
+              </span>
+            </div>
+          </div>
+
+          {hudMode === "expanded" ? (
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {messages.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
+                  <ChatBubbleIcon className="w-8 h-8 mb-2 opacity-40 text-teal-400" />
+                  <p className="text-xs">Abhi koi message nahi hai.</p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Hold to Speak dabakar ya type karke puchiye.
+                  </p>
+                </div>
+              ) : (
+                messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`p-3 rounded-2xl text-xs ${
+                      m.sender === "user"
+                        ? "bg-teal-950/70 border border-teal-500/30 text-teal-100 ml-4"
+                        : "bg-slate-800/90 border border-slate-700/60 text-slate-100"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="font-bold text-[11px] text-teal-400">
+                        {m.sender === "user" ? "You" : "AI Mentor"}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {formatTime(m.timestamp)}
+                      </span>
+                    </div>
+                    <div className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-slate-200">
+                      {m.text}
+                    </div>
+                    {m.sender === "ai" && (
+                      <div className="mt-2 pt-2 border-t border-slate-700/50 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => replayTTS(m)}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-teal-500/20 text-teal-300 border border-teal-500/40 hover:bg-teal-500/30 transition-colors"
+                        >
+                          <PlayTriangleIcon />
+                          <span>Listen Again</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+              <div ref={drawerBottomRef} />
+            </div>
+          ) : (
+            <div className="flex-1 px-4 flex items-center overflow-hidden">
+              {messages.length > 0 ? (
+                <span className="truncate text-[11px] text-slate-300">
+                  <span className="text-teal-400 font-bold mr-1">Latest:</span>
+                  {messages[messages.length - 1].text.slice(0, 90)}
+                </span>
+              ) : (
+                <span className="text-[11px] text-slate-500 italic">
+                  Hold to Speak dabakar ya type karke puchiye...
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── Error ── */}
         {error && (
-          <div className="px-4 pb-2">
-            <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-[11px] font-medium text-center">
+          <div className="px-4 pb-2 shrink-0">
+            <div className="p-2.5 bg-rose-950/60 border border-rose-800 rounded-xl text-rose-300 text-[11px] font-medium text-center">
               {error}
             </div>
           </div>
         )}
 
-        {/* Input Area */}
-        <div className="p-4 border-t border-slate-200 bg-white">
-          {/* Hold to Speak Button (Big, Live Doubt style) */}
-          <div className="mb-3">
+        {/* ── Input row: mic fills text, chat button sends ── */}
+        <div className="p-4 border-t border-slate-800 bg-slate-900 shrink-0">
+          <div className="flex gap-2 items-center">
             <button
               type="button"
-              onMouseDown={startHoldToSpeak}
-              onMouseUp={stopHoldToSpeak}
-              onMouseLeave={stopHoldToSpeak}
-              onTouchStart={startHoldToSpeak}
-              onTouchEnd={stopHoldToSpeak}
-              className={`w-full py-4 px-4 rounded-2xl text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg transition-all ${
-                isRecording
-                  ? "bg-rose-600 ring-4 ring-rose-200 animate-pulse"
-                  : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700"
-              }`}
-            >
-              <span className="text-lg">🎢</span>
-              <span>{isRecording ? "Recording... Release to Send" : "HOLD TO SPEAK"}</span>
-              <span className="text-lg">🎢</span>
-            </button>
-            <p className="text-[10px] text-slate-500 text-center mt-1">
-              Speak your doubt, release to get instant answer
-            </p>
-          </div>
-
-          {/* Chat Input + Mic */}
-          <div className="flex gap-2 items-end">
-            <button
-              type="button"
-              onClick={startSpeechToText}
-              className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md transition-all shrink-0 ${
-                isRecording
+              onClick={toggleMic}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md transition-all shrink-0 ${
+                isMicActive
                   ? "bg-rose-500 hover:bg-rose-600"
                   : "bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700"
               }`}
-              title={isRecording ? "Stop listening" : "Speech to Text"}
+              title={isMicActive ? "Stop listening" : "Speech to Text (fills chat box)"}
             >
-              🎤
+              {isMicActive ? (
+                <MicMutedIcon className="w-5 h-5" />
+              ) : (
+                <MicActiveIcon className="w-5 h-5" />
+              )}
             </button>
             <div className="flex-1 relative">
               <textarea
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isSpeaking ? "Listening..." : "Type your message or use voice input..."}
+                placeholder={isSpeaking ? "Mentor bol raha hai..." : "Type your message..."}
                 rows={1}
-                className="w-full p-3 pr-10 border border-slate-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all bg-white"
-                disabled={isLoading || isSpeaking}
+                className="w-full p-3 pr-10 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                disabled={isLoading}
               />
-              {inputText && !isLoading && !isSpeaking && (
-                <button
-                  onClick={() => sendMessage(inputText)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 transition-colors"
-                >
-                  🛒
-                </button>
-              )}
               {isSpeaking && (
                 <button
+                  type="button"
                   onClick={stopSpeaking}
                   className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-rose-600 text-white flex items-center justify-center hover:bg-rose-700 transition-colors"
+                  title="Stop speaking"
                 >
-                  🔽
+                  <StopSquareIcon className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
-          </div>
-
-          {/* Language Selector */}
-          <div className="flex justify-end mt-2">
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="text-[11px] px-2 py-1.5 bg-slate-100 border border-slate-200 rounded-lg font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            <button
+              type="button"
+              onClick={() => sendMessage(inputText)}
+              disabled={!inputText.trim() || isLoading}
+              className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0 hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Send chat"
             >
-              <option value="auto">Auto Detect</option>
-              <option value="en">English</option>
-              <option value="hi">Hindi</option>
-              <option value="hi-IN">Hinglish</option>
-            </select>
+              <SendIcon className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </div>
