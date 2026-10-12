@@ -285,20 +285,43 @@ async function callGeminiChat(
   key: string
 ) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${key}`;
-  
+
+  // Gemini generateContent only accepts roles "user" and "model" inside
+  // `contents`. Sending role "system" there is rejected with HTTP 400
+  // ("Role 'system' is not supported"), so system prompts must be moved to
+  // the top-level `systemInstruction` field instead.
+  const systemTexts: string[] = [];
+  const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+  for (const msg of messages) {
+    if (msg.role === "system") {
+      systemTexts.push(msg.content);
+      continue;
+    }
+    const role = msg.role === "assistant" || msg.role === "model" ? "model" : "user";
+    contents.push({ role, parts: [{ text: msg.content }] });
+  }
+  if (contents.length === 0) {
+    contents.push({ role: "user", parts: [{ text: systemTexts.join("\n\n") || "Hello" }] });
+  }
+  const requestBody: {
+    contents: typeof contents;
+    generationConfig: { responseMimeType: string; temperature: number };
+    systemInstruction?: { parts: Array<{ text: string }> };
+  } = {
+    contents,
+    generationConfig: {
+      responseMimeType: "application/json",
+      temperature: 0.7,
+    },
+  };
+  if (systemTexts.length > 0) {
+    requestBody.systemInstruction = { parts: [{ text: systemTexts.join("\n\n") }] };
+  }
+
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: messages.map((msg) => ({
-        role: msg.role,
-        parts: [{ text: msg.content }],
-      })),
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.7,
-      },
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!res.ok) {
