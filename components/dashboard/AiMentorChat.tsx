@@ -291,15 +291,15 @@ export default function AiMentorChat({
   const speechSessionRef = useRef(0);
   const speakTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Web Audio: unlocks autoplay on the first user gesture and powers the
-  // orb frequency bars with REAL voice data (mic while listening, TTS while
-  // the AI speaks) — no more artificial rhythm.
+  // orb frequency bars with REAL voice data on the AI side (TTS analyser).
+  // User-side bars are driven by SpeechRecognition activity instead of a mic
+  // analyser — a live getUserMedia stream fights SpeechRecognition for the
+  // microphone on Chrome Android and silently breaks voice input.
   const audioCtxRef = useRef<any>(null);
   const aiGraphRef = useRef<{ source: any; analyser: AnalyserNode } | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const micAnalyserRef = useRef<AnalyserNode | null>(null);
-  const micGraphRef = useRef<{ src: any; analyser: AnalyserNode; mute: any } | null>(null);
   const eqBarRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const orbStateRef = useRef<"idle" | "user" | "ai">("idle");
+  const voiceLevelRef = useRef(0);
 
   // Load cached chat history
   useEffect(() => {
@@ -362,65 +362,6 @@ export default function AiMentorChat({
     }
   }, []);
 
-  // Mic analyser: live frequency data of the user voice while listening.
-  // Routed to the destination through a zero-gain node — output stays muted
-  // (no feedback/echo) but the graph is pulled so the analyser gets data.
-  const startMicAnalyser = useCallback(() => {
-    if (micAnalyserRef.current) return;
-    const ctx = ensureAudioCtx();
-    if (!ctx || !navigator.mediaDevices?.getUserMedia) return;
-    try {
-      navigator.mediaDevices
-        .getUserMedia({ audio: true })
-        .then((stream) => {
-          const c = audioCtxRef.current;
-          if (!c) {
-            stream.getTracks().forEach((t) => t.stop());
-            return;
-          }
-          micStreamRef.current = stream;
-          const src = c.createMediaStreamSource(stream);
-          const analyser = c.createAnalyser();
-          analyser.fftSize = 64;
-          analyser.smoothingTimeConstant = 0.6;
-          // Route through a ZERO-gain node into the destination. Web Audio only
-          // renders nodes reachable from the destination, so without this the
-          // analyser starves and the bars never move; gain = 0 keeps the mic
-          // silent (no feedback/echo) while still feeding real spectrum data.
-          const mute = c.createGain();
-          mute.gain.value = 0;
-          src.connect(analyser);
-          analyser.connect(mute);
-          mute.connect(c.destination);
-          micGraphRef.current = { src, analyser, mute };
-          micAnalyserRef.current = analyser;
-        })
-        .catch(() => {});
-    } catch (_) {}
-  }, [ensureAudioCtx]);
-
-  const stopMicAnalyser = useCallback(() => {
-    micAnalyserRef.current = null;
-    try {
-      if (micGraphRef.current) {
-        try { micGraphRef.current.src.disconnect(); } catch (_) {}
-        try { micGraphRef.current.analyser.disconnect(); } catch (_) {}
-        try { micGraphRef.current.mute.disconnect(); } catch (_) {}
-        micGraphRef.current = null;
-      }
-    } catch (_) {}
-    try {
-      micStreamRef.current?.getTracks().forEach((t) => t.stop());
-    } catch (_) {}
-    micStreamRef.current = null;
-  }, []);
-
-  // Mic analyser follows the listening state (mic button OR hold-to-speak)
-  useEffect(() => {
-    if (isMicActive || isHolding) startMicAnalyser();
-    else stopMicAnalyser();
-  }, [isMicActive, isHolding, startMicAnalyser, stopMicAnalyser]);
-
   // Cleanup audio + recognitions on unmount
   useEffect(() => {
     return () => {
@@ -454,7 +395,6 @@ export default function AiMentorChat({
           aiGraphRef.current = null;
         }
       } catch (_) {}
-      stopMicAnalyser();
       try {
         audioCtxRef.current?.close();
       } catch (_) {}
@@ -493,6 +433,14 @@ export default function AiMentorChat({
       recognition.onresult = opts.onResult;
       recognition.onerror = (e: any) => opts.onError(e?.error);
       recognition.onend = opts.onEnd;
+      // Voice activity markers — drive the user-side frequency bars without a
+      // mic analyser (which would fight SpeechRecognition for the microphone).
+      recognition.onaudiostart = () => {
+        voiceLevelRef.current = 1;
+      };
+      recognition.onspeechstart = () => {
+        voiceLevelRef.current = 1;
+      };
       return recognition;
     },
     []
@@ -835,15 +783,17 @@ export default function AiMentorChat({
 
   const startMicRecognition = useCallback(() => {
     if (isMicActive) return;
-    ensureAudioCtx(); // gesture unlock + mic analyser context
+    ensureAudioCtx(); // gesture unlock (TTS autoplay)
+    stopSpeaking(); // barge-in: user starts talking -> stop any AI voice
     if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
       setError("Speech recognition not supported in your browser");
       return;
     }
     try {
       const recognition = createRecognition({
-        continuous: false,
+        continuous: true, // keep listening until the user toggles the mic off
         onResult: (event: any) => {
+          voiceLevelRef.current = 1; // user is speaking — drive the bars
           let transcript = "";
           for (let i = 0; i < event.results.length; i++) {
             transcript += event.results[i][0].transcript;
@@ -856,7 +806,11 @@ export default function AiMentorChat({
         onError: (err) => {
           if (err === "not-allowed" || err === "service-not-allowed") {
             setError("Microphone permission denied. Please allow mic access.");
-          } else if (err !== "no-speech" && err !== "aborted" && err !== "network") {
+          } else if (err === "audio-capture") {
+            setError("Microphone not available. Close other apps using the mic.");
+          } else if (err === "network") {
+            setError("Speech service network error. Check your connection.");
+          } else if (err !== "no-speech" && err !== "aborted") {
             setError("Speech recognition error. Please try again.");
           }
           setIsMicActive(false);
@@ -878,7 +832,7 @@ export default function AiMentorChat({
       console.error("Mic recognition start error:", e);
       setIsMicActive(false);
     }
-  }, [isMicActive, inputText, createRecognition, ensureAudioCtx]);
+  }, [isMicActive, inputText, createRecognition, ensureAudioCtx, stopSpeaking]);
 
   const toggleMic = useCallback(() => {
     if (isMicActive) {
@@ -894,7 +848,8 @@ export default function AiMentorChat({
   // ==========================================================================
   const startHoldRecognition = useCallback(() => {
     if (isHolding || isLoading) return;
-    ensureAudioCtx(); // gesture unlock + mic analyser context
+    ensureAudioCtx(); // gesture unlock (TTS autoplay)
+    stopSpeaking(); // barge-in: user holds to speak -> stop any AI voice
     if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
       setError("Speech recognition not supported in your browser");
       return;
@@ -908,6 +863,7 @@ export default function AiMentorChat({
       const recognition = createRecognition({
         continuous: true,
         onResult: (event: any) => {
+          voiceLevelRef.current = 1; // user is speaking — drive the bars
           // Guarded final-commit (same approach as Live Doubt): Android engines
           // can resend whole utterances as finals — naive append duplicates text.
           let interim = "";
@@ -940,6 +896,14 @@ export default function AiMentorChat({
         onError: (err) => {
           if (err === "not-allowed" || err === "service-not-allowed") {
             setError("Microphone permission denied. Please allow mic access.");
+          } else if (err === "no-speech") {
+            setError("No speech detected. Hold and speak again.");
+          } else if (err === "network") {
+            setError("Speech service network error. Check your connection.");
+          } else if (err === "audio-capture") {
+            setError("Microphone not available. Close other apps using the mic.");
+          } else if (err !== "aborted") {
+            setError("Speech recognition error. Please try again.");
           }
           setIsHolding(false);
         },
@@ -959,7 +923,7 @@ export default function AiMentorChat({
       console.error("Hold recognition start error:", e);
       setIsHolding(false);
     }
-  }, [isHolding, isLoading, createRecognition, ensureAudioCtx]);
+  }, [isHolding, isLoading, createRecognition, ensureAudioCtx, stopSpeaking]);
 
   const endHoldAndSend = useCallback(async () => {
     if (!isHolding) return;
@@ -976,7 +940,10 @@ export default function AiMentorChat({
     holdFinalRef.current = "";
     holdTranscriptRef.current = "";
     setHoldTranscript("");
-    if (!text) return;
+    if (!text) {
+      setError("Didn't catch that — hold and speak again.");
+      return;
+    }
     sendMessage(text);
   }, [isHolding, sendMessage]);
 
@@ -1054,10 +1021,10 @@ export default function AiMentorChat({
     orbStateRef.current = orbState;
   }, [orbState]);
 
-  // Drive the frequency bars from the REAL voice: mic analyser while the
-  // user speaks, TTS analyser while the AI speaks. Natural rhythm instead of
-  // a fixed CSS animation; falls back to the CSS animation when no analyser
-  // is live (e.g. the native speechSynthesis fallback voice).
+  // Drive the frequency bars from the REAL voice on BOTH sides: TTS analyser
+  // while the AI speaks, SpeechRecognition activity while the user speaks (a
+  // mic analyser would fight SpeechRecognition and break voice input). Falls
+  // back to the CSS animation when no data source is live.
   useEffect(() => {
     if (orbState === "idle") return;
     const bars = eqBarRefs.current;
@@ -1065,10 +1032,8 @@ export default function AiMentorChat({
     const levels = new Array(EQ_BAR_COUNT).fill(0.12);
     let raf = 0;
     const loop = () => {
-      const analyser =
-        orbStateRef.current === "ai"
-          ? aiGraphRef.current?.analyser
-          : micAnalyserRef.current;
+      const state = orbStateRef.current;
+      const analyser = state === "ai" ? aiGraphRef.current?.analyser : null;
       if (analyser) {
         try {
           analyser.getByteFrequencyData(freq);
@@ -1077,11 +1042,29 @@ export default function AiMentorChat({
           // Voice energy lives in the lower bins — bias the mapping downwards
           const bin = Math.min(31, Math.floor(Math.pow(i / (EQ_BAR_COUNT - 1), 1.5) * 24));
           // Boost the raw spectrum: voice byte-values are naturally low, which
-          // made the bars look almost dead. 2.6x gain + a higher floor keeps
+          // made the bars look almost dead. 3.2x gain + a higher floor keeps
           // them lively, clamped to full height.
-          const target = Math.min(1, Math.max(0.18, ((freq[bin] || 0) / 255) * 2.6));
+          const target = Math.min(1, Math.max(0.22, ((freq[bin] || 0) / 255) * 3.2));
           // Fast attack, slow release — reads like a real equalizer.
           levels[i] += (target - levels[i]) * (target > levels[i] ? 0.6 : 0.28);
+          const bar = bars[i];
+          if (bar) {
+            bar.style.animation = "none";
+            bar.style.transform = `scaleY(${(0.15 + levels[i] * 0.85).toFixed(3)})`;
+            bar.style.opacity = "0.95";
+          }
+        }
+      } else if (state === "user") {
+        // User side: no mic analyser (it would fight SpeechRecognition and
+        // break voice input) — drive the bars from the SpeechRecognition
+        // activity level with a lively travelling wave.
+        voiceLevelRef.current *= 0.96;
+        const lvl = voiceLevelRef.current;
+        const t = performance.now() / 1000;
+        for (let i = 0; i < EQ_BAR_COUNT; i++) {
+          const wave = 0.5 + 0.5 * Math.sin(t * 6 + i * 0.8);
+          const target = 0.15 + lvl * (0.4 + 0.45 * wave);
+          levels[i] += (target - levels[i]) * 0.5;
           const bar = bars[i];
           if (bar) {
             bar.style.animation = "none";
@@ -1106,23 +1089,23 @@ export default function AiMentorChat({
   }, [orbState]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
       <style>{`
         @keyframes mentorEq {
-          0%, 100% { transform: scaleY(0.18); }
+          0%, 100% { transform: scaleY(0.3); }
           50% { transform: scaleY(1); }
         }
         .mentor-eq-bar {
           transform-origin: bottom;
-          animation: mentorEq 1.7s ease-in-out infinite;
+          animation: mentorEq 1.2s ease-in-out infinite;
         }
         @keyframes mentorDot {
-          0%, 100% { transform: scaleY(0.45); opacity: 0.45; }
-          50% { transform: scaleY(1.6); opacity: 0.95; }
+          0%, 100% { transform: scaleY(0.3); opacity: 0.35; }
+          50% { transform: scaleY(2.4); opacity: 1; }
         }
         .mentor-dot {
           transform-origin: bottom;
-          animation: mentorDot 1.4s ease-in-out infinite;
+          animation: mentorDot 1.1s ease-in-out infinite;
         }
       `}</style>
       <div className="bg-slate-950 rounded-3xl max-w-md w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-800 overflow-hidden">
@@ -1310,8 +1293,8 @@ export default function AiMentorChat({
 
         {/* Live voice visualizer — its own dedicated strip BELOW the orb stage,
             so the listening/thinking/reply bubble above can never cover it.
-            Always visible: idle = breathing dots, you speak = teal bars from
-            the mic analyser, AI speaks = fuchsia bars from the TTS analyser. */}
+            Always visible: idle = breathing dots, you speak = teal bars synced
+            to your voice, AI speaks = fuchsia bars synced to the AI voice. */}
         <div className="shrink-0 px-4 pb-2">
           <div
             className={`relative z-20 mx-auto w-fit pointer-events-none flex items-end justify-center gap-[3px] h-12 px-5 rounded-full bg-slate-900/80 border border-slate-700/60 shadow-inner ${orbText}`}
@@ -1337,7 +1320,7 @@ export default function AiMentorChat({
                       }
                     : {
                         animationDelay: `${-(i * 0.07).toFixed(2)}s`,
-                        animationDuration: "1.4s",
+                        animationDuration: "1.1s",
                       }
                 }
               />
