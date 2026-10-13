@@ -230,6 +230,34 @@ Return ONLY a JSON object with: {"reply": "your response", "tts_text": "EXACT sa
   `.trim();
 }
 
+// Transient HTTP statuses worth one retry (demand spikes / momentary overload)
+function isTransientStatus(status?: number): boolean {
+  return (
+    status === 429 || status === 500 || status === 502 || status === 503 || status === 504
+  );
+}
+
+function httpError(prefix: string, status: number, body: string) {
+  const err: any = new Error(`${prefix} HTTP ${status}: ${body.slice(0, 200)}`);
+  err.status = status;
+  return err;
+}
+
+// Call an AI provider with ONE retry on transient failures (e.g. Gemini 503 spikes)
+async function callWithRetry<T>(fn: () => Promise<T>, delayMs = 800): Promise<T> {
+  try {
+    return await fn();
+  } catch (err: any) {
+    const transient =
+      isTransientStatus(err?.status) ||
+      err?.name === "TypeError" || // network failure
+      /timed? ?out|aborted/i.test(String(err?.message || ""));
+    if (!transient) throw err;
+    await new Promise((r) => setTimeout(r, delayMs));
+    return fn();
+  }
+}
+
 // Call Groq with chat completion
 async function callGroqChat(
   messages: Array<{ role: string; content: string }>,
@@ -270,7 +298,7 @@ async function callGroqChat(
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Groq chat HTTP ${res.status}: ${errText.slice(0, 200)}`);
+    throw httpError("Groq chat", res.status, errText);
   }
 
   const data = await res.json();
@@ -322,11 +350,12 @@ async function callGeminiChat(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini chat HTTP ${res.status}: ${errText.slice(0, 200)}`);
+    throw httpError("Gemini chat", res.status, errText);
   }
 
   const json = await res.json();
@@ -336,6 +365,8 @@ async function callGeminiChat(
 }
 
 export async function POST(req: NextRequest) {
+  let language = "en";
+  let tone = "bro";
   try {
     const { userId, message, studentContext, sessionId } = await req.json();
 
@@ -347,8 +378,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Detect or use provided language
-    const language = studentContext?.language || detectLanguage(message);
-    const tone = getGenZTone(studentContext?.gender);
+    language = studentContext?.language || detectLanguage(message);
+    tone = getGenZTone(studentContext?.gender);
 
     // Build conversation history (for now, just current message)
     // In production, you'd store and retrieve previous messages by sessionId
@@ -370,7 +401,7 @@ export async function POST(req: NextRequest) {
           { role: "system", content: prompt },
           { role: "user", content: message },
         ];
-        rawJson = await callGroqChat(messages, language, tone);
+        rawJson = await callWithRetry(() => callGroqChat(messages, language, tone));
       } else {
         throw new Error("No Groq key");
       }
@@ -390,7 +421,7 @@ export async function POST(req: NextRequest) {
       let lastError: any = null;
       for (const key of geminiKeys) {
         try {
-          rawJson = await callGeminiChat(messages, key);
+          rawJson = await callWithRetry(() => callGeminiChat(messages, key));
           break;
         } catch (err: any) {
           lastError = err;
@@ -431,14 +462,21 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     console.error("AI Mentor Chat Error:", error);
+    // Graceful degradation: return 200 with a polite apology so the chat UI
+    // shows (and speaks) a friendly message instead of a hard error toast.
+    const hindiLike = language === "hi" || language === "hi-IN" || language === "mr";
+    const apology = hindiLike
+      ? "Sorry yaar, abhi thodi dikkat aa gayi. Thodi der baad phir se try kar."
+      : "Sorry, I'm having trouble responding. Please try again.";
     return NextResponse.json(
       {
         error: error?.message || "Failed to get chat response",
-        reply: "Sorry, I'm having trouble responding. Please try again.",
-        tts_text: "Sorry, I'm having trouble responding. Please try again.",
-        language: "en",
+        reply: apology,
+        tts_text: apology,
+        language,
+        tone,
       },
-      { status: error?.status || 500 }
+      { status: 200 }
     );
   }
 }

@@ -381,6 +381,8 @@ export default function AiMentorChat({
           const analyser = c.createAnalyser();
           analyser.fftSize = 64;
           analyser.smoothingTimeConstant = 0.7;
+          analyser.minDecibels = -85;
+          analyser.maxDecibels = -25;
           src.connect(analyser);
           micAnalyserRef.current = analyser;
         })
@@ -583,6 +585,8 @@ export default function AiMentorChat({
                       const analyser = ctx.createAnalyser();
                       analyser.fftSize = 64;
                       analyser.smoothingTimeConstant = 0.78;
+                      analyser.minDecibels = -85;
+                      analyser.maxDecibels = -25;
                       source.connect(analyser);
                       analyser.connect(ctx.destination);
                       aiGraphRef.current = { source, analyser };
@@ -1036,35 +1040,53 @@ export default function AiMentorChat({
   }, [orbState]);
 
   // Drive the frequency bars from the REAL voice: mic analyser while the
-  // user speaks, TTS analyser while the AI speaks. Natural rhythm instead of
-  // a fixed CSS animation; falls back to the CSS animation when no analyser
-  // is live (e.g. the native speechSynthesis fallback voice).
+  // user speaks, TTS analyser while the AI speaks. Falls back to a gentle
+  // synthetic wave when no analyser is live (e.g. native fallback voice) so
+  // the bars always move during an active session.
   useEffect(() => {
     if (orbState === "idle") return;
+    // Best-effort: make sure the audio context is running for live data
+    if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume().catch(() => {});
+    }
     const bars = eqBarRefs.current;
     const freq = new Uint8Array(32);
-    const levels = new Array(EQ_BAR_COUNT).fill(0.12);
+    const levels = new Array(EQ_BAR_COUNT).fill(0.2);
     let raf = 0;
     const loop = () => {
       const analyser =
         orbStateRef.current === "ai"
           ? aiGraphRef.current?.analyser
           : micAnalyserRef.current;
-      if (analyser) {
+      const ctxRunning =
+        !!audioCtxRef.current && audioCtxRef.current.state === "running";
+      if (analyser && ctxRunning) {
         try {
           analyser.getByteFrequencyData(freq);
         } catch (_) {}
-        for (let i = 0; i < EQ_BAR_COUNT; i++) {
-          // Voice energy lives in the lower bins — bias the mapping downwards
-          const bin = Math.min(31, Math.floor(Math.pow(i / (EQ_BAR_COUNT - 1), 1.5) * 24));
-          const target = Math.max(0.1, (freq[bin] || 0) / 255);
-          levels[i] += (target - levels[i]) * 0.45;
-          const bar = bars[i];
-          if (bar) {
-            bar.style.animation = "none";
-            bar.style.transform = `scaleY(${(0.12 + levels[i] * 0.88).toFixed(3)})`;
-            bar.style.opacity = "0.95";
-          }
+      }
+      const useAnalyser = !!(analyser && ctxRunning);
+      const t = performance.now() / 1000;
+      for (let i = 0; i < EQ_BAR_COUNT; i++) {
+        // Voice energy lives in the lower bins — bias the mapping downwards
+        const bin = Math.min(
+          31,
+          Math.floor(Math.pow(i / (EQ_BAR_COUNT - 1), 1.8) * 16)
+        );
+        let target: number;
+        if (useAnalyser) {
+          // Real voice spectrum; keep a visible floor so silence during an
+          // active session still shows living bars
+          target = Math.max(0.22, (freq[bin] || 0) / 255);
+        } else {
+          target = 0.35 + 0.3 * Math.sin(t * 5.5 + i * 0.55);
+        }
+        levels[i] += (target - levels[i]) * 0.45;
+        const bar = bars[i];
+        if (bar) {
+          bar.style.animation = "none";
+          bar.style.transform = `scaleY(${(0.15 + levels[i] * 0.85).toFixed(3)})`;
+          bar.style.opacity = "0.95";
         }
       }
       raf = requestAnimationFrame(loop);
@@ -1094,7 +1116,7 @@ export default function AiMentorChat({
           animation: mentorEq 1.7s ease-in-out infinite;
         }
       `}</style>
-      <div className="bg-slate-950 rounded-3xl max-w-md w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-800 overflow-hidden">
+      <div className="bg-slate-950 rounded-3xl max-w-md w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-800 overflow-y-auto">
 
         {/* ── Header: title + expand/collapse + close (no language dropdown) ── */}
         <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 text-white shrink-0">
@@ -1171,131 +1193,151 @@ export default function AiMentorChat({
           </p>
         </div>
 
-        {/* ── Infinity Orb (default screen) + Live overlay ── */}
-        <div className="flex-1 relative flex flex-col items-center justify-center gap-3 min-h-[150px] px-4">
+        {/* ── Infinity Orb (default screen) + status card + live frequency bars ── */}
+        <div className="flex-1 relative flex flex-col items-center justify-center gap-3 min-h-[210px] px-4">
 
-          {/* Overlay: Listening (while holding) — live transcript */}
-          {isHolding && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
-              <div className="w-full max-w-sm bg-slate-900/95 border border-teal-500/50 backdrop-blur-md rounded-3xl shadow-2xl p-4 animate-in fade-in zoom-in duration-200">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-ping" />
-                  <span className="text-[11px] font-black text-teal-300 uppercase tracking-wider">
-                    Listening...
-                  </span>
-                </div>
-                <p className="text-sm font-medium text-teal-100 italic min-h-[1.5rem]">
-                  {holdTranscript || "Boliye... speak your doubt"}
-                </p>
-              </div>
-            </div>
-          )}
+          {/* Orb region — status overlays cover ONLY this area so the
+              frequency bars below stay visible while listening / replying */}
+          <div className="relative flex-1 w-full min-h-[120px] flex items-center justify-center">
 
-          {/* Overlay: Thinking (AI is generating the reply) */}
-          {!isHolding && isLoading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-[2px]">
-              <div className="w-full max-w-sm bg-slate-900/95 border border-indigo-500/40 rounded-3xl shadow-2xl p-4 flex items-center gap-3 animate-in fade-in zoom-in duration-200">
-                <span className="w-9 h-9 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-white">AI Mentor soch raha hai...</p>
-                  {pendingUserText && (
-                    <p className="text-[11px] text-slate-400 italic mt-0.5 truncate">
-                      &quot;{pendingUserText}&quot;
-                    </p>
-                  )}
+            {/* Overlay: Listening (while holding) — live transcript */}
+            {isHolding && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center p-2">
+                <div className="w-full max-w-sm bg-slate-900/95 border border-teal-500/50 backdrop-blur-md rounded-3xl shadow-2xl p-4 animate-in fade-in zoom-in duration-200">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-ping" />
+                    <span className="text-[11px] font-black text-teal-300 uppercase tracking-wider">
+                      Listening...
+                    </span>
+                  </div>
+                  <p className="text-sm font-medium text-teal-100 italic min-h-[1.5rem]">
+                    {holdTranscript || "Boliye... speak your doubt"}
+                  </p>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Overlay: Live AI reply output */}
-          {!isHolding && !isLoading && liveReply && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
-              <div className="w-full max-w-sm bg-slate-900/95 border border-violet-500/40 backdrop-blur-md rounded-3xl shadow-2xl p-4 animate-in fade-in zoom-in duration-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <MentorCapIcon className="w-4 h-4 text-violet-300" />
-                  <span className="text-[11px] font-black text-violet-300 uppercase tracking-wider">
-                    AI Mentor
-                  </span>
-                  <div className="ml-auto flex items-center gap-1">
-                    {isSpeaking && (
-                      <button
-                        type="button"
-                        onClick={stopSpeaking}
-                        className="p-1.5 rounded-full bg-rose-500/20 text-rose-300 hover:bg-rose-500/40 transition-colors"
-                        title="Stop voice"
-                      >
-                        <StopSquareIcon />
-                      </button>
+            {/* Overlay: Thinking (AI is generating the reply) */}
+            {!isHolding && isLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center p-2 bg-slate-950/40 backdrop-blur-[2px]">
+                <div className="w-full max-w-sm bg-slate-900/95 border border-indigo-500/40 rounded-3xl shadow-2xl p-4 flex items-center gap-3 animate-in fade-in zoom-in duration-200">
+                  <span className="w-9 h-9 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">AI Mentor soch raha hai...</p>
+                    {pendingUserText && (
+                      <p className="text-[11px] text-slate-400 italic mt-0.5 truncate">
+                        &quot;{pendingUserText}&quot;
+                      </p>
                     )}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        speakText(liveReply.ttsText || liveReply.text, liveReply.language)
-                      }
-                      className="p-1.5 rounded-full bg-teal-500/20 text-teal-300 hover:bg-teal-500/40 transition-colors"
-                      title="Listen again"
-                    >
-                      <PlayTriangleIcon />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLiveReply(null)}
-                      className="p-1.5 rounded-full bg-slate-700/60 text-slate-300 hover:bg-slate-600 transition-colors"
-                      title="Close"
-                    >
-                      <CloseIcon className="w-3.5 h-3.5" />
-                    </button>
                   </div>
                 </div>
-                <p className="text-sm text-slate-100 whitespace-pre-wrap leading-relaxed">
-                  {liveReply.text}
-                </p>
               </div>
+            )}
+
+            {/* Overlay: Live AI reply output */}
+            {!isHolding && !isLoading && liveReply && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center p-2">
+                <div className="w-full max-w-sm max-h-full overflow-y-auto bg-slate-900/95 border border-violet-500/40 backdrop-blur-md rounded-3xl shadow-2xl p-4 animate-in fade-in zoom-in duration-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <MentorCapIcon className="w-4 h-4 text-violet-300" />
+                    <span className="text-[11px] font-black text-violet-300 uppercase tracking-wider">
+                      AI Mentor
+                    </span>
+                    <div className="ml-auto flex items-center gap-1">
+                      {isSpeaking && (
+                        <button
+                          type="button"
+                          onClick={stopSpeaking}
+                          className="p-1.5 rounded-full bg-rose-500/20 text-rose-300 hover:bg-rose-500/40 transition-colors"
+                          title="Stop voice"
+                        >
+                          <StopSquareIcon />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          speakText(liveReply.ttsText || liveReply.text, liveReply.language)
+                        }
+                        className="p-1.5 rounded-full bg-teal-500/20 text-teal-300 hover:bg-teal-500/40 transition-colors"
+                        title="Listen again"
+                      >
+                        <PlayTriangleIcon />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLiveReply(null)}
+                        className="p-1.5 rounded-full bg-slate-700/60 text-slate-300 hover:bg-slate-600 transition-colors"
+                        title="Close"
+                      >
+                        <CloseIcon className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-sm text-slate-100 whitespace-pre-wrap leading-relaxed">
+                    {liveReply.text}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Infinity symbol — glows on user speech (teal), colour change
+                when the AI speaks (fuchsia) */}
+            <div
+              className={`relative flex items-center justify-center transition-transform duration-500 ${
+                orbActive ? "scale-110" : "scale-100"
+              }`}
+            >
+              <div
+                className={`absolute w-44 h-44 rounded-full blur-3xl ${orbGlow} ${
+                  orbActive ? "animate-pulse" : "opacity-70"
+                }`}
+              />
+              <span
+                className={`relative text-9xl font-black ${orbText} drop-shadow-2xl select-none leading-none`}
+              >
+                ∞
+              </span>
+            </div>
+          </div>
+
+          {/* Frequency bars — always-visible strip.
+              Idle: static dots. Active: driven by the REAL voice (mic / TTS). */}
+          {orbState === "idle" ? (
+            <div
+              className="flex items-center justify-center gap-[4px] h-2 shrink-0"
+              aria-hidden="true"
+            >
+              {Array.from({ length: EQ_BAR_COUNT }, (_, i) => (
+                <span
+                  key={i}
+                  className={`w-[4px] h-[5px] rounded-full opacity-40 ${orbText}`}
+                />
+              ))}
+            </div>
+          ) : (
+            <div
+              className={`flex items-end justify-center gap-[4px] h-12 shrink-0 ${orbText}`}
+              aria-hidden="true"
+            >
+              {Array.from({ length: EQ_BAR_COUNT }, (_, i) => (
+                <span
+                  key={i}
+                  ref={(el) => {
+                    eqBarRefs.current[i] = el;
+                  }}
+                  className="mentor-eq-bar w-[4px] h-full rounded-full bg-current"
+                  style={{
+                    animationDelay: `${-(i * 0.09).toFixed(2)}s`,
+                    animationDuration: "0.5s",
+                    opacity: 0.95,
+                  }}
+                />
+              ))}
             </div>
           )}
 
-          {/* Infinity symbol — glows + frequencies on user speech (teal),
-              colour change + frequencies when AI speaks (fuchsia) */}
-          <div
-            className={`relative flex items-center justify-center transition-transform duration-500 ${
-              orbActive ? "scale-110" : "scale-100"
-            }`}
-          >
-            <div
-              className={`absolute w-36 h-36 rounded-full blur-3xl ${orbGlow} ${
-                orbActive ? "animate-pulse" : "opacity-70"
-              }`}
-            />
-            <span
-              className={`relative text-8xl font-black ${orbText} drop-shadow-2xl select-none leading-none`}
-            >
-              ∞
-            </span>
-          </div>
-
-          {/* Frequency (equalizer) bars */}
-          <div
-            className={`flex items-end justify-center gap-[3px] h-8 ${orbText}`}
-            aria-hidden="true"
-          >
-            {Array.from({ length: EQ_BAR_COUNT }, (_, i) => (
-              <span
-                key={i}
-                ref={(el) => {
-                  eqBarRefs.current[i] = el;
-                }}
-                className="mentor-eq-bar w-[3px] h-full rounded-full bg-current"
-                style={{
-                  animationDelay: `${-(i * 0.09).toFixed(2)}s`,
-                  animationDuration: orbActive ? "0.5s" : "1.7s",
-                  opacity: orbActive ? 0.95 : 0.35,
-                }}
-              />
-            ))}
-          </div>
-
-          <p className="text-[11px] text-slate-500 font-medium">{orbCaption}</p>
+          <p className="text-[11px] text-slate-500 font-medium shrink-0">{orbCaption}</p>
         </div>
 
         {/* ── Mentor Session drawer — mentorship-log style (expand/collapse) ── */}
