@@ -1,6 +1,6 @@
 // app/api/ai-mentor/chat/route.ts - Conversational AI Mentor endpoint
 import { NextRequest, NextResponse } from "next/server";
-import { getGroqKey, getChatGeminiKeys } from "@/lib/ai-key-manager";
+import { getGroqKey, getChatGeminiKeys, getCloudflareWorkersAiConfig } from "@/lib/ai-key-manager";
 
 export const runtime = "edge";
 
@@ -243,19 +243,22 @@ function httpError(prefix: string, status: number, body: string) {
   return err;
 }
 
-// Call an AI provider with ONE retry on transient failures (e.g. Gemini 503 spikes)
-async function callWithRetry<T>(fn: () => Promise<T>, delayMs = 800): Promise<T> {
-  try {
-    return await fn();
-  } catch (err: any) {
-    const transient =
-      isTransientStatus(err?.status) ||
-      err?.name === "TypeError" || // network failure
-      /timed? ?out|aborted/i.test(String(err?.message || ""));
-    if (!transient) throw err;
-    await new Promise((r) => setTimeout(r, delayMs));
-    return fn();
+// Call an AI provider with retries + backoff on transient failures
+// (e.g. Gemini/Groq 503 demand spikes) — 3 attempts total.
+async function callWithRetry<T>(fn: () => Promise<T>, delaysMs: number[] = [800, 2000]): Promise<T> {
+  for (let attempt = 0; attempt <= delaysMs.length; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const transient =
+        isTransientStatus(err?.status) ||
+        err?.name === "TypeError" || // network failure
+        /timed? ?out|aborted/i.test(String(err?.message || ""));
+      if (!transient || attempt === delaysMs.length) throw err;
+      await new Promise((r) => setTimeout(r, delaysMs[attempt]));
+    }
   }
+  throw new Error("callWithRetry exhausted");
 }
 
 // Call Groq with chat completion
@@ -364,6 +367,44 @@ async function callGeminiChat(
   return text;
 }
 
+// Call Cloudflare Workers AI (last-resort backup tier — works even when no
+// Groq/Gemini keys are configured). Mirrors the ai-doubt live route.
+async function callCloudflareChat(
+  messages: Array<{ role: string; content: string }>
+) {
+  const cfConfig = getCloudflareWorkersAiConfig();
+  if (!cfConfig) {
+    throw new Error("No Cloudflare Workers AI config");
+  }
+  const models = ["@cf/meta/llama-3.1-8b-instruct", "@cf/mistral/mistral-7b-instruct-v0.1"];
+  let lastErr: any = null;
+  for (const model of models) {
+    try {
+      const endpoint = `https://api.cloudflare.com/client/v4/accounts/${cfConfig.accountId}/ai/run/${model}`;
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${cfConfig.apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ messages }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) {
+        lastErr = httpError(`Cloudflare AI (${model})`, res.status, await res.text());
+        continue;
+      }
+      const data = await res.json();
+      const text = data?.result?.response?.trim();
+      if (!text) throw new Error("Cloudflare AI empty response");
+      return text;
+    } catch (err: any) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("Cloudflare AI failed");
+}
+
 export async function POST(req: NextRequest) {
   let language = "en";
   let tone = "bro";
@@ -409,22 +450,28 @@ export async function POST(req: NextRequest) {
       // Fallback to Gemini
       console.warn("Groq chat failed, trying Gemini:", groqErr?.message);
       const geminiKeys = getChatGeminiKeys();
-      if (geminiKeys.length === 0) {
-        throw new Error("No AI keys available");
-      }
       
       const messages = [
         { role: "system", content: prompt },
         { role: "user", content: message },
       ];
       
-      let lastError: any = null;
+      let lastError: any = groqErr;
       for (const key of geminiKeys) {
         try {
           rawJson = await callWithRetry(() => callGeminiChat(messages, key));
           break;
         } catch (err: any) {
           lastError = err;
+        }
+      }
+      // Tier 3: Cloudflare Workers AI last-resort backup (works even with
+      // no Groq/Gemini keys configured)
+      if (!rawJson) {
+        try {
+          rawJson = await callCloudflareChat(messages);
+        } catch (cfErr: any) {
+          lastError = lastError || cfErr;
         }
       }
       if (!rawJson) throw lastError || new Error("All AI providers failed");
