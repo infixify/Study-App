@@ -283,7 +283,6 @@ export default function AiMentorChat({
   const drawerBottomRef = useRef<HTMLDivElement>(null);
   const micRecognitionRef = useRef<any>(null);
   const holdRecognitionRef = useRef<any>(null);
-  const baseTextRef = useRef<string>("");
   const holdFinalRef = useRef<string>("");
   const holdTranscriptRef = useRef<string>("");
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -300,6 +299,15 @@ export default function AiMentorChat({
   const eqBarRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const orbStateRef = useRef<"idle" | "user" | "ai">("idle");
   const voiceLevelRef = useRef(0);
+  // Speech-session control: Chrome ends continuous SpeechRecognition after a
+  // stretch of silence — these flags let the mic/hold sessions auto-restart
+  // instead of silently dying, and keep mic & hold from ever running two live
+  // recognitions that fight over the one microphone (that breaks voice input).
+  const micRunRef = useRef(false);
+  const micFinalsRef = useRef("");
+  const micSessionRef = useRef(0);
+  const holdRunRef = useRef(false);
+  const holdSessionRef = useRef(0);
 
   // Load cached chat history
   useEffect(() => {
@@ -366,6 +374,8 @@ export default function AiMentorChat({
   useEffect(() => {
     return () => {
       speechSessionRef.current++;
+      micRunRef.current = false;
+      holdRunRef.current = false;
       if (speakTimeoutRef.current) {
         clearTimeout(speakTimeoutRef.current);
         speakTimeoutRef.current = null;
@@ -452,7 +462,7 @@ export default function AiMentorChat({
   // Native browser voice (last-resort fallback when server TTS is unavailable)
   const speakNative = useCallback((text: string, lang?: string) => {
     if (!("speechSynthesis" in window)) {
-      setError("Text-to-speech not supported in your browser");
+      setError("Is browser mein bolne ki facility nahi hai.");
       setIsSpeaking(false);
       return;
     }
@@ -679,12 +689,33 @@ export default function AiMentorChat({
     setIsSpeaking(false);
   }, []);
 
+  // Stop the tap-to-fill mic (also cancels any pending auto-restart).
+  const stopMicRecognition = useCallback(() => {
+    micRunRef.current = false; // explicit stop — never auto-restart after this
+    const rec = micRecognitionRef.current;
+    if (rec) {
+      try {
+        rec.onstart = null;
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        rec.stop();
+      } catch (_) {}
+      micRecognitionRef.current = null;
+    }
+    setIsMicActive(false);
+  }, []);
+
   // ==========================================================================
   // SEND MESSAGE (shared by typed chat & hold-to-speak)
   // ==========================================================================
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || isLoading) return;
+      // Barge-in: sending stops any AI voice still playing, and a running mic
+      // is switched off so it can't re-fill the box we just sent.
+      stopSpeaking();
+      stopMicRecognition();
       // Gesture unlock: the automatic TTS a few seconds later must never be
       // blocked by the browser autoplay policy.
       ensureAudioCtx();
@@ -728,7 +759,7 @@ export default function AiMentorChat({
 
         const data = await response.json();
 
-        const aiText = data.reply || "I'm here to help you with your studies!";
+        const aiText = data.reply || "Yaar, main yahin hoon — padhai mein kuch bhi pooch!";
         const aiTtsText = data.tts_text || aiText;
         const aiLang = data.language || undefined;
 
@@ -753,86 +784,127 @@ export default function AiMentorChat({
           speakText(aiTtsText, aiLang);
         }, 500);
       } catch (err) {
-        setError("Failed to get response from AI Mentor. Please try again.");
+        setError("Mentor se jawab nahi aaya. Dobara try karo.");
         console.error("AI Mentor API error:", err);
       } finally {
         setIsLoading(false);
       }
     },
-    [userId, studentContext, targetExam, getGenZTone, speakText, ensureAudioCtx]
+    [userId, studentContext, targetExam, getGenZTone, speakText, ensureAudioCtx, stopSpeaking, stopMicRecognition]
   );
 
   // ==========================================================================
   // MIC BUTTON (tap toggle) — fills the chat input box with live text.
-  // Independent from Hold-to-Speak.
+  // Chrome ends continuous SpeechRecognition after a stretch of silence, so
+  // the session auto-restarts (startMicSession below) until the user toggles
+  // the mic off. stopMicRecognition is defined above sendMessage.
   // ==========================================================================
-  const stopMicRecognition = useCallback(() => {
-    const rec = micRecognitionRef.current;
-    if (rec) {
-      try {
-        rec.onstart = null;
-        rec.onresult = null;
-        rec.onerror = null;
-        rec.onend = null;
-        rec.stop();
-      } catch (_) {}
-      micRecognitionRef.current = null;
-    }
-    setIsMicActive(false);
-  }, []);
-
-  const startMicRecognition = useCallback(() => {
-    if (isMicActive) return;
-    ensureAudioCtx(); // gesture unlock (TTS autoplay)
-    stopSpeaking(); // barge-in: user starts talking -> stop any AI voice
+  const startMicSession: () => void = useCallback(() => {
     if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
-      setError("Speech recognition not supported in your browser");
+      micRunRef.current = false;
+      setError("Is browser mein voice typing support nahi hai.");
+      setIsMicActive(false);
       return;
     }
+    const session = ++micSessionRef.current;
+    let recognition: any = null;
     try {
-      const recognition = createRecognition({
+      recognition = createRecognition({
         continuous: true, // keep listening until the user toggles the mic off
         onResult: (event: any) => {
           voiceLevelRef.current = 1; // user is speaking — drive the bars
-          let transcript = "";
+          let interim = "";
           for (let i = 0; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript;
+            const res = event.results[i];
+            if (res.isFinal) {
+              const t = res[0].transcript.trim();
+              if (!t) continue;
+              // Guarded final-commit (same approach as Live Doubt): Android
+              // engines can resend whole utterances as finals — naive append
+              // duplicates text. micFinalsRef survives auto-restarts, so text
+              // recognized before a restart is never lost.
+              const committed = micFinalsRef.current.trim();
+              if (!committed) {
+                micFinalsRef.current = t + " ";
+              } else if (committed.toLowerCase().includes(t.toLowerCase())) {
+                // duplicate final, skip
+              } else if (t.toLowerCase().includes(committed.toLowerCase())) {
+                micFinalsRef.current = t + " ";
+              } else {
+                micFinalsRef.current += t + " ";
+              }
+            } else {
+              interim += res[0].transcript;
+            }
           }
-          transcript = transcript.trim();
-          if (!transcript) return;
-          const base = baseTextRef.current.trim();
-          setInputText(base ? base + " " + transcript : transcript);
+          const text = (micFinalsRef.current + " " + interim).trim();
+          if (text) setInputText(text);
         },
         onError: (err) => {
           if (err === "not-allowed" || err === "service-not-allowed") {
-            setError("Microphone permission denied. Please allow mic access.");
+            micRunRef.current = false; // permission won't fix itself — stop
+            setError("Mic ki permission dedo — voice input ke liye zaroori hai.");
+            setIsMicActive(false);
           } else if (err === "audio-capture") {
-            setError("Microphone not available. Close other apps using the mic.");
+            micRunRef.current = false; // mic busy elsewhere — stop
+            setError("Mic kisi aur app use kar raha hai. Pehle usse band karo.");
+            setIsMicActive(false);
           } else if (err === "network") {
-            setError("Speech service network error. Check your connection.");
-          } else if (err !== "no-speech" && err !== "aborted") {
-            setError("Speech recognition error. Please try again.");
+            setError("Network slow hai. Connection check karo.");
+            // transient — onEnd below restarts the session
           }
-          setIsMicActive(false);
+          // no-speech / aborted / anything else: stay quiet, onEnd restarts
         },
         onEnd: () => {
           if (micRecognitionRef.current === recognition) {
             micRecognitionRef.current = null;
           }
-          setIsMicActive(false);
+          if (micRunRef.current && micSessionRef.current === session) {
+            // Chrome ended the session (usually after silence) — restart it
+            // so the mic keeps listening until the user toggles it off.
+            setTimeout(() => {
+              if (micRunRef.current && micSessionRef.current === session) {
+                startMicSession();
+              }
+            }, 350);
+          } else {
+            setIsMicActive(false);
+          }
         },
       });
-      if (!recognition) return;
-      baseTextRef.current = inputText;
-      micRecognitionRef.current = recognition;
-      recognition.start();
-      setIsMicActive(true);
-      setError(null);
     } catch (e) {
       console.error("Mic recognition start error:", e);
+      micRunRef.current = false;
       setIsMicActive(false);
+      return;
     }
-  }, [isMicActive, inputText, createRecognition, ensureAudioCtx, stopSpeaking]);
+    if (!recognition) {
+      micRunRef.current = false;
+      setIsMicActive(false);
+      return;
+    }
+    micRecognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch (e) {
+      console.error("Mic recognition start error:", e);
+      micRecognitionRef.current = null;
+      micRunRef.current = false;
+      setIsMicActive(false);
+      return;
+    }
+    setIsMicActive(true);
+  }, [createRecognition]);
+
+  const startMicRecognition = useCallback(() => {
+    if (isMicActive || isHolding) return; // never two live recognitions on one mic
+    ensureAudioCtx(); // gesture unlock (TTS autoplay)
+    stopSpeaking(); // barge-in: user starts talking -> stop any AI voice
+    micFinalsRef.current = inputText.trim() ? inputText.trim() + " " : "";
+    micRunRef.current = true;
+    startMicSession();
+    setError(null);
+  }, [isMicActive, isHolding, inputText, ensureAudioCtx, stopSpeaking, startMicSession]);
 
   const toggleMic = useCallback(() => {
     if (isMicActive) {
@@ -844,28 +916,28 @@ export default function AiMentorChat({
 
   // ==========================================================================
   // HOLD TO SPEAK (top button) — live transcript in overlay, release to send.
-  // Independent from the mic button.
+  // Chrome ends recognition after silence even while the button is still held,
+  // so the session auto-restarts (startHoldSession below) until the user
+  // releases — a silent pause can never eat the user's speech.
   // ==========================================================================
-  const startHoldRecognition = useCallback(() => {
-    if (isHolding || isLoading) return;
-    ensureAudioCtx(); // gesture unlock (TTS autoplay)
-    stopSpeaking(); // barge-in: user holds to speak -> stop any AI voice
+  const startHoldSession: () => void = useCallback(() => {
     if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
-      setError("Speech recognition not supported in your browser");
+      holdRunRef.current = false;
+      setError("Is browser mein voice typing support nahi hai.");
+      setIsHolding(false);
       return;
     }
-    // New hold session clears the live reply overlay
-    setLiveReply(null);
-    setHoldTranscript("");
-    holdFinalRef.current = "";
-    holdTranscriptRef.current = "";
+    const session = ++holdSessionRef.current;
+    let recognition: any = null;
     try {
-      const recognition = createRecognition({
+      recognition = createRecognition({
         continuous: true,
         onResult: (event: any) => {
           voiceLevelRef.current = 1; // user is speaking — drive the bars
           // Guarded final-commit (same approach as Live Doubt): Android engines
           // can resend whole utterances as finals — naive append duplicates text.
+          // holdFinalRef survives auto-restarts, so nothing said before a
+          // restart is lost.
           let interim = "";
           for (let i = event.resultIndex; i < event.results.length; ++i) {
             const res = event.results[i];
@@ -895,38 +967,79 @@ export default function AiMentorChat({
         },
         onError: (err) => {
           if (err === "not-allowed" || err === "service-not-allowed") {
-            setError("Microphone permission denied. Please allow mic access.");
-          } else if (err === "no-speech") {
-            setError("No speech detected. Hold and speak again.");
-          } else if (err === "network") {
-            setError("Speech service network error. Check your connection.");
+            holdRunRef.current = false; // permission won't fix itself — stop
+            setError("Mic ki permission dedo — voice input ke liye zaroori hai.");
+            setIsHolding(false);
           } else if (err === "audio-capture") {
-            setError("Microphone not available. Close other apps using the mic.");
-          } else if (err !== "aborted") {
-            setError("Speech recognition error. Please try again.");
+            holdRunRef.current = false; // mic busy elsewhere — stop
+            setError("Mic kisi aur app use kar raha hai. Pehle usse band karo.");
+            setIsHolding(false);
+          } else if (err === "network") {
+            setError("Network slow hai. Connection check karo.");
+            // transient — onEnd below restarts the session
           }
-          setIsHolding(false);
+          // no-speech / aborted / others: a silent pause while holding must
+          // never kill the session — onEnd restarts it
         },
         onEnd: () => {
           if (holdRecognitionRef.current === recognition) {
             holdRecognitionRef.current = null;
           }
-          setIsHolding(false);
+          if (holdRunRef.current && holdSessionRef.current === session) {
+            // Session ended (usually after silence) while still holding —
+            // restart so nothing the user says is lost.
+            setTimeout(() => {
+              if (holdRunRef.current && holdSessionRef.current === session) {
+                startHoldSession();
+              }
+            }, 350);
+          } else {
+            setIsHolding(false);
+          }
         },
       });
-      if (!recognition) return;
-      holdRecognitionRef.current = recognition;
-      recognition.start();
-      setIsHolding(true);
-      setError(null);
     } catch (e) {
       console.error("Hold recognition start error:", e);
+      holdRunRef.current = false;
       setIsHolding(false);
+      return;
     }
-  }, [isHolding, isLoading, createRecognition, ensureAudioCtx, stopSpeaking]);
+    if (!recognition) {
+      holdRunRef.current = false;
+      setIsHolding(false);
+      return;
+    }
+    holdRecognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch (e) {
+      console.error("Hold recognition start error:", e);
+      holdRecognitionRef.current = null;
+      holdRunRef.current = false;
+      setIsHolding(false);
+      return;
+    }
+    setIsHolding(true);
+  }, [createRecognition]);
+
+  const startHoldRecognition = useCallback(() => {
+    if (isHolding || isLoading) return;
+    ensureAudioCtx(); // gesture unlock (TTS autoplay)
+    stopSpeaking(); // barge-in: user holds to speak -> stop any AI voice
+    stopMicRecognition(); // never two live recognitions fighting over the mic
+    // New hold session clears the live reply overlay
+    setLiveReply(null);
+    setHoldTranscript("");
+    holdFinalRef.current = "";
+    holdTranscriptRef.current = "";
+    holdRunRef.current = true;
+    startHoldSession();
+    setError(null);
+  }, [isHolding, isLoading, ensureAudioCtx, stopSpeaking, stopMicRecognition, startHoldSession]);
 
   const endHoldAndSend = useCallback(async () => {
     if (!isHolding) return;
+    holdRunRef.current = false; // released — never auto-restart after this
     try {
       holdRecognitionRef.current?.stop();
     } catch (_) {}
@@ -941,7 +1054,7 @@ export default function AiMentorChat({
     holdTranscriptRef.current = "";
     setHoldTranscript("");
     if (!text) {
-      setError("Didn't catch that — hold and speak again.");
+      setError("Samajh nahi aaya — hold karke dobara boliye.");
       return;
     }
     sendMessage(text);
@@ -1014,7 +1127,7 @@ export default function AiMentorChat({
       ? "Listening... bolte rahiye"
       : orbState === "ai"
       ? "Mentor bol raha hai..."
-      : "Hold to Speak ya neeche type karke puchiye";
+      : "Hold karke bolo ya neeche type karke puchiye";
 
   // Mirror orbState into a ref for the animation loop below
   useEffect(() => {
@@ -1042,15 +1155,15 @@ export default function AiMentorChat({
           // Voice energy lives in the lower bins — bias the mapping downwards
           const bin = Math.min(31, Math.floor(Math.pow(i / (EQ_BAR_COUNT - 1), 1.5) * 24));
           // Boost the raw spectrum: voice byte-values are naturally low, which
-          // made the bars look almost dead. 3.2x gain + a higher floor keeps
+          // made the bars look almost dead. 3.6x gain + a higher floor keeps
           // them lively, clamped to full height.
-          const target = Math.min(1, Math.max(0.22, ((freq[bin] || 0) / 255) * 3.2));
+          const target = Math.min(1, Math.max(0.3, ((freq[bin] || 0) / 255) * 3.6));
           // Fast attack, slow release — reads like a real equalizer.
-          levels[i] += (target - levels[i]) * (target > levels[i] ? 0.6 : 0.28);
+          levels[i] += (target - levels[i]) * (target > levels[i] ? 0.65 : 0.3);
           const bar = bars[i];
           if (bar) {
             bar.style.animation = "none";
-            bar.style.transform = `scaleY(${(0.15 + levels[i] * 0.85).toFixed(3)})`;
+            bar.style.transform = `scaleY(${(0.18 + levels[i] * 0.82).toFixed(3)})`;
             bar.style.opacity = "0.95";
           }
         }
@@ -1058,17 +1171,20 @@ export default function AiMentorChat({
         // User side: no mic analyser (it would fight SpeechRecognition and
         // break voice input) — drive the bars from the SpeechRecognition
         // activity level with a lively travelling wave.
-        voiceLevelRef.current *= 0.96;
+        voiceLevelRef.current *= 0.94;
         const lvl = voiceLevelRef.current;
         const t = performance.now() / 1000;
         for (let i = 0; i < EQ_BAR_COUNT; i++) {
-          const wave = 0.5 + 0.5 * Math.sin(t * 6 + i * 0.8);
-          const target = 0.15 + lvl * (0.4 + 0.45 * wave);
-          levels[i] += (target - levels[i]) * 0.5;
+          const wave = 0.5 + 0.5 * Math.sin(t * 7.5 + i * 0.8);
+          // Gentle breathing floor keeps the bars moving even in pauses,
+          // swelling to full height while the user actually speaks.
+          const breathe = 0.5 + 0.5 * Math.sin(t * 3 + i * 0.5);
+          const target = 0.22 + 0.08 * breathe + lvl * (0.35 + 0.4 * wave);
+          levels[i] += (target - levels[i]) * 0.55;
           const bar = bars[i];
           if (bar) {
             bar.style.animation = "none";
-            bar.style.transform = `scaleY(${(0.15 + levels[i] * 0.85).toFixed(3)})`;
+            bar.style.transform = `scaleY(${(0.18 + levels[i] * 0.82).toFixed(3)})`;
             bar.style.opacity = "0.95";
           }
         }
@@ -1092,20 +1208,20 @@ export default function AiMentorChat({
     <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
       <style>{`
         @keyframes mentorEq {
-          0%, 100% { transform: scaleY(0.3); }
+          0%, 100% { transform: scaleY(0.25); }
           50% { transform: scaleY(1); }
         }
         .mentor-eq-bar {
           transform-origin: bottom;
-          animation: mentorEq 1.2s ease-in-out infinite;
+          animation: mentorEq 0.9s ease-in-out infinite;
         }
         @keyframes mentorDot {
-          0%, 100% { transform: scaleY(0.3); opacity: 0.35; }
-          50% { transform: scaleY(2.4); opacity: 1; }
+          0%, 100% { transform: scaleY(0.25); opacity: 0.25; }
+          50% { transform: scaleY(3.4); opacity: 1; }
         }
         .mentor-dot {
           transform-origin: bottom;
-          animation: mentorDot 1.1s ease-in-out infinite;
+          animation: mentorDot 0.9s ease-in-out infinite;
         }
       `}</style>
       <div className="bg-slate-950 rounded-3xl max-w-md w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-800 overflow-hidden">
@@ -1177,11 +1293,11 @@ export default function AiMentorChat({
                 ? "Listening... chhodne pe bhejega"
                 : isLoading
                 ? "Mentor Soch Raha Hai..."
-                : "Hold To Speak"}
+                : "Hold Karke Bolo"}
             </span>
           </button>
           <p className="text-[10px] text-slate-500 text-center mt-1">
-            Speak your doubt, release to get instant answer
+            Apna doubt bolo, chhodne pe instant answer milega
           </p>
         </div>
 
@@ -1199,7 +1315,7 @@ export default function AiMentorChat({
                   </span>
                 </div>
                 <p className="text-sm font-medium text-teal-100 italic min-h-[1.5rem]">
-                  {holdTranscript || "Boliye... speak your doubt"}
+                  {holdTranscript || "Boliye... apna doubt batao"}
                 </p>
               </div>
             </div>
@@ -1309,7 +1425,7 @@ export default function AiMentorChat({
                 className={
                   orbActive
                     ? "mentor-eq-bar w-[3px] h-full rounded-full bg-current"
-                    : "mentor-dot w-2 h-2 rounded-full bg-current"
+                    : "mentor-dot w-2.5 h-2.5 rounded-full bg-current"
                 }
                 style={
                   orbActive
@@ -1319,8 +1435,8 @@ export default function AiMentorChat({
                         opacity: 0.95,
                       }
                     : {
-                        animationDelay: `${-(i * 0.07).toFixed(2)}s`,
-                        animationDuration: "1.1s",
+                        animationDelay: `${-(i * 0.06).toFixed(2)}s`,
+                        animationDuration: "0.9s",
                       }
                 }
               />
@@ -1379,7 +1495,7 @@ export default function AiMentorChat({
                   <SparkleIcon className="w-8 h-8 mb-2 text-indigo-400/50" />
                   <p className="text-xs font-semibold text-slate-300">Session abhi khaali hai</p>
                   <p className="text-[11px] text-slate-500 mt-1">
-                    Hold to Speak dabakar ya type karke apna doubt puchiye.
+                    Hold karke bolo ya type karke apna doubt puchiye.
                   </p>
                 </div>
               ) : (
@@ -1433,7 +1549,7 @@ export default function AiMentorChat({
                                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/35 hover:bg-violet-500/20 transition-colors"
                               >
                                 <SpeakerIcon />
-                                <span>Listen</span>
+                                <span>Suniye</span>
                               </button>
                             </div>
                           )}
@@ -1490,7 +1606,7 @@ export default function AiMentorChat({
                   ? "bg-rose-500 hover:bg-rose-600"
                   : "bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700"
               }`}
-              title={isMicActive ? "Stop listening" : "Speech to Text (fills chat box)"}
+              title={isMicActive ? "Mic band karo" : "Bolke text likho — chat box bharega"}
             >
               {isMicActive ? (
                 <MicMutedIcon className="w-5 h-5" />
@@ -1503,7 +1619,7 @@ export default function AiMentorChat({
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isSpeaking ? "Mentor bol raha hai..." : "Type your message..."}
+                placeholder={isSpeaking ? "Mentor bol raha hai..." : "Apna sawal yahan type karo..."}
                 rows={1}
                 className="w-full p-3 pr-10 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
                 disabled={isLoading}
