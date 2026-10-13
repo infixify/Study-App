@@ -78,6 +78,27 @@ const TrashIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
   </svg>
 );
 
+const MentorCapIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M5.5 11.6v4c0 1 2.9 2.4 6.5 2.4s6.5-1.4 6.5-2.4v-4" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M21 9v5" />
+  </svg>
+);
+
+const SparkleIcon = ({ className = "w-3.5 h-3.5" }: { className?: string }) => (
+  <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+    <path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4L12 2z" />
+  </svg>
+);
+
+const SpeakerIcon = ({ className = "w-3 h-3" }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5L6 9H3v6h3l5 4V5z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13" />
+  </svg>
+);
+
 // ============================================================================
 // TYPES & CONSTANTS
 // ============================================================================
@@ -238,7 +259,7 @@ function resolveNativeLang(text: string, lang?: string): string {
 }
 
 // ============================================================================
-// MAIN COMPONENT: AiMentorChat (Live Doubt style — infinity orb + HUD drawer)
+// MAIN COMPONENT: AiMentorChat (mentor style — infinity orb with live voice-reactive frequencies + session drawer)
 // ============================================================================
 export default function AiMentorChat({
   userId,
@@ -269,6 +290,15 @@ export default function AiMentorChat({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const speechSessionRef = useRef(0);
   const speakTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Web Audio: unlocks autoplay on the first user gesture and powers the
+  // orb frequency bars with REAL voice data (mic while listening, TTS while
+  // the AI speaks) — no more artificial rhythm.
+  const audioCtxRef = useRef<any>(null);
+  const aiGraphRef = useRef<{ source: any; analyser: AnalyserNode } | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const eqBarRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const orbStateRef = useRef<"idle" | "user" | "ai">("idle");
 
   // Load cached chat history
   useEffect(() => {
@@ -312,6 +342,66 @@ export default function AiMentorChat({
     }
   }, [messages, hudMode]);
 
+  // ==========================================================================
+  // WEB AUDIO — unlocks autoplay on the first user gesture and powers the
+  // orb frequency bars with real voice data (no more artificial rhythm).
+  // ==========================================================================
+  const ensureAudioCtx = useCallback((): any => {
+    try {
+      if (typeof window === "undefined") return null;
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) return null;
+      if (!audioCtxRef.current) audioCtxRef.current = new Ctx();
+      if (audioCtxRef.current.state === "suspended") {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+      return audioCtxRef.current;
+    } catch (_) {
+      return null;
+    }
+  }, []);
+
+  // Mic analyser: live frequency data of the user voice while listening.
+  // The analyser is NEVER connected to the output — mic must not feed back.
+  const startMicAnalyser = useCallback(() => {
+    if (micAnalyserRef.current) return;
+    const ctx = ensureAudioCtx();
+    if (!ctx || !navigator.mediaDevices?.getUserMedia) return;
+    try {
+      navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((stream) => {
+          const c = audioCtxRef.current;
+          if (!c) {
+            stream.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          micStreamRef.current = stream;
+          const src = c.createMediaStreamSource(stream);
+          const analyser = c.createAnalyser();
+          analyser.fftSize = 64;
+          analyser.smoothingTimeConstant = 0.7;
+          src.connect(analyser);
+          micAnalyserRef.current = analyser;
+        })
+        .catch(() => {});
+    } catch (_) {}
+  }, [ensureAudioCtx]);
+
+  const stopMicAnalyser = useCallback(() => {
+    micAnalyserRef.current = null;
+    try {
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    } catch (_) {}
+    micStreamRef.current = null;
+  }, []);
+
+  // Mic analyser follows the listening state (mic button OR hold-to-speak)
+  useEffect(() => {
+    if (isMicActive || isHolding) startMicAnalyser();
+    else stopMicAnalyser();
+  }, [isMicActive, isHolding, startMicAnalyser, stopMicAnalyser]);
+
   // Cleanup audio + recognitions on unmount
   useEffect(() => {
     return () => {
@@ -339,6 +429,17 @@ export default function AiMentorChat({
         audioRef.current?.pause();
       } catch (_) {}
       audioRef.current = null;
+      try {
+        if (aiGraphRef.current) {
+          try { aiGraphRef.current.source.stop(); } catch (_) {}
+          aiGraphRef.current = null;
+        }
+      } catch (_) {}
+      stopMicAnalyser();
+      try {
+        audioCtxRef.current?.close();
+      } catch (_) {}
+      audioCtxRef.current = null;
       try {
         window.speechSynthesis.cancel();
       } catch (_) {}
@@ -402,7 +503,14 @@ export default function AiMentorChat({
       console.error("TTS error:", event);
     };
     utteranceRef.current = utterance;
-    window.speechSynthesis.speak(utterance);
+    // Chrome drops utterances queued synchronously right after cancel() —
+    // speak on the next tick and nudge the synth out of its paused state.
+    setTimeout(() => {
+      try {
+        window.speechSynthesis.resume();
+        window.speechSynthesis.speak(utterance);
+      } catch (_) {}
+    }, 60);
   }, []);
 
   // Text to speech: server-side 3-tier TTS (natural voice — same pipeline as
@@ -415,10 +523,19 @@ export default function AiMentorChat({
 
       // New speech session: invalidates any in-flight playback/fetch
       const session = ++speechSessionRef.current;
+      // Unlock the AudioContext while we may still be inside a user gesture,
+      // so the automatic playback below is never blocked by autoplay policy.
+      ensureAudioCtx();
       try {
         audioRef.current?.pause();
       } catch (_) {}
       audioRef.current = null;
+      try {
+        if (aiGraphRef.current) {
+          try { aiGraphRef.current.source.stop(); } catch (_) {}
+          aiGraphRef.current = null;
+        }
+      } catch (_) {}
       try {
         window.speechSynthesis.cancel();
       } catch (_) {}
@@ -431,25 +548,98 @@ export default function AiMentorChat({
             resolve(false);
             return;
           }
-          try {
-            const audio = new Audio(URL.createObjectURL(blob));
-            audioRef.current = audio;
-            let settled = false;
-            const done = (ok: boolean) => {
-              if (settled) return;
-              settled = true;
-              if (audioRef.current === audio) audioRef.current = null;
-              try {
-                URL.revokeObjectURL(audio.src);
-              } catch (_) {}
-              if (alive()) setIsSpeaking(false);
-              resolve(ok);
-            };
-            audio.onended = () => done(true);
-            audio.onerror = () => done(false);
-            audio.play().catch(() => done(false));
-          } catch (_) {
-            resolve(false);
+          const finish = (ok: boolean) => {
+            if (aiGraphRef.current) {
+              try { aiGraphRef.current.source.disconnect(); } catch (_) {}
+              try { aiGraphRef.current.analyser.disconnect(); } catch (_) {}
+              aiGraphRef.current = null;
+            }
+            if (alive()) setIsSpeaking(false);
+            resolve(ok);
+          };
+          // Preferred path: play through Web Audio. The gesture-unlocked
+          // AudioContext makes automatic playback reliable on every browser,
+          // and the analyser feeds the orb frequency bars with the REAL
+          // voice spectrum.
+          const ctx = ensureAudioCtx();
+          if (ctx && blob.type && blob.type !== "application/json" && blob.size > 0) {
+            blob
+              .arrayBuffer()
+              .then((buf) => {
+                if (!alive()) {
+                  resolve(false);
+                  return;
+                }
+                ctx.decodeAudioData(
+                  buf,
+                  (audioBuf: AudioBuffer) => {
+                    if (!alive()) {
+                      resolve(false);
+                      return;
+                    }
+                    try {
+                      const source = ctx.createBufferSource();
+                      source.buffer = audioBuf;
+                      const analyser = ctx.createAnalyser();
+                      analyser.fftSize = 64;
+                      analyser.smoothingTimeConstant = 0.78;
+                      source.connect(analyser);
+                      analyser.connect(ctx.destination);
+                      aiGraphRef.current = { source, analyser };
+                      source.onended = () => finish(true);
+                      source.start(0);
+                    } catch (_) {
+                      finish(false);
+                    }
+                  },
+                  () => playViaElement()
+                );
+              })
+              .catch(() => playViaElement());
+            return;
+          }
+          playViaElement();
+
+          // Fallback: plain audio element (no analyser data on this path)
+          function playViaElement() {
+            if (!alive()) {
+              resolve(false);
+              return;
+            }
+            try {
+              const audio = new Audio(URL.createObjectURL(blob));
+              audioRef.current = audio;
+              let settled = false;
+              const done = (ok: boolean) => {
+                if (settled) return;
+                settled = true;
+                if (audioRef.current === audio) audioRef.current = null;
+                try {
+                  URL.revokeObjectURL(audio.src);
+                } catch (_) {}
+                if (alive()) setIsSpeaking(false);
+                resolve(ok);
+              };
+              audio.onended = () => done(true);
+              audio.onerror = () => done(false);
+              audio.play().catch(() => {
+                // Autoplay policy hit: resume the unlocked context, retry once
+                try {
+                  const c = ensureAudioCtx();
+                  if (c && c.state === "suspended") {
+                    c.resume()
+                      .then(() => audio.play())
+                      .catch(() => done(false));
+                  } else {
+                    done(false);
+                  }
+                } catch (_) {
+                  done(false);
+                }
+              });
+            } catch (_) {
+              resolve(false);
+            }
           }
         });
       };
@@ -498,7 +688,7 @@ export default function AiMentorChat({
       // 3. Final fallback: browser native voice
       if (alive()) speakNative(speechText, lang);
     },
-    [speakNative]
+    [speakNative, ensureAudioCtx]
   );
 
   // Stop speaking
@@ -508,6 +698,14 @@ export default function AiMentorChat({
       audioRef.current?.pause();
     } catch (_) {}
     audioRef.current = null;
+    try {
+      if (aiGraphRef.current) {
+        try { aiGraphRef.current.source.stop(); } catch (_) {}
+        try { aiGraphRef.current.source.disconnect(); } catch (_) {}
+        try { aiGraphRef.current.analyser.disconnect(); } catch (_) {}
+      }
+    } catch (_) {}
+    aiGraphRef.current = null;
     try {
       window.speechSynthesis.cancel();
     } catch (_) {}
@@ -520,6 +718,9 @@ export default function AiMentorChat({
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || isLoading) return;
+      // Gesture unlock: the automatic TTS a few seconds later must never be
+      // blocked by the browser autoplay policy.
+      ensureAudioCtx();
 
       const userText = text.trim();
       const userMessage: Message = {
@@ -591,7 +792,7 @@ export default function AiMentorChat({
         setIsLoading(false);
       }
     },
-    [userId, studentContext, targetExam, getGenZTone, speakText]
+    [userId, studentContext, targetExam, getGenZTone, speakText, ensureAudioCtx]
   );
 
   // ==========================================================================
@@ -615,6 +816,7 @@ export default function AiMentorChat({
 
   const startMicRecognition = useCallback(() => {
     if (isMicActive) return;
+    ensureAudioCtx(); // gesture unlock + mic analyser context
     if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
       setError("Speech recognition not supported in your browser");
       return;
@@ -657,7 +859,7 @@ export default function AiMentorChat({
       console.error("Mic recognition start error:", e);
       setIsMicActive(false);
     }
-  }, [isMicActive, inputText, createRecognition]);
+  }, [isMicActive, inputText, createRecognition, ensureAudioCtx]);
 
   const toggleMic = useCallback(() => {
     if (isMicActive) {
@@ -673,6 +875,7 @@ export default function AiMentorChat({
   // ==========================================================================
   const startHoldRecognition = useCallback(() => {
     if (isHolding || isLoading) return;
+    ensureAudioCtx(); // gesture unlock + mic analyser context
     if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
       setError("Speech recognition not supported in your browser");
       return;
@@ -737,7 +940,7 @@ export default function AiMentorChat({
       console.error("Hold recognition start error:", e);
       setIsHolding(false);
     }
-  }, [isHolding, isLoading, createRecognition]);
+  }, [isHolding, isLoading, createRecognition, ensureAudioCtx]);
 
   const endHoldAndSend = useCallback(async () => {
     if (!isHolding) return;
@@ -827,6 +1030,58 @@ export default function AiMentorChat({
       ? "Mentor bol raha hai..."
       : "Hold to Speak ya neeche type karke puchiye";
 
+  // Mirror orbState into a ref for the animation loop below
+  useEffect(() => {
+    orbStateRef.current = orbState;
+  }, [orbState]);
+
+  // Drive the frequency bars from the REAL voice: mic analyser while the
+  // user speaks, TTS analyser while the AI speaks. Natural rhythm instead of
+  // a fixed CSS animation; falls back to the CSS animation when no analyser
+  // is live (e.g. the native speechSynthesis fallback voice).
+  useEffect(() => {
+    if (orbState === "idle") return;
+    const bars = eqBarRefs.current;
+    const freq = new Uint8Array(32);
+    const levels = new Array(EQ_BAR_COUNT).fill(0.12);
+    let raf = 0;
+    const loop = () => {
+      const analyser =
+        orbStateRef.current === "ai"
+          ? aiGraphRef.current?.analyser
+          : micAnalyserRef.current;
+      if (analyser) {
+        try {
+          analyser.getByteFrequencyData(freq);
+        } catch (_) {}
+        for (let i = 0; i < EQ_BAR_COUNT; i++) {
+          // Voice energy lives in the lower bins — bias the mapping downwards
+          const bin = Math.min(31, Math.floor(Math.pow(i / (EQ_BAR_COUNT - 1), 1.5) * 24));
+          const target = Math.max(0.1, (freq[bin] || 0) / 255);
+          levels[i] += (target - levels[i]) * 0.45;
+          const bar = bars[i];
+          if (bar) {
+            bar.style.animation = "none";
+            bar.style.transform = `scaleY(${(0.12 + levels[i] * 0.88).toFixed(3)})`;
+            bar.style.opacity = "0.95";
+          }
+        }
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      cancelAnimationFrame(raf);
+      bars.forEach((b) => {
+        if (b) {
+          b.style.animation = "";
+          b.style.transform = "";
+          b.style.opacity = "";
+        }
+      });
+    };
+  }, [orbState]);
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
       <style>{`
@@ -844,15 +1099,15 @@ export default function AiMentorChat({
         {/* ── Header: title + expand/collapse + close (no language dropdown) ── */}
         <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 text-white shrink-0">
           <div className="flex items-center gap-3">
-            <span className="w-8 h-8 rounded-xl bg-white/20 text-white flex items-center justify-center text-sm shadow-md font-bold">
-              👨‍🏫
+            <span className="w-8 h-8 rounded-xl bg-white/20 text-white flex items-center justify-center shadow-md">
+              <MentorCapIcon className="w-4 h-4" />
             </span>
             <div>
               <h3 className="text-sm font-black tracking-tight text-white">
                 AI Mentor Chat
               </h3>
               <p className="text-[10px] text-white/80 font-medium">
-                {getGenZTone(studentContext?.gender)} mode 🤤🤤
+                Aapka personal study mentor
               </p>
             </div>
           </div>
@@ -958,7 +1213,7 @@ export default function AiMentorChat({
             <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
               <div className="w-full max-w-sm bg-slate-900/95 border border-violet-500/40 backdrop-blur-md rounded-3xl shadow-2xl p-4 animate-in fade-in zoom-in duration-200">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-base">👨‍🏫</span>
+                  <MentorCapIcon className="w-4 h-4 text-violet-300" />
                   <span className="text-[11px] font-black text-violet-300 uppercase tracking-wider">
                     AI Mentor
                   </span>
@@ -1027,6 +1282,9 @@ export default function AiMentorChat({
             {Array.from({ length: EQ_BAR_COUNT }, (_, i) => (
               <span
                 key={i}
+                ref={(el) => {
+                  eqBarRefs.current[i] = el;
+                }}
                 className="mentor-eq-bar w-[3px] h-full rounded-full bg-current"
                 style={{
                   animationDelay: `${-(i * 0.09).toFixed(2)}s`,
@@ -1040,21 +1298,25 @@ export default function AiMentorChat({
           <p className="text-[11px] text-slate-500 font-medium">{orbCaption}</p>
         </div>
 
-        {/* ── HUD Drawer: message popup (Live Doubt style, expand/collapse) ── */}
+        {/* ── Mentor Session drawer — mentorship-log style (expand/collapse) ── */}
         <div
-          className={`shrink-0 bg-slate-900 border-t border-slate-800 transition-all duration-300 flex flex-col overflow-hidden ${
+          className={`relative shrink-0 bg-slate-950 border-t border-indigo-900/40 transition-all duration-300 flex flex-col overflow-hidden ${
             hudMode === "expanded" ? "h-[42vh]" : "h-14"
           }`}
         >
+          {/* grip handle */}
+          <span className="absolute top-1 left-1/2 -translate-x-1/2 w-9 h-1 rounded-full bg-slate-700/70 pointer-events-none" />
           <div
             onClick={() => setHudMode((prev) => (prev === "expanded" ? "compact" : "expanded"))}
-            className="w-full py-2 px-4 flex items-center justify-between cursor-pointer border-b border-slate-800/60 hover:bg-slate-800/40 shrink-0"
+            className="w-full px-4 pt-2.5 pb-1.5 flex items-center justify-between cursor-pointer hover:bg-indigo-950/20 shrink-0"
           >
             <div className="flex items-center gap-2">
-              <ChatBubbleIcon className="w-4 h-4 text-teal-400" />
-              <span className="text-xs font-bold text-slate-200">Mentor Chat</span>
+              <span className="w-6 h-6 rounded-lg bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center">
+                <SparkleIcon className="w-3.5 h-3.5 text-indigo-300" />
+              </span>
+              <span className="text-xs font-bold text-slate-100">Mentor Session</span>
               {messages.length > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 font-semibold">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 font-semibold">
                   {messages.length}
                 </span>
               )}
@@ -1068,7 +1330,7 @@ export default function AiMentorChat({
                     clearChat();
                   }}
                   className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-400 transition-colors"
-                  title="Clear chat"
+                  title="Clear session"
                 >
                   <TrashIcon />
                   <span>Clear</span>
@@ -1081,63 +1343,97 @@ export default function AiMentorChat({
           </div>
 
           {hudMode === "expanded" ? (
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            <div className="flex-1 overflow-y-auto px-4 pb-3">
               {messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
-                  <ChatBubbleIcon className="w-8 h-8 mb-2 opacity-40 text-teal-400" />
-                  <p className="text-xs">Abhi koi message nahi hai.</p>
+                  <SparkleIcon className="w-8 h-8 mb-2 text-indigo-400/50" />
+                  <p className="text-xs font-semibold text-slate-300">Session abhi khaali hai</p>
                   <p className="text-[11px] text-slate-500 mt-1">
-                    Hold to Speak dabakar ya type karke puchiye.
+                    Hold to Speak dabakar ya type karke apna doubt puchiye.
                   </p>
                 </div>
               ) : (
-                messages.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`p-3 rounded-2xl text-xs ${
-                      m.sender === "user"
-                        ? "bg-teal-950/70 border border-teal-500/30 text-teal-100 ml-4"
-                        : "bg-slate-800/90 border border-slate-700/60 text-slate-100"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="font-bold text-[11px] text-teal-400">
-                        {m.sender === "user" ? "You" : "AI Mentor"}
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        {formatTime(m.timestamp)}
-                      </span>
-                    </div>
-                    <div className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-slate-200">
-                      {m.text}
-                    </div>
-                    {m.sender === "ai" && (
-                      <div className="mt-2 pt-2 border-t border-slate-700/50 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => replayTTS(m)}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-teal-500/20 text-teal-300 border border-teal-500/40 hover:bg-teal-500/30 transition-colors"
+                <div className="relative">
+                  {/* timeline rail */}
+                  <div className="absolute left-[4px] top-4 bottom-4 w-px bg-gradient-to-b from-indigo-500/40 via-violet-500/20 to-transparent" />
+                  <div className="space-y-4">
+                    {messages.map((m) => (
+                      <div key={m.id} className="relative pl-5">
+                        <span
+                          className={`absolute left-0 top-4 w-[9px] h-[9px] rounded-full ring-4 ring-slate-950 ${
+                            m.sender === "user" ? "bg-indigo-400" : "bg-violet-400"
+                          }`}
+                        />
+                        <div
+                          className={`rounded-2xl rounded-tl-md border p-3 ${
+                            m.sender === "user"
+                              ? "ml-6 bg-indigo-950/40 border-indigo-500/25"
+                              : "bg-violet-950/30 border-violet-500/25"
+                          }`}
                         >
-                          <PlayTriangleIcon />
-                          <span>Listen Again</span>
-                        </button>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span
+                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black ${
+                                m.sender === "user"
+                                  ? "bg-indigo-500/20 text-indigo-200"
+                                  : "bg-violet-500/20 text-violet-200"
+                              }`}
+                            >
+                              {m.sender === "user" ? "Y" : "M"}
+                            </span>
+                            <span
+                              className={`text-[11px] font-bold ${
+                                m.sender === "user" ? "text-indigo-300" : "text-violet-300"
+                              }`}
+                            >
+                              {m.sender === "user" ? "You" : "Mentor"}
+                            </span>
+                            <span className="ml-auto text-[10px] text-slate-500">
+                              {formatTime(m.timestamp)}
+                            </span>
+                          </div>
+                          <div className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-slate-200">
+                            {m.text}
+                          </div>
+                          {m.sender === "ai" && (
+                            <div className="mt-2 pt-2 border-t border-violet-500/15 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => replayTTS(m)}
+                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/35 hover:bg-violet-500/20 transition-colors"
+                              >
+                                <SpeakerIcon />
+                                <span>Listen</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
+                    ))}
                   </div>
-                ))
+                </div>
               )}
               <div ref={drawerBottomRef} />
             </div>
           ) : (
             <div className="flex-1 px-4 flex items-center overflow-hidden">
               {messages.length > 0 ? (
-                <span className="truncate text-[11px] text-slate-300">
-                  <span className="text-teal-400 font-bold mr-1">Latest:</span>
+                <span className="truncate text-[11px] text-slate-300 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse shrink-0" />
+                  <span
+                    className={`font-bold ${
+                      messages[messages.length - 1].sender === "ai"
+                        ? "text-violet-300"
+                        : "text-indigo-300"
+                    }`}
+                  >
+                    {messages[messages.length - 1].sender === "ai" ? "Mentor:" : "You:"}
+                  </span>
                   {messages[messages.length - 1].text.slice(0, 90)}
                 </span>
               ) : (
                 <span className="text-[11px] text-slate-500 italic">
-                  Hold to Speak dabakar ya type karke puchiye...
+                  Apni mentorship session yahan dikhegi...
                 </span>
               )}
             </div>
