@@ -297,6 +297,7 @@ export default function AiMentorChat({
   const aiGraphRef = useRef<{ source: any; analyser: AnalyserNode } | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const micGraphRef = useRef<{ src: any; analyser: AnalyserNode; mute: any } | null>(null);
   const eqBarRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const orbStateRef = useRef<"idle" | "user" | "ai">("idle");
 
@@ -362,7 +363,8 @@ export default function AiMentorChat({
   }, []);
 
   // Mic analyser: live frequency data of the user voice while listening.
-  // The analyser is NEVER connected to the output — mic must not feed back.
+  // Routed to the destination through a zero-gain node — output stays muted
+  // (no feedback/echo) but the graph is pulled so the analyser gets data.
   const startMicAnalyser = useCallback(() => {
     if (micAnalyserRef.current) return;
     const ctx = ensureAudioCtx();
@@ -380,8 +382,17 @@ export default function AiMentorChat({
           const src = c.createMediaStreamSource(stream);
           const analyser = c.createAnalyser();
           analyser.fftSize = 64;
-          analyser.smoothingTimeConstant = 0.7;
+          analyser.smoothingTimeConstant = 0.6;
+          // Route through a ZERO-gain node into the destination. Web Audio only
+          // renders nodes reachable from the destination, so without this the
+          // analyser starves and the bars never move; gain = 0 keeps the mic
+          // silent (no feedback/echo) while still feeding real spectrum data.
+          const mute = c.createGain();
+          mute.gain.value = 0;
           src.connect(analyser);
+          analyser.connect(mute);
+          mute.connect(c.destination);
+          micGraphRef.current = { src, analyser, mute };
           micAnalyserRef.current = analyser;
         })
         .catch(() => {});
@@ -390,6 +401,14 @@ export default function AiMentorChat({
 
   const stopMicAnalyser = useCallback(() => {
     micAnalyserRef.current = null;
+    try {
+      if (micGraphRef.current) {
+        try { micGraphRef.current.src.disconnect(); } catch (_) {}
+        try { micGraphRef.current.analyser.disconnect(); } catch (_) {}
+        try { micGraphRef.current.mute.disconnect(); } catch (_) {}
+        micGraphRef.current = null;
+      }
+    } catch (_) {}
     try {
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
     } catch (_) {}
@@ -582,7 +601,7 @@ export default function AiMentorChat({
                       source.buffer = audioBuf;
                       const analyser = ctx.createAnalyser();
                       analyser.fftSize = 64;
-                      analyser.smoothingTimeConstant = 0.78;
+                      analyser.smoothingTimeConstant = 0.6;
                       source.connect(analyser);
                       analyser.connect(ctx.destination);
                       aiGraphRef.current = { source, analyser };
@@ -1057,12 +1076,16 @@ export default function AiMentorChat({
         for (let i = 0; i < EQ_BAR_COUNT; i++) {
           // Voice energy lives in the lower bins — bias the mapping downwards
           const bin = Math.min(31, Math.floor(Math.pow(i / (EQ_BAR_COUNT - 1), 1.5) * 24));
-          const target = Math.max(0.1, (freq[bin] || 0) / 255);
-          levels[i] += (target - levels[i]) * 0.45;
+          // Boost the raw spectrum: voice byte-values are naturally low, which
+          // made the bars look almost dead. 2.6x gain + a higher floor keeps
+          // them lively, clamped to full height.
+          const target = Math.min(1, Math.max(0.18, ((freq[bin] || 0) / 255) * 2.6));
+          // Fast attack, slow release — reads like a real equalizer.
+          levels[i] += (target - levels[i]) * (target > levels[i] ? 0.6 : 0.28);
           const bar = bars[i];
           if (bar) {
             bar.style.animation = "none";
-            bar.style.transform = `scaleY(${(0.12 + levels[i] * 0.88).toFixed(3)})`;
+            bar.style.transform = `scaleY(${(0.15 + levels[i] * 0.85).toFixed(3)})`;
             bar.style.opacity = "0.95";
           }
         }
@@ -1092,6 +1115,14 @@ export default function AiMentorChat({
         .mentor-eq-bar {
           transform-origin: bottom;
           animation: mentorEq 1.7s ease-in-out infinite;
+        }
+        @keyframes mentorDot {
+          0%, 100% { transform: scaleY(0.45); opacity: 0.45; }
+          50% { transform: scaleY(1.6); opacity: 0.95; }
+        }
+        .mentor-dot {
+          transform-origin: bottom;
+          animation: mentorDot 1.4s ease-in-out infinite;
         }
       `}</style>
       <div className="bg-slate-950 rounded-3xl max-w-md w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-800 overflow-hidden">
@@ -1274,11 +1305,16 @@ export default function AiMentorChat({
             </span>
           </div>
 
-          {/* Frequency (equalizer) bars — always above the overlays so the
-              voice rhythm stays visible while listening AND while the AI
-              replies; idle state shows calm dots instead of bars */}
+          <p className="text-[11px] text-slate-500 font-medium">{orbCaption}</p>
+        </div>
+
+        {/* Live voice visualizer — its own dedicated strip BELOW the orb stage,
+            so the listening/thinking/reply bubble above can never cover it.
+            Always visible: idle = breathing dots, you speak = teal bars from
+            the mic analyser, AI speaks = fuchsia bars from the TTS analyser. */}
+        <div className="shrink-0 px-4 pb-2">
           <div
-            className={`relative z-20 pointer-events-none flex items-end justify-center gap-[3px] h-10 ${orbText}`}
+            className={`relative z-20 mx-auto w-fit pointer-events-none flex items-end justify-center gap-[3px] h-12 px-5 rounded-full bg-slate-900/80 border border-slate-700/60 shadow-inner ${orbText}`}
             aria-hidden="true"
           >
             {Array.from({ length: EQ_BAR_COUNT }, (_, i) => (
@@ -1290,7 +1326,7 @@ export default function AiMentorChat({
                 className={
                   orbActive
                     ? "mentor-eq-bar w-[3px] h-full rounded-full bg-current"
-                    : "w-1.5 h-1.5 rounded-full bg-current opacity-50"
+                    : "mentor-dot w-2 h-2 rounded-full bg-current"
                 }
                 style={
                   orbActive
@@ -1299,13 +1335,14 @@ export default function AiMentorChat({
                         animationDuration: "0.5s",
                         opacity: 0.95,
                       }
-                    : {}
+                    : {
+                        animationDelay: `${-(i * 0.07).toFixed(2)}s`,
+                        animationDuration: "1.4s",
+                      }
                 }
               />
             ))}
           </div>
-
-          <p className="text-[11px] text-slate-500 font-medium">{orbCaption}</p>
         </div>
 
         {/* ── Mentor Session drawer — mentorship-log style (expand/collapse) ── */}
