@@ -11,7 +11,7 @@ import {
 
 export const runtime = "edge";
 
-// ── Language matching (same proven logic as /api/ai-mentor/chat) ──
+// ── Language matching (Unicode script detect + whole-word Roman keywords) ──
 // STRICT rule: reply in the SAME language + script as the student's question.
 const SCRIPT_DETECT: Record<string, { regex: RegExp; code: string }> = {
   hindi: { regex: /[\u0900-\u097F]/, code: "hi" },        // Devanagari
@@ -26,35 +26,79 @@ const SCRIPT_DETECT: Record<string, { regex: RegExp; code: string }> = {
   odia: { regex: /[\u0B00-\u0B7F]/, code: "or" },         // Odia
 };
 
-// Keyword lists for Roman-script languages (shuddh Hindi vs Hinglish vs English)
-const LANGUAGE_KEYWORDS: Record<string, string[]> = {
-  hindi: ["hai", "main", "mujhe", "kya", "hain", "thi", "ka", "ki", "mein", "aap", "hum"],
-  hinglish: ["bro", "bhai", "yaar", "ar", "hai", "main", "mujhe", "kya", "bhaiya", "didi", "behen"],
-  english: ["the", "and", "for", "are", "this", "that", "with", "what", "how", "why"],
-  bengali: ["ami", "tomar", "kotha", "ki", "hoyeche", "bolte", "parbe"],
-  tamil: ["naan", "un", "enna", "yaaru", "eppadi", "varum", "seyyum"],
-  telugu: ["nenu", "nuvv", "emi", "eppudi", "cheyyali", "varu"],
-  marathi: ["mi", "tumhi", "kay", "ka", "karayche", "ahe"],
-  gujarati: ["hu", "tame", "shu", "kay", "karu", "che"],
-  punjabi: ["main", "tusi", "ki", "kya", "karna", "hai"],
-  malayalam: ["njan", "ninte", "enth", "kaaryam", "cheyyanam"],
-  kannada: ["naanu", "nimage", "eni", "hege", "maaduvudi"],
-  odia: ["mu", "tume", "ki", "kaana", "kariba"],
+// Roman-script keyword lists, matched on WHOLE WORDS only. Substring matching
+// misfires badly: Hinglish like "Newton ka first law batado" matched the old
+// "hindi" list via "ka" and wrongly produced a Devanagari reply. Hinglish
+// (Roman Hindi) is listed FIRST so ties resolve to Hinglish; it contains only
+// unambiguous Hindi glue words (never "to", "hi", "do", "so").
+const ROMAN_KEYWORDS: Record<string, string[]> = {
+  "hi-IN": [
+    "bro", "bhai", "bhaiya", "yaar", "arre", "arrey", "abey", "ji", "waah",
+    "hai", "hain", "tha", "thi", "the", "hoga", "hogi", "honge", "hua", "hui",
+    "hota", "hoti", "kar", "karo", "kara", "kiya", "kiye", "gaya", "gayi",
+    "batado", "batao", "bataiye", "samajhao", "samajha", "samjha", "samajh",
+    "padho", "padha", "seekho", "dekho", "dekh", "sunao", "bolo", "bol",
+    "puch", "pucho", "puchiye", "chahiye", "chahta", "chahti",
+    "kya", "kaise", "kyun", "kaun", "kab", "kahan", "kitna", "kitni",
+    "konsa", "konsi", "kaunsa", "nahi", "nahin", "mat",
+    "ka", "ki", "ke", "ko", "se", "ne", "pe", "mein", "aur", "ya", "par",
+    "lekin", "phir", "abhi", "fir", "bhi", "sirf", "toh", "isliye", "kyunki",
+    "main", "mujhe", "mujhko", "tumhe", "aapko", "aap", "tum", "tu",
+    "vo", "ye", "yeh", "wo", "woh", "iska", "iske", "iski", "uska", "uske",
+    "hmare", "tumhara", "mera", "tera", "apna",
+    "bahut", "thoda", "thodi", "zyada", "jyada", "kam", "matlab",
+    "seedha", "seedhi", "koi", "kuch", "sab", "sabhi", "har",
+    "bilkul", "sach", "sachin", "ekdum",
+  ],
+  en: [
+    "the", "and", "for", "are", "is", "was", "were", "be", "been", "this",
+    "that", "these", "those", "with", "what", "how", "why", "when", "where",
+    "which", "who", "of", "to", "in", "on", "at", "by", "from", "as", "it",
+    "its", "if", "then", "than", "so", "but", "or", "not", "no", "do", "does",
+    "did", "will", "would", "can", "could", "should", "may", "might", "must",
+    "you", "your", "we", "our", "they", "their", "he", "she", "his", "her",
+    "i", "me", "my", "please", "explain", "tell", "define", "give", "find",
+    "calculate", "derive", "solve", "show", "prove", "state", "write", "name",
+    "list", "describe", "compare", "between", "meaning", "use", "using",
+    "about", "into", "over", "after", "before", "under", "again", "once",
+    "here", "there", "all", "any", "both", "each", "few", "more", "most",
+    "other", "some", "such", "only", "own", "same", "too", "very", "just",
+    "also", "now", "first", "second", "well", "way", "even", "still", "back",
+    "right", "much", "many", "good", "great", "high", "low", "big", "small",
+    "large", "new", "old", "able", "sure", "get", "make", "take", "put",
+    "know", "think", "see", "come", "want", "need", "work", "call", "try",
+    "ask", "feel", "leave", "long", "little",
+  ],
+  bn: ["ami", "tomar", "tomake", "bhalobashi", "bhalo", "kemon", "achen", "ache", "korun", "korchhe", "bolun", "bolo", "bujhlam", "bujhte", "parbo", "parbi", "chai", "lagbe", "ki"],
+  ta: ["naan", "enna", "yaaru", "eppadi", "irukku", "irukka", "pogiren", "pogiral", "mudiyum", "sollunga", "sollungal", "puriyavillai", "theriyuma", "vela"],
+  te: ["nenu", "nuvvu", "ela", "undi", "cheppu", "cheyandi", "cheppandi", "vastundi", "artham", "avuthundi", "arthama", "cheyali"],
+  mr: ["mi", "mala", "tumhi", "kay", "karayche", "ahe", "aahe", "sanga", "sangitla", "pahije", "zale", "hot"],
+  gu: ["hu", "tame", "shu", "karu", "kahyu", "kahis", "maane", "joiye"],
+  pa: ["tusi", "karna", "vich", "dass", "samajh", "pucho", "chahida", "hunda", "hove"],
+  ml: ["njan", "ninte", "enth", "cheyyanam", "parayunnu", "manasilayi", "sheri", "ningal", "ente"],
+  kn: ["naanu", "nimage", "yenu", "maaduvudi", "tiliside", "kelabeda", "yaake", "ide", "nodi"],
+  or: ["mu", "tume", "kaana", "kariba", "kahiba", "bujhibi", "jane", "nuhen"],
 };
 
-// Detect language from the question text (script first, then keywords)
+// Detect language from the question text: Unicode script first (Devanagari,
+// Bengali, Tamil, ...), then whole-word Roman keywords. Roman-script Hindi —
+// shuddh or Hinglish, e.g. "Newton ka first law batado" — resolves to hi-IN so
+// the reply stays in ROMAN script instead of flipping to Devanagari.
 function detectLanguage(text: string): string {
-  const lowerText = text.toLowerCase();
   for (const [, { regex, code }] of Object.entries(SCRIPT_DETECT)) {
     if (regex.test(text)) return code;
   }
+  const words = new Set(text.toLowerCase().match(/[a-z]+/g) || []);
   let bestMatch = "en";
   let maxMatches = 0;
-  for (const [lang, keywords] of Object.entries(LANGUAGE_KEYWORDS)) {
-    const matches = keywords.filter((word) => lowerText.includes(word));
-    if (matches.length > maxMatches) {
-      maxMatches = matches.length;
-      bestMatch = lang === "hinglish" ? "hi-IN" : lang === "hindi" ? "hi" : lang;
+  for (const [lang, keywords] of Object.entries(ROMAN_KEYWORDS)) {
+    let matches = 0;
+    for (const word of keywords) {
+      if (words.has(word)) matches++;
+    }
+    if (matches > maxMatches) {
+      maxMatches = matches;
+      bestMatch = lang;
     }
   }
   return bestMatch;
@@ -67,7 +111,7 @@ function getLanguageRule(language: string): string {
   const rules: Record<string, string> = {
     en: "LANGUAGE RULE (STRICT — MOST IMPORTANT): The student asked in ENGLISH. Answer ONLY in natural English, helpful teacher tone. NEVER answer in Hindi or any other language. KEEP the formatting markers exactly: **Heading Name** for headings, 'Step 1:', 'Step 2:' for steps, 'Formula:' or 'Important:' for formulas/notes, '- ' for bullet points.",
     hi: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne shuddh HINDI (Devanagari script) mein pucha hai. Answer ONLY Hindi (Devanagari script) mein, helpful teacher tone mein. Roman script ya English mein bilkul NAHI. Formatting markers bilkul same rakho: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
-    "hi-IN": "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne HINGLISH (Roman Hindi) mein pucha hai. Answer ONLY Hinglish (Roman Hindi script) mein, helpful teacher tone mein. Devanagari bilkul NAHI. Formatting markers bilkul same rakho: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    "hi-IN": "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne HINGLISH (Roman/English letters) mein pucha hai. Answer ONLY Hinglish mein — Hindi words ko ROMAN/ENGLISH letters mein likho (jaise 'yaar, yeh law bahut simple hai'). Devanagari (क, ख, ग ...) bilkul NAHI — ek bhi akshar nahi. Formatting markers bilkul same rakho: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
     bn: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne BENGALI mein pucha hai. Answer ONLY Bengali script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
     ta: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne TAMIL mein pucha hai. Answer ONLY Tamil script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
     te: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne TELUGU mein pucha hai. Answer ONLY Telugu script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
@@ -82,6 +126,93 @@ function getLanguageRule(language: string): string {
   return (rules[language] || rules.en) + common;
 }
 
+// Post-process the AI reply: models sometimes ignore the "no LaTeX" rule and
+// emit $...$, \( ... \), \frac{a}{b}, x^{2} etc. The chat UI renders plain text
+// + Unicode only, so convert/strip every LaTeX leftover deterministically.
+// Formatting markers (**heading**, 'Step 1:', 'Formula:', '- ' bullets) are
+// NOT touched.
+function cleanSymbols(text: string): string {
+  if (!text) return text;
+  let t = text;
+  // LaTeX line breaks
+  t = t.replace(/\\\\/g, "\n");
+  // spacing commands \, \; \! \: \ (space)
+  t = t.replace(/\\[,;!:]|\\ /g, " ");
+  // superscripts / subscripts → Unicode (run BEFORE \frac/\sqrt so nested
+  // cases like \sqrt{x^{2}} or \frac{v^{2}}{2} also resolve correctly)
+  const sup: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻", "n": "ⁿ", "i": "ⁱ" };
+  const sub: Record<string, string> = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉", "+": "₊", "-": "₋", "n": "ₙ", "i": "ᵢ" };
+  const supify = (s: string) => s.split("").map((c) => sup[c] || c).join("");
+  const subify = (s: string) => s.split("").map((c) => sub[c] || c).join("");
+  // (brace content must not contain a backslash — LaTeX commands inside
+  // ^{...}/_{...} are resolved by the second pass after the command map)
+  t = t.replace(/\^\{([^{}\\]*)\}/g, (_, c) => supify(c));
+  t = t.replace(/\^([0-9a-zA-Z])/g, (_, c) => sup[c] || c);
+  t = t.replace(/_\{([^{}\\]*)\}/g, (_, c) => subify(c));
+  t = t.replace(/_([0-9a-zA-Z])/g, (_, c) => sub[c] || c);
+  // \text{...} / \mathrm{...} / \mathbf{...} / \mathit{...} → inner text
+  t = t.replace(/\\(?:text|mathrm|mathbf|mathit|textrm)\{([^{}]*)\}/g, "$1");
+  // \sqrt{x} → √(x), \sqrt[n]{x} → n√(x) (BEFORE \frac so \frac{\sqrt{2}}{2}
+  // resolves inner sqrt first)
+  t = t.replace(/\\sqrt\[([^\]]*)\]\{([^{}]*)\}/g, "$1√($2)");
+  t = t.replace(/\\sqrt\{([^{}]*)\}/g, "√($1)");
+  // \frac{a}{b} / \dfrac / \tfrac → a/b (parens around numerator when it has
+  // +/- so 'u + at' doesn't become ambiguous; two passes for one nesting level)
+  const fracify = (_: string, a: string, b: string) =>
+    /[+\-]/.test(a) ? "(" + a + ")/" + b : a + "/" + b;
+  t = t.replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, fracify);
+  t = t.replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, fracify);
+  // common LaTeX commands → Unicode symbols
+  const sym: Record<string, string> = {
+    times: "×", cdot: "·", div: "÷", pm: "±", mp: "∓",
+    leq: "≤", le: "≤", geq: "≥", ge: "≥", neq: "≠", ne: "≠",
+    approx: "≈", equiv: "≡", propto: "∝", sim: "∼", simeq: "≃", cong: "≅",
+    infty: "∞", partial: "∂", nabla: "∇", sum: "∑", prod: "∏", int: "∫",
+    leftarrow: "←", rightarrow: "→", to: "→", Rightarrow: "⇒", Leftarrow: "⇐",
+    leftrightarrow: "↔", mapsto: "↦", gets: "←", implies: "⇒",
+    circ: "°", deg: "°", degree: "°",
+    alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", varepsilon: "ε",
+    theta: "θ", vartheta: "θ", lambda: "λ", mu: "μ", nu: "ν", pi: "π", rho: "ρ",
+    sigma: "σ", phi: "φ", varphi: "φ", omega: "ω", kappa: "κ", eta: "η",
+    xi: "ξ", zeta: "ζ", tau: "τ", chi: "χ", psi: "ψ",
+    Delta: "Δ", Gamma: "Γ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π",
+    Sigma: "Σ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+    cup: "∪", cap: "∩", setminus: "∖", in: "∈", notin: "∉",
+    subset: "⊂", supset: "⊃", subseteq: "⊆", supseteq: "⊇", emptyset: "∅",
+    forall: "∀", exists: "∃", neg: "¬", land: "∧", wedge: "∧", lor: "∨", vee: "∨",
+    oplus: "⊕", otimes: "⊗", perp: "⊥", parallel: "∥", mid: "∣",
+    ldots: "…", dots: "…", cdots: "…", vdots: "⋮", ddots: "⋱", prime: "′",
+    cos: "cos", sin: "sin", tan: "tan", cot: "cot", sec: "sec", csc: "csc", cosec: "cosec",
+    log: "log", ln: "ln", exp: "exp", min: "min", max: "max", lim: "lim",
+    det: "det", dim: "dim", gcd: "gcd", lcm: "lcm", mod: "mod", arg: "arg",
+    sup: "sup", inf: "inf",
+    left: "", right: "", big: "", Big: "", bigl: "", bigr: "", Bigl: "", Bigr: "",
+    displaystyle: "", limits: "", nolimits: "", quad: " ", qquad: "  ",
+  };
+  t = t.replace(/\\([a-zA-Z]+)/g, (m, cmd) => (cmd in sym ? sym[cmd] : m));
+  // second sup/sub pass: resolves wrappers whose content was a LaTeX command
+  // (e.g. 30^{\circ} → 30^{°} → 30°, x^{\infty} → x∞)
+  t = t.replace(/\^\{([^{}\\]*)\}/g, (_, c) => supify(c));
+  t = t.replace(/_\{([^{}\\]*)\}/g, (_, c) => subify(c));
+  // escaped literal chars \{ \} \% \& \# \_ → literal
+  t = t.replace(/\\([{}%&#_])/g, "$1");
+  // math delimiters: $...$, $...$, \( ... \), \[ ... \]
+  t = t.replace(/\$\$/g, " ").replace(/\$/g, "");
+  t = t.replace(/\\\(|\\\)|\\\[|\\\]/g, " ");
+  // leftover unknown backslash commands → drop them
+  t = t.replace(/\\[a-zA-Z]+/g, "");
+  // empty LaTeX groups
+  t = t.replace(/\{\s*\}/g, "");
+  // tidy whitespace
+  t = t.replace(/[ \t]{2,}/g, " ");
+  t = t
+    .split("\n")
+    .map((l) => l.replace(/[ \t]+$/g, ""))
+    .join("\n")
+    .trim();
+  return t;
+}
+
 const BASE_PROMPT = `Tu PrepWise ka highly qualified Senior Academic Faculty hai jo JEE, NEET aur Boards padhata hai.
 RULES FOR PERFECT ANSWERS:
 1. Academic Accuracy: Pure NCERT aur standard formulas use kar (jaise Koshika = Cell, Jeevan ki buniyadi ikai).
@@ -90,7 +221,7 @@ RULES FOR PERFECT ANSWERS:
    - Steps ko 'Step 1:', 'Step 2:' likh.
    - Formula ya Note ke liye 'Formula:' ya 'Important:' likh.
    - Points ke liye '- ' bullet use kar.
-3. Math Symbols: Clean Unicode use kar (x², √(49)=7, a/b, ±, →, °C). LaTeX delimiters ($ ya $$ ya \\frac) mat use kar.
+3. Math Symbols (VERY STRICT): Sirf clean Unicode hi use kar — x², x³, √(49)=7, a/b, a×b, ±, →, °C, π, ≤, ≥, ≠, ∞. LaTeX bilkul NAHI: na '
 4. Tone: Helpful, clear aur seedha to-the-point solution de. Question ke upar diya gaya LANGUAGE RULE strictly follow karo (same language + script as the student).`;
 
 interface ImagePart {
@@ -474,12 +605,24 @@ export async function POST(req: NextRequest) {
     }
 
     // STRICT language matching: reply in the SAME language + script as the
-    // student's question (auto-detected; studentContext.language wins if set).
-    // Image-only doubts (no text to detect) keep the default Hinglish reply.
-    const language =
-      (studentContext && studentContext.language) ||
-      (prompt.trim() ? detectLanguage(prompt) : "hi-IN");
-    const finalPrompt = getLanguageRule(language) + "\n\nQuestion: " + userPrompt;
+    // student's TYPED question. Typed text ALWAYS wins — even when photos are
+    // attached, the language of text visible in the photo is IGNORED.
+    // studentContext.language is only a fallback for image-only doubts (no
+    // text to detect), which keep the default Hinglish reply.
+    const typedText = prompt.trim();
+    const KNOWN_LANGUAGES = new Set(["en", "hi", "hi-IN", "bn", "ta", "te", "mr", "gu", "pa", "ml", "kn", "or"]);
+    const ctxLang =
+      studentContext && KNOWN_LANGUAGES.has(studentContext.language)
+        ? studentContext.language
+        : null;
+    const language = typedText ? detectLanguage(typedText) : ctxLang || "hi-IN";
+    let finalPrompt = getLanguageRule(language) + "\n\nQuestion: " + userPrompt;
+    if (hasImages && typedText) {
+      finalPrompt +=
+        "\n\nPHOTO RULE (STRICT): Student ne photo ke saath ek text question bhi likha hai. " +
+        "Photo ke andar jo bhi language dikhe, usko IGNORE karo — reply ONLY typed text ki language + script mein (upar wala LANGUAGE RULE). " +
+        "Photo sirf sawal samajhne ke liye hai, reply ki language decide nahi karti.";
+    }
 
     const attemptsTrace: string[] = [];
 
@@ -492,7 +635,7 @@ export async function POST(req: NextRequest) {
         const { reply, model } = await callGeminiVision(finalPrompt, base64Images);
         attemptsTrace.push(`Gemini: Success (${model})`);
         return NextResponse.json(
-          { reply, provider: "gemini", model, debugTrace: attemptsTrace },
+          { reply: cleanSymbols(reply), provider: "gemini", model, debugTrace: attemptsTrace },
           { status: 200 }
         );
       } catch (e: any) {
@@ -504,7 +647,7 @@ export async function POST(req: NextRequest) {
         const { reply, model } = await callGroqVision(finalPrompt, base64Images);
         attemptsTrace.push(`Groq Vision: Success (${model})`);
         return NextResponse.json(
-          { reply, provider: "groq", model, debugTrace: attemptsTrace },
+          { reply: cleanSymbols(reply), provider: "groq", model, debugTrace: attemptsTrace },
           { status: 200 }
         );
       } catch (e: any) {
@@ -516,7 +659,7 @@ export async function POST(req: NextRequest) {
         const { reply, model } = await callSambaNovaVision(finalPrompt, base64Images);
         attemptsTrace.push(`SambaNova: Success (${model})`);
         return NextResponse.json(
-          { reply, provider: "sambanova", model, debugTrace: attemptsTrace },
+          { reply: cleanSymbols(reply), provider: "sambanova", model, debugTrace: attemptsTrace },
           { status: 200 }
         );
       } catch (e: any) {
@@ -528,7 +671,7 @@ export async function POST(req: NextRequest) {
         const { reply, model } = await callCloudflareWorkersAiVision(finalPrompt, base64Images);
         attemptsTrace.push(`WorkersAI Vision: Success (${model})`);
         return NextResponse.json(
-          { reply, provider: "cloudflare_vision", model, debugTrace: attemptsTrace },
+          { reply: cleanSymbols(reply), provider: "cloudflare_vision", model, debugTrace: attemptsTrace },
           { status: 200 }
         );
       } catch (e: any) {
@@ -540,7 +683,7 @@ export async function POST(req: NextRequest) {
         const { reply, model } = await callOpenRouterVision(finalPrompt, base64Images);
         attemptsTrace.push(`OpenRouter: Success (${model})`);
         return NextResponse.json(
-          { reply, provider: "openrouter", model, debugTrace: attemptsTrace },
+          { reply: cleanSymbols(reply), provider: "openrouter", model, debugTrace: attemptsTrace },
           { status: 200 }
         );
       } catch (e: any) {
@@ -557,7 +700,7 @@ export async function POST(req: NextRequest) {
         const { reply, model } = await callGroqText(finalPrompt);
         attemptsTrace.push(`Groq: Success (${model})`);
         return NextResponse.json(
-          { reply, provider: "groq", model, debugTrace: attemptsTrace },
+          { reply: cleanSymbols(reply), provider: "groq", model, debugTrace: attemptsTrace },
           { status: 200 }
         );
       } catch (e: any) {
@@ -569,7 +712,7 @@ export async function POST(req: NextRequest) {
         const { reply, model } = await callWorkersAiText(finalPrompt);
         attemptsTrace.push(`WorkersAI: Success (${model})`);
         return NextResponse.json(
-          { reply, provider: "cloudflare_workers_ai", model, debugTrace: attemptsTrace },
+          { reply: cleanSymbols(reply), provider: "cloudflare_workers_ai", model, debugTrace: attemptsTrace },
           { status: 200 }
         );
       } catch (e: any) {
@@ -581,7 +724,7 @@ export async function POST(req: NextRequest) {
         const { reply, model } = await callGeminiVision(finalPrompt, []);
         attemptsTrace.push(`Gemini: Success (${model})`);
         return NextResponse.json(
-          { reply, provider: "gemini", model, debugTrace: attemptsTrace },
+          { reply: cleanSymbols(reply), provider: "gemini", model, debugTrace: attemptsTrace },
           { status: 200 }
         );
       } catch (e: any) {
@@ -593,7 +736,7 @@ export async function POST(req: NextRequest) {
         const { reply, model } = await callOpenRouterVision(finalPrompt, []);
         attemptsTrace.push(`OpenRouter: Success (${model})`);
         return NextResponse.json(
-          { reply, provider: "openrouter", model, debugTrace: attemptsTrace },
+          { reply: cleanSymbols(reply), provider: "openrouter", model, debugTrace: attemptsTrace },
           { status: 200 }
         );
       } catch (e: any) {
