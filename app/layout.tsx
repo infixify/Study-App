@@ -6,7 +6,7 @@ import FcmSync from "@/components/FcmSync";
 import { HeaderProvider } from "@/components/dashboard/AppHeader";
 
 export const metadata: Metadata = {
-  title: "PrepWise — JEE/NEET/Boards Study Companion",
+  title: "PrepWise â€” JEE/NEET/Boards Study Companion",
   description: "Track your prep, close your backlog, walk into the exam ready.",
 };
 
@@ -18,6 +18,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <meta charSet="utf-8" />
+        <meta httpEquiv="Content-Type" content="text/html; charset=utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
         {/* Safe Runtime Font Loading - Prevents Cloudflare Pages Webpack Build Crash */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
