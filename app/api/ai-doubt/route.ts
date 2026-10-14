@@ -11,6 +11,77 @@ import {
 
 export const runtime = "edge";
 
+// ── Language matching (same proven logic as /api/ai-mentor/chat) ──
+// STRICT rule: reply in the SAME language + script as the student's question.
+const SCRIPT_DETECT: Record<string, { regex: RegExp; code: string }> = {
+  hindi: { regex: /[\u0900-\u097F]/, code: "hi" },        // Devanagari
+  bengali: { regex: /[\u0980-\u09FF]/, code: "bn" },     // Bengali
+  tamil: { regex: /[\u0B80-\u0BFF]/, code: "ta" },        // Tamil
+  telugu: { regex: /[\u0C00-\u0C7F]/, code: "te" },       // Telugu
+  marathi: { regex: /[\u0900-\u097F]/, code: "mr" },      // Devanagari (same as Hindi)
+  gujarati: { regex: /[\u0A80-\u0AFF]/, code: "gu" },     // Gujarati
+  punjabi: { regex: /[\u0A00-\u0A7F]/, code: "pa" },      // Gurmukhi
+  malayalam: { regex: /[\u0D00-\u0D7F]/, code: "ml" },    // Malayalam
+  kannada: { regex: /[\u0C80-\u0CFF]/, code: "kn" },       // Kannada
+  odia: { regex: /[\u0B00-\u0B7F]/, code: "or" },         // Odia
+};
+
+// Keyword lists for Roman-script languages (shuddh Hindi vs Hinglish vs English)
+const LANGUAGE_KEYWORDS: Record<string, string[]> = {
+  hindi: ["hai", "main", "mujhe", "kya", "hain", "thi", "ka", "ki", "mein", "aap", "hum"],
+  hinglish: ["bro", "bhai", "yaar", "ar", "hai", "main", "mujhe", "kya", "bhaiya", "didi", "behen"],
+  english: ["the", "and", "for", "are", "this", "that", "with", "what", "how", "why"],
+  bengali: ["ami", "tomar", "kotha", "ki", "hoyeche", "bolte", "parbe"],
+  tamil: ["naan", "un", "enna", "yaaru", "eppadi", "varum", "seyyum"],
+  telugu: ["nenu", "nuvv", "emi", "eppudi", "cheyyali", "varu"],
+  marathi: ["mi", "tumhi", "kay", "ka", "karayche", "ahe"],
+  gujarati: ["hu", "tame", "shu", "kay", "karu", "che"],
+  punjabi: ["main", "tusi", "ki", "kya", "karna", "hai"],
+  malayalam: ["njan", "ninte", "enth", "kaaryam", "cheyyanam"],
+  kannada: ["naanu", "nimage", "eni", "hege", "maaduvudi"],
+  odia: ["mu", "tume", "ki", "kaana", "kariba"],
+};
+
+// Detect language from the question text (script first, then keywords)
+function detectLanguage(text: string): string {
+  const lowerText = text.toLowerCase();
+  for (const [, { regex, code }] of Object.entries(SCRIPT_DETECT)) {
+    if (regex.test(text)) return code;
+  }
+  let bestMatch = "en";
+  let maxMatches = 0;
+  for (const [lang, keywords] of Object.entries(LANGUAGE_KEYWORDS)) {
+    const matches = keywords.filter((word) => lowerText.includes(word));
+    if (matches.length > maxMatches) {
+      maxMatches = matches.length;
+      bestMatch = lang === "hinglish" ? "hi-IN" : lang === "hindi" ? "hi" : lang;
+    }
+  }
+  return bestMatch;
+}
+
+// Per-language STRICT instruction injected ahead of the question. The chat UI
+// renders **headings**, 'Step N:', 'Formula:'/'Important:' boxes and '- '
+// bullets — those markers MUST stay intact in every language.
+function getLanguageRule(language: string): string {
+  const rules: Record<string, string> = {
+    en: "LANGUAGE RULE (STRICT — MOST IMPORTANT): The student asked in ENGLISH. Answer ONLY in natural English, helpful teacher tone. NEVER answer in Hindi or any other language. KEEP the formatting markers exactly: **Heading Name** for headings, 'Step 1:', 'Step 2:' for steps, 'Formula:' or 'Important:' for formulas/notes, '- ' for bullet points.",
+    hi: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne shuddh HINDI (Devanagari script) mein pucha hai. Answer ONLY Hindi (Devanagari script) mein, helpful teacher tone mein. Roman script ya English mein bilkul NAHI. Formatting markers bilkul same rakho: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    "hi-IN": "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne HINGLISH (Roman Hindi) mein pucha hai. Answer ONLY Hinglish (Roman Hindi script) mein, helpful teacher tone mein. Devanagari bilkul NAHI. Formatting markers bilkul same rakho: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    bn: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne BENGALI mein pucha hai. Answer ONLY Bengali script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    ta: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne TAMIL mein pucha hai. Answer ONLY Tamil script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    te: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne TELUGU mein pucha hai. Answer ONLY Telugu script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    mr: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne MARATHI (Devanagari) mein pucha hai. Answer ONLY Marathi Devanagari script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    gu: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne GUJARATI mein pucha hai. Answer ONLY Gujarati script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    pa: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne PUNJABI (Gurmukhi) mein pucha hai. Answer ONLY Punjabi Gurmukhi script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    ml: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne MALAYALAM mein pucha hai. Answer ONLY Malayalam script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    kn: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne KANNADA mein pucha hai. Answer ONLY Kannada script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+    or: "LANGUAGE RULE (STRICT — MOST IMPORTANT): Student ne ODIA mein pucha hai. Answer ONLY Odia script mein, helpful teacher tone mein. KEEP formatting markers: **Heading Name**, 'Step 1:', 'Step 2:', 'Formula:' ya 'Important:', '- ' bullets.",
+  };
+  const common = " Technical terms (Newton, force, equation, lens, voltage, current, energy, power, etc.) MUST ALWAYS remain in English in ALL languages.";
+  return (rules[language] || rules.en) + common;
+}
+
 const BASE_PROMPT = `Tu PrepWise ka highly qualified Senior Academic Faculty hai jo JEE, NEET aur Boards padhata hai.
 RULES FOR PERFECT ANSWERS:
 1. Academic Accuracy: Pure NCERT aur standard formulas use kar (jaise Koshika = Cell, Jeevan ki buniyadi ikai).
@@ -20,7 +91,7 @@ RULES FOR PERFECT ANSWERS:
    - Formula ya Note ke liye 'Formula:' ya 'Important:' likh.
    - Points ke liye '- ' bullet use kar.
 3. Math Symbols: Clean Unicode use kar (x², √(49)=7, a/b, ±, →, °C). LaTeX delimiters ($ ya $$ ya \\frac) mat use kar.
-4. Tone: Helpful aur clear Hinglish. Seedha to-the-point solution de.`;
+4. Tone: Helpful, clear aur seedha to-the-point solution de. Question ke upar diya gaya LANGUAGE RULE strictly follow karo (same language + script as the student).`;
 
 interface ImagePart {
   mimeType: string;
@@ -375,6 +446,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const prompt = (body.message || body.prompt || body.question || "").trim();
     const images: string[] = Array.isArray(body.images) ? body.images : [];
+    const studentContext = body.studentContext || {};
 
     // Safe base64 substring parser (zero regex catastrophic backtracking)
     const base64Images: ImagePart[] = [];
@@ -392,14 +464,22 @@ export async function POST(req: NextRequest) {
     }
 
     const hasImages = base64Images.length > 0;
-    const finalPrompt = prompt || (hasImages ? "Kripya is photo mein diye gaye sawal ko step-by-step solve kijiye." : "");
+    const userPrompt = prompt || (hasImages ? "Kripya is photo mein diye gaye sawal ko step-by-step solve kijiye." : "");
 
-    if (!finalPrompt) {
+    if (!userPrompt) {
       return NextResponse.json(
         { reply: "Kripya koi sawal likhein ya photo attach karein." },
         { status: 200 }
       );
     }
+
+    // STRICT language matching: reply in the SAME language + script as the
+    // student's question (auto-detected; studentContext.language wins if set).
+    // Image-only doubts (no text to detect) keep the default Hinglish reply.
+    const language =
+      (studentContext && studentContext.language) ||
+      (prompt.trim() ? detectLanguage(prompt) : "hi-IN");
+    const finalPrompt = getLanguageRule(language) + "\n\nQuestion: " + userPrompt;
 
     const attemptsTrace: string[] = [];
 
