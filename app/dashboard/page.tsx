@@ -22,7 +22,7 @@ declare global {
   }
 }
 
-// ─── HIGH-SPEED SWR IN-MEMORY CACHE ───
+// â”€â”€â”€ HIGH-SPEED SWR IN-MEMORY CACHE â”€â”€â”€
 const CACHE_TTL_MS = 1 * 60 * 1000;
 const globalMemoryCache: Record<string, { timestamp: number; data: any }> = {};
 
@@ -44,7 +44,7 @@ function getMemCache<T>(key: string): T | null {
   return null;
 }
 
-// ─── AI MENTOR REPORT PERSISTENCE (last refresh survives page refresh/back) ───
+// â”€â”€â”€ AI MENTOR REPORT PERSISTENCE (last refresh survives page refresh/back) â”€â”€â”€
 function saveMentorReportLocal(userId: string, report: any, studentContext: any) {
   try {
     localStorage.setItem(`pw_ai_mentor_report_${userId}`, JSON.stringify({ report, studentContext }));
@@ -265,11 +265,11 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
 const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
   {
     id: "meme-1",
-    quote: "PAKAD PAKAD PAKAD... Isne aaj tak numericals solve nahi kiye! Daya, iska phone tod do! 😂",
+    quote: "PAKAD PAKAD PAKAD... Isne aaj tak numericals solve nahi kiye! Daya, iska phone tod do! ðŸ˜‚",
     quote_source: "human",
     character: "ACP Pradyuman",
     show: "CID (Meme Edition)",
-    icon_or_sticker: "👮",
+    icon_or_sticker: "ðŸ‘®",
     color: "from-gray-600 to-gray-800",
     bg: "bg-gray-50",
     border: "border-gray-300",
@@ -279,13 +279,13 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
 ];
 
 function getGreeting(name: string, hour: number): string {
-  if (hour >= 5 && hour < 9) return `Rise & grind, ${name}! 🌅`;
-  if (hour >= 9 && hour < 12) return `Good morning, ${name}! ☀️`;
-  if (hour >= 12 && hour < 14) return `Lunch break, ${name}? 🍱 Back to books!`;
-  if (hour >= 14 && hour < 17) return `Afternoon session, ${name}! 💪`;
-  if (hour >= 17 && hour < 20) return `Evening grind, ${name}! 🌆`;
-  if (hour >= 20 && hour < 23) return `Late night mode, ${name}! 🌙`;
-  return `Night owl alert, ${name}! 🦉 Sleep matters too!`;
+  if (hour >= 5 && hour < 9) return `Rise & grind, ${name}! ðŸŒ…`;
+  if (hour >= 9 && hour < 12) return `Good morning, ${name}! â˜€ï¸`;
+  if (hour >= 12 && hour < 14) return `Lunch break, ${name}? ðŸ± Back to books!`;
+  if (hour >= 14 && hour < 17) return `Afternoon session, ${name}! ðŸ’ª`;
+  if (hour >= 17 && hour < 20) return `Evening grind, ${name}! ðŸŒ†`;
+  if (hour >= 20 && hour < 23) return `Late night mode, ${name}! ðŸŒ™`;
+  return `Night owl alert, ${name}! ðŸ¦‰ Sleep matters too!`;
 }
 
 function timeToMinutes(t: string | null | undefined): number | null {
@@ -405,7 +405,7 @@ function HeroWidget({
               quote_source: (row.quote_source as "human" | "anime") || "human",
               character: row.character,
               show: row.show || "PrepWise",
-              icon_or_sticker: row.icon_or_sticker || "⚡",
+              icon_or_sticker: row.icon_or_sticker || "âš¡",
               color: row.gradient_color || fallbackPreset.color,
               bg: row.bg_color || fallbackPreset.bg,
               border: row.border_color || fallbackPreset.border,
@@ -532,7 +532,7 @@ function HeroWidget({
               streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"
             }`}
           >
-            <span className="text-sm leading-none">{streak > 0 ? "🔥" : "💤"}</span>
+            <span className="text-sm leading-none">{streak > 0 ? "ðŸ”¥" : "ðŸ’¤"}</span>
             <span className={`text-sm font-black leading-none ${streak > 0 ? "text-orange-600" : "text-slate-400"}`}>
               {streak}
             </span>
@@ -547,7 +547,7 @@ function HeroWidget({
               goalReached ? "bg-emerald-50 border-emerald-200" : "bg-teal-50 border-teal-100"
             }`}
           >
-            <span className="text-sm">{goalReached ? "🎯" : "⏱️"}</span>
+            <span className="text-sm">{goalReached ? "ðŸŽ¯" : "â±ï¸"}</span>
             <div>
               <p className={`text-[9px] font-bold leading-none ${goalReached ? "text-emerald-600" : "text-teal-600"}`}>
                 {goalReached ? "Goal Reached!" : "Today"}
@@ -559,7 +559,7 @@ function HeroWidget({
           </div>
           <div className="flex-1 bg-indigo-50 border border-indigo-100 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-1.5">
             <div className="flex items-center gap-1.5">
-              <span className="text-sm">🎯</span>
+              <span className="text-sm">ðŸŽ¯</span>
               <div>
                 <p className="text-[9px] font-bold text-indigo-600 leading-none">Goal</p>
                 <p className="text-xs font-black text-indigo-900 leading-tight">{goalHoursDisplay}h / day</p>
@@ -629,7 +629,7 @@ function HeroWidget({
               mode === "motivation" ? "bg-white text-slate-900 shadow-2xs font-black" : "text-slate-500 hover:text-slate-900"
             }`}
           >
-            <span>🔥</span> Motivation
+            <span>ðŸ”¥</span> Motivation
           </button>
           <button
             type="button"
@@ -638,7 +638,7 @@ function HeroWidget({
               mode === "meme" ? "bg-white text-slate-900 shadow-2xs font-black" : "text-slate-500 hover:text-slate-900"
             }`}
           >
-            <span>😂</span> Memes
+            <span>ðŸ˜‚</span> Memes
           </button>
         </div>
 
@@ -666,15 +666,15 @@ function HeroWidget({
                     }}
                   />
                 ) : (
-                  <span className="text-3xl">{currentItem.icon_or_sticker || "💡"}</span>
+                  <span className="text-3xl">{currentItem.icon_or_sticker || "ðŸ’¡"}</span>
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className={`text-xs font-bold ${currentItem.text} leading-snug`}>"{currentItem.quote}"</p>
                 <div className="flex items-center justify-between mt-2 pt-1 border-t border-black/5">
-                  <p className="text-[10px] font-black text-slate-600 truncate">— {currentItem.character}</p>
+                  <p className="text-[10px] font-black text-slate-600 truncate">â€” {currentItem.character}</p>
                   <span className="text-[9.5px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-1.5 py-0.5 rounded-full shrink-0">
-                    Tap ↻
+                    Tap â†»
                   </span>
                 </div>
               </div>
@@ -685,8 +685,8 @@ function HeroWidget({
         {limitHit && (
           <p className="mt-1.5 text-center text-[10px] font-bold text-red-500">
             {mode === "motivation"
-              ? `Only 2 quotes per day — come back tomorrow! 🌅`
-              : `Only 2 memes per day — back to books! 📚`}
+              ? `Only 2 quotes per day â€” come back tomorrow! ðŸŒ…`
+              : `Only 2 memes per day â€” back to books! ðŸ“š`}
           </p>
         )}
       </div>
@@ -694,7 +694,7 @@ function HeroWidget({
   );
 }
 
-// ─── SYLLABUS COMPLETION WIDGET ───
+// â”€â”€â”€ SYLLABUS COMPLETION WIDGET â”€â”€â”€
 function SyllabusCompletionWidget({
   subjects,
   chapters,
@@ -757,7 +757,7 @@ function SyllabusCompletionWidget({
     <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-          <span>📚</span> Syllabus Completion
+          <span>ðŸ“š</span> Syllabus Completion
         </h3>
         <span className="text-[10px] font-bold text-teal bg-teal/10 px-2 py-0.5 rounded-md border border-teal/20">
           {stats.grandDone}/{stats.grandTotal} Chapters Done
@@ -812,13 +812,177 @@ function SyllabusCompletionWidget({
         className="w-full py-2.5 bg-slate-50 hover:bg-slate-100 text-teal font-bold text-xs rounded-xl border border-slate-200 transition-all text-center flex items-center justify-center gap-1"
       >
         <span>Go to Syllabus Tracker</span>
-        <span>→</span>
+        <span>â†’</span>
       </button>
     </div>
   );
 }
 
-// ─── ACTION ITEMS WIDGET ───
+// â”€â”€â”€ ANALYTICS TEASER BANNER (MINI VISUALIZATION + DIAGONAL WATERMARK) â”€â”€â”€
+function AnalyticsTeaserBanner({
+  logs,
+  splitRatio,
+  subjects,
+  onOpenAnalytics,
+}: {
+  logs: DailyLogItem[];
+  splitRatio: { theory: number; practice: number; revision: number; verified?: number };
+  subjects: SubjectItem[];
+  onOpenAnalytics: () => void;
+}) {
+  // Compute past 7 days study minutes for the mini sparkline bars
+  const weekData = useMemo(() => {
+    const days: { label: string; mins: number }[] = [];
+    const dayNames = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      const dayName = dayNames[d.getDay()];
+      const matching = logs.find((l) => l.log_date === dateStr);
+      days.push({
+        label: dayName,
+        mins: matching ? matching.study_time_minutes : 0,
+      });
+    }
+    return days;
+  }, [logs]);
+
+  // Total study time across all logs
+  const totalMins = useMemo(() => {
+    return logs.reduce((acc, l) => acc + (l.study_time_minutes || 0), 0);
+  }, [logs]);
+
+  const maxDailyMins = useMemo(() => {
+    const mx = Math.max(...weekData.map((d) => d.mins));
+    return mx > 0 ? mx : 180;
+  }, [weekData]);
+
+  const subjectColors = ["#3b82f6", "#10b981", "#a855f7", "#14b8a6", "#f97316"];
+
+  return (
+    <div
+      onClick={onOpenAnalytics}
+      className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-2xs hover:shadow-md cursor-pointer group active:scale-[0.99] transition-all"
+    >
+      {/* â”€â”€ BACKGROUND LAYER: Mini Analytics Elements (Preview & Visualisation) â”€â”€ */}
+      <div className="p-3.5 space-y-2.5 opacity-50 group-hover:opacity-35 transition-opacity select-none pointer-events-none filter blur-[0.2px]">
+        {/* Mini Header & Summary Pill */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">ðŸ“Š</span>
+            <span className="text-[11px] font-black text-slate-800 tracking-tight">Analytics & Telemetry</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9.5px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full font-mono">
+              Total: {(totalMins / 60).toFixed(1)}h
+            </span>
+            <span className="text-[9.5px] font-bold text-teal-700 bg-teal-50 border border-teal-200/80 px-2 py-0.5 rounded-full">
+              Live Tracker
+            </span>
+          </div>
+        </div>
+
+        {/* Mini 7-Day Sparkline Bar Chart */}
+        <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2">
+          <div className="flex items-center justify-between text-[9px] font-bold text-slate-400 mb-1">
+            <span>7-Day Study Trend</span>
+            <span className="font-mono text-slate-500 font-semibold">Weekly Consistency</span>
+          </div>
+          <div className="flex items-end gap-1.5 h-10 pt-1">
+            {weekData.map((day, idx) => {
+              const heightPct = Math.min(100, Math.max(12, Math.round((day.mins / maxDailyMins) * 100)));
+              return (
+                <div key={idx} className="flex-1 flex flex-col items-center gap-0.5 h-full justify-end">
+                  <div className="w-full bg-slate-200/70 rounded-t h-full flex items-end overflow-hidden">
+                    <div
+                      style={{ height: `${heightPct}%` }}
+                      className={`w-full rounded-t transition-all ${
+                        day.mins > 0 ? "bg-teal-500" : "bg-slate-300"
+                      }`}
+                    />
+                  </div>
+                  <span className="text-[7.5px] font-bold text-slate-400 uppercase leading-none">
+                    {day.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Mini Study Split Bar & Subject Focus */}
+        <div className="grid grid-cols-2 gap-2 text-[9px]">
+          {/* Split Ratio preview */}
+          <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2 flex flex-col justify-between">
+            <span className="font-bold text-slate-500 block mb-1">Study Split Ratio</span>
+            <div className="flex h-2 rounded-full overflow-hidden bg-slate-200 gap-0.5">
+              <div
+                style={{ width: `${Math.max(10, splitRatio.theory || 33)}%` }}
+                className="bg-indigo-500 h-full"
+                title="Theory"
+              />
+              <div
+                style={{ width: `${Math.max(10, splitRatio.practice || 33)}%` }}
+                className="bg-emerald-500 h-full"
+                title="Practice"
+              />
+              <div
+                style={{ width: `${Math.max(10, splitRatio.revision || 33)}%` }}
+                className="bg-amber-500 h-full"
+                title="Revision"
+              />
+            </div>
+            <div className="flex justify-between text-[8px] font-semibold text-slate-400 mt-1">
+              <span className="text-indigo-600">Th</span>
+              <span className="text-emerald-600">Pr</span>
+              <span className="text-amber-600">Rev</span>
+            </div>
+          </div>
+
+          {/* Subject Distribution */}
+          <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2 flex flex-col justify-between">
+            <span className="font-bold text-slate-500 block mb-1">Subject Focus</span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {subjects.slice(0, 4).map((s, i) => (
+                <span
+                  key={s.id || i}
+                  className="inline-flex items-center gap-1 text-[8px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200/80 text-slate-700"
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full shrink-0"
+                    style={{ backgroundColor: subjectColors[i % subjectColors.length] }}
+                  />
+                  <span className="truncate max-w-[45px]">{s.name}</span>
+                </span>
+              ))}
+              {subjects.length === 0 && (
+                <span className="text-[8px] text-slate-400">Physics, Chem, Math</span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* â”€â”€ FOREGROUND LAYER: Tilted Watermark Ribbon (Upper-Left to Bottom-Right) â”€â”€ */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
+        {/* Diagonal Line & Ribbon tilted at 12 degrees (Upper-left to Bottom-right) */}
+        <div className="w-[140%] -mx-[20%] rotate-12 py-2.5 bg-slate-900/90 backdrop-blur-xs text-white text-center shadow-lg border-y-2 border-teal-400/80 flex items-center justify-center gap-2 group-hover:bg-slate-900 transition-colors">
+          <span className="text-xs">ðŸ“Š</span>
+          <span className="text-[11px] font-black tracking-widest uppercase bg-gradient-to-r from-teal-300 via-white to-teal-300 bg-clip-text text-transparent">
+            VIEW FULL ANALYTICS
+          </span>
+          <span className="text-xs font-black text-teal-300 group-hover:translate-x-1 transition-transform">
+            âž”
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// â”€â”€â”€ ACTION ITEMS WIDGET â”€â”€â”€
 function ActionItemsWidget({
   tasks,
   scheduledTests,
@@ -857,7 +1021,7 @@ function ActionItemsWidget({
     <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-          <span>📋</span> Action Items
+          <span>ðŸ“‹</span> Action Items
         </h3>
         <button
           type="button"
@@ -883,7 +1047,7 @@ function ActionItemsWidget({
       </div>
       {items.length === 0 ? (
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-xs text-emerald-900 font-bold">
-          🎉 All caught up! No pending items in this category.
+          ðŸŽ‰ All caught up! No pending items in this category.
         </div>
       ) : (
         <div className="space-y-2">
@@ -899,7 +1063,7 @@ function ActionItemsWidget({
                   <span className="font-bold text-slate-900 block truncate">{it.title}</span>
                   {it.date && (
                     <span className="text-[9.5px] font-semibold text-slate-500 block">
-                      {it.itemType === "test" ? `📅 Scheduled: ${it.date}` : `Target: ${it.date}`}
+                      {it.itemType === "test" ? `ðŸ“… Scheduled: ${it.date}` : `Target: ${it.date}`}
                     </span>
                   )}
                 </div>
@@ -909,7 +1073,7 @@ function ActionItemsWidget({
                 onClick={() => (it.itemType === "test" ? onCompleteTest(it.id) : onCompleteTask(it.id))}
                 className="text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg hover:bg-emerald-200 active:scale-95 shrink-0"
               >
-                Done ✓
+                Done âœ“
               </button>
             </div>
           ))}
@@ -917,14 +1081,14 @@ function ActionItemsWidget({
       )}
       {totalCount > 5 && (
         <button type="button" onClick={onViewAll} className="w-full text-center text-[11px] font-bold text-slate-600 hover:text-slate-900 pt-1 block">
-          View All ({totalCount}) →
+          View All ({totalCount}) â†’
         </button>
       )}
     </div>
   );
 }
 
-// ─── MAIN DASHBOARD PAGE ───
+// â”€â”€â”€ MAIN DASHBOARD PAGE â”€â”€â”€
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -1029,7 +1193,7 @@ export default function DashboardPage() {
       const uid = currentUser.id;
       if (!isCancelled) {
         setUser(currentUser);
-        // INSTANT HYDRATE: last refresh ka mentor report turant dikha do —
+        // INSTANT HYDRATE: last refresh ka mentor report turant dikha do â€”
         // DB fetch complete hone tak card khaali nahi dikhega.
         const localMentor = loadMentorReportLocal(uid);
         if (localMentor?.report) {
@@ -1244,7 +1408,7 @@ export default function DashboardPage() {
 
       setLoading(false);
 
-      // AI Mentor: strictly read-only — never auto-generate.
+      // AI Mentor: strictly read-only â€” never auto-generate.
       // DB ka latest report chalega; agar DB me null hai to last refresh ka
       // localStorage copy dikhega (card refresh/back par khaali nahi hoga).
       if (!isCancelled) {
@@ -1324,7 +1488,7 @@ export default function DashboardPage() {
     for (const e of sameDay) {
       if (timeRangesOverlap(newFrom, newTo, e.time_from, e.time_to)) {
         const label = e.topic_name || "a previous entry";
-        return `Time overlap with "${label}" (${e.time_from || "?"} – ${e.time_to || "?"}). Alag time range use karo.`;
+        return `Time overlap with "${label}" (${e.time_from || "?"} â€“ ${e.time_to || "?"}). Alag time range use karo.`;
       }
     }
     return null;
@@ -1415,10 +1579,10 @@ export default function DashboardPage() {
     return (
       <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center text-white p-6">
         <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-2xl shadow-lg mb-4 animate-pulse">
-          ⚡
+          âš¡
         </div>
         <h2 className="text-base font-black">PrepWise Cockpit</h2>
-        <p className="text-xs text-slate-400 mt-1">Starting engine…</p>
+        <p className="text-xs text-slate-400 mt-1">Starting engineâ€¦</p>
       </div>
     );
   }
@@ -1482,7 +1646,7 @@ export default function DashboardPage() {
                   <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">DAYS LEFT</span>
                 </div>
                 <div className="mt-1 pt-1.5 border-t border-white/10 flex flex-col items-center">
-                  <span className="text-[10px] font-bold text-slate-300 tracking-wide">📅 {formattedDate}</span>
+                  <span className="text-[10px] font-bold text-slate-300 tracking-wide">ðŸ“… {formattedDate}</span>
                   {shifts.length > 0 && (
                     <div className="w-full mt-1.5">
                       <select
@@ -1515,7 +1679,7 @@ export default function DashboardPage() {
               {todayHours}
               <span className="text-xs font-semibold text-slate-500 ml-0.5">h</span>
             </div>
-            <span className="text-[10px] font-bold text-teal block mt-0.5">Study Timer →</span>
+            <span className="text-[10px] font-bold text-teal block mt-0.5">Study Timer â†’</span>
           </button>
 
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 flex flex-col justify-between shadow-2xs">
@@ -1550,7 +1714,7 @@ export default function DashboardPage() {
             <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Tasks</span>
             <div className="text-lg font-black text-slate-900 tracking-tight">{allTasks.length}</div>
             <span className={`text-[10px] font-bold block mt-0.5 ${allTasks.length > 0 ? "text-rose-600" : "text-emerald-600"}`}>
-              {allTasks.length > 0 ? "Pending" : "All Done ✓"}
+              {allTasks.length > 0 ? "Pending" : "All Done âœ“"}
             </span>
           </div>
         </div>
@@ -1559,7 +1723,7 @@ export default function DashboardPage() {
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
-              <span>⚖️</span> Today's Study Split
+              <span>âš–ï¸</span> Today's Study Split
             </span>
           </div>
           <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex mb-2.5 shadow-inner">
@@ -1580,7 +1744,7 @@ export default function DashboardPage() {
           </div>
           {splitRatio.verified > 0 && (
             <div className="mt-2.5 flex items-center gap-2 bg-teal/10 border border-teal/20 rounded-xl px-3 py-2">
-              <span className="text-sm">🛡️</span>
+              <span className="text-sm">ðŸ›¡ï¸</span>
               <div className="flex-1">
                 <span className="text-[11px] font-bold text-teal">{splitRatio.verified}m Verified (Leaderboard Counted)</span>
                 <p className="text-[10px] text-teal/80 mt-0.5">Face cam + App blocker both ON</p>
@@ -1657,7 +1821,7 @@ export default function DashboardPage() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="w-8 h-8 rounded-xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-sm shadow-inner">
-                    ✨
+                    âœ¨
                   </div>
                   <span className="text-[8.5px] font-black uppercase tracking-wider text-teal-300 bg-teal-500/20 px-2 py-0.5 rounded-full border border-teal-400/30">
                     Text / Photo
@@ -1667,12 +1831,12 @@ export default function DashboardPage() {
                   AI Doubt Solver
                 </h4>
                 <p className="text-[9.5px] font-medium text-slate-300 leading-relaxed line-clamp-2">
-                  Photo upload karo ya type karo — step-by-step NCERT formula & concept solutions pao.
+                  Photo upload karo ya type karo â€” step-by-step NCERT formula & concept solutions pao.
                 </p>
               </div>
               <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-bold text-teal-300">
                 <span>Ask Doubts</span>
-                <span className="transition-transform group-hover:translate-x-0.5">→</span>
+                <span className="transition-transform group-hover:translate-x-0.5">â†’</span>
               </div>
             </button>
 
@@ -1686,7 +1850,7 @@ export default function DashboardPage() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-sm shadow-inner">
-                    📹
+                    ðŸ“¹
                   </div>
                   <span className="flex items-center gap-1 text-[8.5px] font-black uppercase tracking-wider text-rose-300 bg-rose-500/20 px-2 py-0.5 rounded-full border border-rose-400/30">
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
@@ -1697,12 +1861,12 @@ export default function DashboardPage() {
                   Live Video Call
                 </h4>
                 <p className="text-[9.5px] font-medium text-indigo-200/90 leading-relaxed line-clamp-2">
-                  Hands-free camera on karke book dikhao — AI teacher live aawaz mein real-time samjhaye.
+                  Hands-free camera on karke book dikhao â€” AI teacher live aawaz mein real-time samjhaye.
                 </p>
               </div>
               <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-bold text-indigo-300">
                 <span>Start Video Call</span>
-                <span className="transition-transform group-hover:translate-x-0.5">→</span>
+                <span className="transition-transform group-hover:translate-x-0.5">â†’</span>
               </div>
             </button>
           </div>
@@ -1712,10 +1876,10 @@ export default function DashboardPage() {
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
-              <span>📈</span> Recent Mock Performance
+              <span>ðŸ“ˆ</span> Recent Mock Performance
             </span>
             <button type="button" onClick={() => router.push("/tests/analysis")} className="text-[11px] font-bold text-indigo-700 hover:underline">
-              View Detailed Analysis →
+              View Detailed Analysis â†’
             </button>
           </div>
           {recentTests.length === 0 ? (
@@ -1756,6 +1920,14 @@ export default function DashboardPage() {
           onOpenSyllabus={() => router.push("/library")}
         />
 
+        {/* 9.5 ANALYTICS TEASER BANNER (MINI VISUALIZATION + DIAGONAL WATERMARK) */}
+        <AnalyticsTeaserBanner
+          logs={allPastLogs}
+          splitRatio={splitRatio}
+          subjects={subjects}
+          onOpenAnalytics={() => router.push("/analytics")}
+        />
+
         {/* 10. QUICK ROUTE CARDS */}
         <div className="grid grid-cols-3 gap-2">
           <button
@@ -1763,7 +1935,7 @@ export default function DashboardPage() {
             onClick={() => router.push("/library")}
             className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
           >
-            <div className="text-xl mb-1">📚</div>
+            <div className="text-xl mb-1">ðŸ“š</div>
             <div>
               <div className="text-xs font-black text-slate-900">Syllabus</div>
               <div className="text-[9px] font-semibold text-slate-500">Chapters & Backlogs</div>
@@ -1774,7 +1946,7 @@ export default function DashboardPage() {
             onClick={() => router.push("/tests")}
             className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
           >
-            <div className="text-xl mb-1">📊</div>
+            <div className="text-xl mb-1">ðŸ“Š</div>
             <div>
               <div className="text-xs font-black text-slate-900">Test Hub</div>
               <div className="text-[8.5px] font-semibold text-slate-500 leading-tight">LOG, VIEW & SCHEDULE</div>
@@ -1785,7 +1957,7 @@ export default function DashboardPage() {
             onClick={() => router.push("/analytics")}
             className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
           >
-            <div className="text-xl mb-1">📈</div>
+            <div className="text-xl mb-1">ðŸ“ˆ</div>
             <div>
               <div className="text-xs font-black text-slate-900">Analytics</div>
               <div className="text-[9px] font-semibold text-slate-500">Charts & Heatmap</div>
@@ -1801,7 +1973,7 @@ export default function DashboardPage() {
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-teal text-white flex items-center justify-center text-sm shadow-xs font-bold">
-                  ✏️
+                  âœï¸
                 </span>
                 <div>
                   <h3 className="text-sm font-black text-slate-900">Log Questions Solved</h3>
@@ -1813,7 +1985,7 @@ export default function DashboardPage() {
                 onClick={() => setShowAddQuestionModal(false)}
                 className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-200 text-sm font-bold"
               >
-                ✕
+                âœ•
               </button>
             </div>
 
@@ -1829,7 +2001,7 @@ export default function DashboardPage() {
                       <div className="truncate">
                         <span className="text-slate-800">{e.topic_name || "Practice Session"}</span>
                         {e.time_from && e.time_to && (
-                          <span className="ml-1.5 text-slate-400 font-normal text-[9px]">{e.time_from}–{e.time_to}</span>
+                          <span className="ml-1.5 text-slate-400 font-normal text-[9px]">{e.time_from}â€“{e.time_to}</span>
                         )}
                         {e.source && e.source !== "manual" && (
                           <span className="ml-1 text-[9px] text-indigo-500 font-semibold">[{e.source}]</span>
@@ -1845,7 +2017,7 @@ export default function DashboardPage() {
             <form onSubmit={handleSaveQuestionLog} className="p-4 space-y-3 overflow-y-auto text-xs">
               {questionConflictWarning && (
                 <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-[11px] font-bold text-rose-700">
-                  ⚠️ {questionConflictWarning}
+                  âš ï¸ {questionConflictWarning}
                 </div>
               )}
 
@@ -1900,9 +2072,9 @@ export default function DashboardPage() {
                     const mins = dur % 60;
                     return (
                       <p className="text-[10px] font-bold text-teal mt-1">
-                        ⏱ Duration: {hrs > 0 ? `${hrs}h ` : ""}{mins > 0 ? `${mins}m` : ""}
+                        â± Duration: {hrs > 0 ? `${hrs}h ` : ""}{mins > 0 ? `${mins}m` : ""}
                         {parseInt(qCount) > 0 && (t - f) > 0
-                          ? ` · ${Math.round((parseInt(qCount) / (t - f)) * 60)} Q/hr`
+                          ? ` Â· ${Math.round((parseInt(qCount) / (t - f)) * 60)} Q/hr`
                           : ""}
                       </p>
                     );
@@ -2002,7 +2174,7 @@ export default function DashboardPage() {
                   disabled={savingQuestion}
                   className="flex-1 py-2.5 rounded-xl bg-teal text-white font-black text-xs hover:bg-teal/90 disabled:opacity-50 shadow-md"
                 >
-                  {savingQuestion ? "Saving…" : "Save Entry"}
+                  {savingQuestion ? "Savingâ€¦" : "Save Entry"}
                 </button>
               </div>
             </form>
