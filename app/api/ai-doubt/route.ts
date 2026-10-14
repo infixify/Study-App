@@ -221,7 +221,7 @@ RULES FOR PERFECT ANSWERS:
    - Steps ko 'Step 1:', 'Step 2:' likh.
    - Formula ya Note ke liye 'Formula:' ya 'Important:' likh.
    - Points ke liye '- ' bullet use kar.
-3. Math Symbols (VERY STRICT): Sirf clean Unicode hi use kar — x², x³, √(49)=7, a/b, a×b, ±, →, °C, π, ≤, ≥, ≠, ∞. LaTeX bilkul NAHI: na '
+3. Math Symbols (VERY STRICT): Sirf clean Unicode hi use kar — x², x³, √(49)=7, a/b, a×b, ±, →, °C, π, ≤, ≥, ≠, ∞. LaTeX bilkul NAHI: dollar sign bilkul mat likho, na double dollar, na \\frac, na \\times, na \\sqrt, na koi backslash command. Formula seedha plain text mein likho, jaise F = ma ya v² = u² + 2as ya E = mc².
 4. Tone: Helpful, clear aur seedha to-the-point solution de. Question ke upar diya gaya LANGUAGE RULE strictly follow karo (same language + script as the student).`;
 
 interface ImagePart {
