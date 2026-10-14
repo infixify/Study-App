@@ -825,11 +825,20 @@ function AnalyticsTeaserBanner({
   subjects,
   onOpenAnalytics,
 }: {
-  logs: DailyLogItem[];
-  splitRatio: { theory: number; practice: number; revision: number; verified?: number };
-  subjects: SubjectItem[];
+  logs?: DailyLogItem[];
+  splitRatio?: { theory: number; practice: number; revision: number; verified?: number };
+  subjects?: SubjectItem[];
   onOpenAnalytics: () => void;
 }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const safeLogs = Array.isArray(logs) ? logs : [];
+  const safeSubjects = Array.isArray(subjects) ? subjects : [];
+  const safeSplit = splitRatio || { theory: 33, practice: 33, revision: 34, verified: 0 };
+
   // Compute past 7 days study minutes for the mini sparkline bars
   const weekData = useMemo(() => {
     const days: { label: string; mins: number }[] = [];
@@ -838,24 +847,30 @@ function AnalyticsTeaserBanner({
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      const dateStr = d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-      const dayName = dayNames[d.getDay()];
-      const matching = logs.find((l) => l.log_date === dateStr);
+      let dateStr = "";
+      try {
+        dateStr = d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      } catch (_) {
+        dateStr = d.toISOString().split("T")[0];
+      }
+      const dayName = dayNames[d.getDay()] || "D";
+      const matching = safeLogs.find((l) => l && l.log_date === dateStr);
       days.push({
         label: dayName,
-        mins: matching ? matching.study_time_minutes : 0,
+        mins: matching && typeof matching.study_time_minutes === "number" ? matching.study_time_minutes : 0,
       });
     }
     return days;
-  }, [logs]);
+  }, [safeLogs]);
 
   // Total study time across all logs
   const totalMins = useMemo(() => {
-    return logs.reduce((acc, l) => acc + (l.study_time_minutes || 0), 0);
-  }, [logs]);
+    return safeLogs.reduce((acc, l) => acc + (l?.study_time_minutes || 0), 0);
+  }, [safeLogs]);
 
   const maxDailyMins = useMemo(() => {
-    const mx = Math.max(...weekData.map((d) => d.mins));
+    if (!weekData.length) return 180;
+    const mx = Math.max(...weekData.map((d) => d.mins || 0));
     return mx > 0 ? mx : 180;
   }, [weekData]);
 
@@ -864,14 +879,19 @@ function AnalyticsTeaserBanner({
   return (
     <div
       onClick={onOpenAnalytics}
-      className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-2xs hover:shadow-md cursor-pointer group active:scale-[0.99] transition-all"
+      className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs hover:shadow-md cursor-pointer group active:scale-[0.99] transition-all select-none"
     >
       {/* â”€â”€ BACKGROUND LAYER: Mini Analytics Elements (Preview & Visualisation) â”€â”€ */}
-      <div className="p-3.5 space-y-2.5 opacity-50 group-hover:opacity-35 transition-opacity select-none pointer-events-none filter blur-[0.2px]">
+      <div className="p-3.5 space-y-2.5 opacity-55 group-hover:opacity-40 transition-opacity pointer-events-none filter blur-[0.2px]">
         {/* Mini Header & Summary Pill */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <span className="text-xs">ðŸ“Š</span>
+            <svg className="w-3.5 h-3.5 text-teal-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 3v18h18" />
+              <path d="M18 17V9" />
+              <path d="M13 17V5" />
+              <path d="M8 17v-3" />
+            </svg>
             <span className="text-[11px] font-black text-slate-800 tracking-tight">Analytics & Telemetry</span>
           </div>
           <div className="flex items-center gap-1.5">
@@ -919,17 +939,17 @@ function AnalyticsTeaserBanner({
             <span className="font-bold text-slate-500 block mb-1">Study Split Ratio</span>
             <div className="flex h-2 rounded-full overflow-hidden bg-slate-200 gap-0.5">
               <div
-                style={{ width: `${Math.max(10, splitRatio.theory || 33)}%` }}
+                style={{ width: `${Math.max(10, safeSplit.theory || 33)}%` }}
                 className="bg-indigo-500 h-full"
                 title="Theory"
               />
               <div
-                style={{ width: `${Math.max(10, splitRatio.practice || 33)}%` }}
+                style={{ width: `${Math.max(10, safeSplit.practice || 33)}%` }}
                 className="bg-emerald-500 h-full"
                 title="Practice"
               />
               <div
-                style={{ width: `${Math.max(10, splitRatio.revision || 33)}%` }}
+                style={{ width: `${Math.max(10, safeSplit.revision || 33)}%` }}
                 className="bg-amber-500 h-full"
                 title="Revision"
               />
@@ -945,19 +965,19 @@ function AnalyticsTeaserBanner({
           <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2 flex flex-col justify-between">
             <span className="font-bold text-slate-500 block mb-1">Subject Focus</span>
             <div className="flex items-center gap-1.5 flex-wrap">
-              {subjects.slice(0, 4).map((s, i) => (
+              {safeSubjects.slice(0, 4).map((s, i) => (
                 <span
-                  key={s.id || i}
-                  className="inline-flex items-center gap-1 text-[8px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200/80 text-slate-700"
+                  key={s?.id || i}
+                  className="inline-flex items-center gap-1 text-[8px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700"
                 >
                   <span
                     className="w-1.5 h-1.5 rounded-full shrink-0"
                     style={{ backgroundColor: subjectColors[i % subjectColors.length] }}
                   />
-                  <span className="truncate max-w-[45px]">{s.name}</span>
+                  <span className="truncate max-w-[45px]">{s?.name || "Subject"}</span>
                 </span>
               ))}
-              {subjects.length === 0 && (
+              {safeSubjects.length === 0 && (
                 <span className="text-[8px] text-slate-400">Physics, Chem, Math</span>
               )}
             </div>
@@ -967,15 +987,20 @@ function AnalyticsTeaserBanner({
 
       {/* â”€â”€ FOREGROUND LAYER: Tilted Watermark Ribbon (Upper-Left to Bottom-Right) â”€â”€ */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
-        {/* Diagonal Line & Ribbon tilted at 12 degrees (Upper-left to Bottom-right) */}
-        <div className="w-[140%] -mx-[20%] rotate-12 py-2.5 bg-slate-900/90 backdrop-blur-xs text-white text-center shadow-lg border-y-2 border-teal-400/80 flex items-center justify-center gap-2 group-hover:bg-slate-900 transition-colors">
-          <span className="text-xs">ðŸ“Š</span>
+        {/* Diagonal Line & Ribbon tilted at 6 degrees from Upper-left to Bottom-right */}
+        <div className="w-[140%] -mx-[20%] rotate-6 py-2.5 bg-slate-900/95 backdrop-blur-sm text-white text-center shadow-lg border-y-2 border-teal-400/90 flex items-center justify-center gap-2 group-hover:bg-slate-900 transition-colors">
+          <svg className="w-4 h-4 text-teal-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 3v18h18" />
+            <path d="M18 17V9" />
+            <path d="M13 17V5" />
+            <path d="M8 17v-3" />
+          </svg>
           <span className="text-[11px] font-black tracking-widest uppercase bg-gradient-to-r from-teal-300 via-white to-teal-300 bg-clip-text text-transparent">
             VIEW FULL ANALYTICS
           </span>
-          <span className="text-xs font-black text-teal-300 group-hover:translate-x-1 transition-transform">
-            âž”
-          </span>
+          <svg className="w-3.5 h-3.5 text-teal-300 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+          </svg>
         </div>
       </div>
     </div>
@@ -1154,41 +1179,50 @@ export default function DashboardPage() {
   useEffect(() => {
     let isCancelled = false;
 
-    async function loadData() {
-      const cached = getMemCache<any>("full_dashboard_state");
-      if (cached && !isCancelled) {
-        setProfile(cached.profile);
-        setUser(cached.user);
-        setSelectedShiftId(cached.selectedShiftId);
-        setDailyGoalMins(cached.dailyGoalMins);
-        setSubjects(cached.subjects || []);
-        setChapters(cached.chapters || []);
-        if (cached.distinctSub) setSelectedDistinctSubject(cached.distinctSub);
-        if (cached.initChap) setQChapterId(cached.initChap);
-        setExamSchedules(cached.examSchedules || []);
-        setShiftsMap(cached.shiftsMap || {});
-        setTodayStudyMins(cached.todayStudyMins || 0);
-        setSplitRatio(cached.splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 });
-        setTotalQuestionsAllTime(cached.totalQuestionsAllTime || 0);
-        setTodayQuestions(cached.todayQuestions || 0);
-        setTodayQuestionEntries(cached.todayQuestionEntries || []);
-        setTodayAvgQPerHr(cached.todayAvgQPerHr || 0);
-        setStreak(cached.streak || 0);
-        setChapterProgress(cached.chapterProgress || []);
-        setAllTasks(cached.allTasks || []);
-        setScheduledTests(cached.scheduledTests || []);
-        setRecentTests(cached.recentTests || []);
+    // Safety failsafe: Cockpit loading screen should never freeze the UI indefinitely
+    const safetyTimer = setTimeout(() => {
+      if (!isCancelled) {
         setLoading(false);
       }
+    }, 3500);
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+    async function loadData() {
+      try {
+        const cached = getMemCache<any>("full_dashboard_state");
+        if (cached && !isCancelled) {
+          setProfile(cached.profile);
+          setUser(cached.user);
+          setSelectedShiftId(cached.selectedShiftId);
+          setDailyGoalMins(cached.dailyGoalMins);
+          setSubjects(cached.subjects || []);
+          setChapters(cached.chapters || []);
+          if (cached.allPastLogs) setAllPastLogs(cached.allPastLogs);
+          if (cached.distinctSub) setSelectedDistinctSubject(cached.distinctSub);
+          if (cached.initChap) setQChapterId(cached.initChap);
+          setExamSchedules(cached.examSchedules || []);
+          setShiftsMap(cached.shiftsMap || {});
+          setTodayStudyMins(cached.todayStudyMins || 0);
+          setSplitRatio(cached.splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 });
+          setTotalQuestionsAllTime(cached.totalQuestionsAllTime || 0);
+          setTodayQuestions(cached.todayQuestions || 0);
+          setTodayQuestionEntries(cached.todayQuestionEntries || []);
+          setTodayAvgQPerHr(cached.todayAvgQPerHr || 0);
+          setStreak(cached.streak || 0);
+          setChapterProgress(cached.chapterProgress || []);
+          setAllTasks(cached.allTasks || []);
+          setScheduledTests(cached.scheduledTests || []);
+          setRecentTests(cached.recentTests || []);
+          setLoading(false);
+        }
 
-      if (!session) {
-        if (!cached) router.push("/");
-        return;
-      }
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session) {
+          if (!cached) router.push("/");
+          return;
+        }
       const currentUser = session.user;
       const uid = currentUser.id;
       if (!isCancelled) {
@@ -1404,6 +1438,7 @@ export default function DashboardPage() {
         allTasks: tasksData,
         scheduledTests: schedTestsData,
         recentTests: recentTestsData,
+        allPastLogs: pastLogsRes?.data || [],
       });
 
       setLoading(false);
@@ -1428,12 +1463,21 @@ export default function DashboardPage() {
           }
         }
       }
+      } catch (err) {
+        console.error("Dashboard loadData caught error:", err);
+      } finally {
+        clearTimeout(safetyTimer);
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
     }
 
     loadData();
 
     return () => {
       isCancelled = true;
+      clearTimeout(safetyTimer);
     };
   }, [router, todayStr]);
 
@@ -1578,11 +1622,13 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center text-white p-6">
-        <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-2xl shadow-lg mb-4 animate-pulse">
-          âš¡
+        <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center shadow-lg mb-4 animate-pulse text-teal-400">
+          <svg className="w-7 h-7" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+          </svg>
         </div>
-        <h2 className="text-base font-black">PrepWise Cockpit</h2>
-        <p className="text-xs text-slate-400 mt-1">Starting engineâ€¦</p>
+        <h2 className="text-base font-black tracking-wide">PrepWise Cockpit</h2>
+        <p className="text-xs text-slate-400 mt-1 font-medium">Starting engine...</p>
       </div>
     );
   }
