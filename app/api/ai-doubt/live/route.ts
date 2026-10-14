@@ -50,7 +50,7 @@ Respond ONLY with a single valid JSON object, no markdown fences, no extra text:
 - "reply": your full answer in the SAME language and script the student used. NEVER translate or change script.
 - "tts_text": EXACT same text as "reply" (no script conversion, no translation). Keep it identical for TTS.
 - "language": detected language code (en, hi, bn, ta, te, mr, gu, pa, ml, kn, or).
-- Technical terms MUST remain in English. NO markdown, NO LaTeX, NO asterisks. Write formulas as spoken words, e.g. "v equals u plus a t", "under root of 2". Flowing natural speech text only.`;
+- Technical terms MUST remain in English. NO markdown, NO LaTeX, NO asterisks, NO dollar signs (never wrap formulas in them). Write formulas as spoken words, e.g. "v equals u plus a t", "under root of 2". Flowing natural speech text only.`;
 
 
 // Parse Gemini dual-output JSON; fall back to raw text if parsing fails
@@ -69,6 +69,93 @@ function parseDual(raw: string): { reply: string; tts_text: string; language?: s
     }
   } catch (_) {}
   return { reply: raw, tts_text: raw };
+}
+
+// Post-process the AI reply: models sometimes ignore the "no LaTeX" rule and
+// emit $...$, \( ... \), \frac{a}{b}, x^{2} etc. The chat UI renders plain text
+// + Unicode only, so convert/strip every LaTeX leftover deterministically.
+// Formatting markers (**heading**, 'Step 1:', 'Formula:', '- ' bullets) are
+// NOT touched.
+function cleanSymbols(text: string): string {
+  if (!text) return text;
+  let t = text;
+  // LaTeX line breaks
+  t = t.replace(/\\\\/g, "\n");
+  // spacing commands \, \; \! \: \ (space)
+  t = t.replace(/\\[,;!:]|\\ /g, " ");
+  // superscripts / subscripts → Unicode (run BEFORE \frac/\sqrt so nested
+  // cases like \sqrt{x^{2}} or \frac{v^{2}}{2} also resolve correctly)
+  const sup: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻", "n": "ⁿ", "i": "ⁱ" };
+  const sub: Record<string, string> = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉", "+": "₊", "-": "₋", "n": "ₙ", "i": "ᵢ" };
+  const supify = (s: string) => s.split("").map((c) => sup[c] || c).join("");
+  const subify = (s: string) => s.split("").map((c) => sub[c] || c).join("");
+  // (brace content must not contain a backslash — LaTeX commands inside
+  // ^{...}/_{...} are resolved by the second pass after the command map)
+  t = t.replace(/\^\{([^{}\\]*)\}/g, (_, c) => supify(c));
+  t = t.replace(/\^([0-9a-zA-Z])/g, (_, c) => sup[c] || c);
+  t = t.replace(/_\{([^{}\\]*)\}/g, (_, c) => subify(c));
+  t = t.replace(/_([0-9a-zA-Z])/g, (_, c) => sub[c] || c);
+  // \text{...} / \mathrm{...} / \mathbf{...} / \mathit{...} → inner text
+  t = t.replace(/\\(?:text|mathrm|mathbf|mathit|textrm)\{([^{}]*)\}/g, "$1");
+  // \sqrt{x} → √(x), \sqrt[n]{x} → n√(x) (BEFORE \frac so \frac{\sqrt{2}}{2}
+  // resolves inner sqrt first)
+  t = t.replace(/\\sqrt\[([^\]]*)\]\{([^{}]*)\}/g, "$1√($2)");
+  t = t.replace(/\\sqrt\{([^{}]*)\}/g, "√($1)");
+  // \frac{a}{b} / \dfrac / \tfrac → a/b (parens around numerator when it has
+  // +/- so 'u + at' doesn't become ambiguous; two passes for one nesting level)
+  const fracify = (_: string, a: string, b: string) =>
+    /[+\-]/.test(a) ? "(" + a + ")/" + b : a + "/" + b;
+  t = t.replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, fracify);
+  t = t.replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, fracify);
+  // common LaTeX commands → Unicode symbols
+  const sym: Record<string, string> = {
+    times: "×", cdot: "·", div: "÷", pm: "±", mp: "∓",
+    leq: "≤", le: "≤", geq: "≥", ge: "≥", neq: "≠", ne: "≠",
+    approx: "≈", equiv: "≡", propto: "∝", sim: "∼", simeq: "≃", cong: "≅",
+    infty: "∞", partial: "∂", nabla: "∇", sum: "∑", prod: "∏", int: "∫",
+    leftarrow: "←", rightarrow: "→", to: "→", Rightarrow: "⇒", Leftarrow: "⇐",
+    leftrightarrow: "↔", mapsto: "↦", gets: "←", implies: "⇒",
+    circ: "°", deg: "°", degree: "°",
+    alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", varepsilon: "ε",
+    theta: "θ", vartheta: "θ", lambda: "λ", mu: "μ", nu: "ν", pi: "π", rho: "ρ",
+    sigma: "σ", phi: "φ", varphi: "φ", omega: "ω", kappa: "κ", eta: "η",
+    xi: "ξ", zeta: "ζ", tau: "τ", chi: "χ", psi: "ψ",
+    Delta: "Δ", Gamma: "Γ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π",
+    Sigma: "Σ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+    cup: "∪", cap: "∩", setminus: "∖", in: "∈", notin: "∉",
+    subset: "⊂", supset: "⊃", subseteq: "⊆", supseteq: "⊇", emptyset: "∅",
+    forall: "∀", exists: "∃", neg: "¬", land: "∧", wedge: "∧", lor: "∨", vee: "∨",
+    oplus: "⊕", otimes: "⊗", perp: "⊥", parallel: "∥", mid: "∣",
+    ldots: "…", dots: "…", cdots: "…", vdots: "⋮", ddots: "⋱", prime: "′",
+    cos: "cos", sin: "sin", tan: "tan", cot: "cot", sec: "sec", csc: "csc", cosec: "cosec",
+    log: "log", ln: "ln", exp: "exp", min: "min", max: "max", lim: "lim",
+    det: "det", dim: "dim", gcd: "gcd", lcm: "lcm", mod: "mod", arg: "arg",
+    sup: "sup", inf: "inf",
+    left: "", right: "", big: "", Big: "", bigl: "", bigr: "", Bigl: "", Bigr: "",
+    displaystyle: "", limits: "", nolimits: "", quad: " ", qquad: "  ",
+  };
+  t = t.replace(/\\([a-zA-Z]+)/g, (m, cmd) => (cmd in sym ? sym[cmd] : m));
+  // second sup/sub pass: resolves wrappers whose content was a LaTeX command
+  // (e.g. 30^{\circ} → 30^{°} → 30°, x^{\infty} → x∞)
+  t = t.replace(/\^\{([^{}\\]*)\}/g, (_, c) => supify(c));
+  t = t.replace(/_\{([^{}\\]*)\}/g, (_, c) => subify(c));
+  // escaped literal chars \{ \} \% \& \# \_ → literal
+  t = t.replace(/\\([{}%&#_])/g, "$1");
+  // math delimiters: $...$, $...$, \( ... \), \[ ... \]
+  t = t.replace(/\$\$/g, " ").replace(/\$/g, "");
+  t = t.replace(/\\\(|\\\)|\\\[|\\\]/g, " ");
+  // leftover unknown backslash commands → drop them
+  t = t.replace(/\\[a-zA-Z]+/g, "");
+  // empty LaTeX groups
+  t = t.replace(/\{\s*\}/g, "");
+  // tidy whitespace
+  t = t.replace(/[ \t]{2,}/g, " ");
+  t = t
+    .split("\n")
+    .map((l) => l.replace(/[ \t]+$/g, ""))
+    .join("\n")
+    .trim();
+  return t;
 }
 
 export async function POST(req: NextRequest) {
@@ -190,8 +277,8 @@ export async function POST(req: NextRequest) {
     // ─────────────────────────────────────────────────────────────
     const geminiOk = (r: { text?: string; ttsText?: string }, model: string, keyLabel: string) =>
       NextResponse.json({
-        reply: r.text,
-        tts_text: r.ttsText,
+        reply: cleanSymbols(r.text || ""),
+        tts_text: cleanSymbols(r.ttsText || r.text || ""),
         model: `Google Gemini (${model}${keyLabel === "Key 2" ? " - Key 2" : ""})`,
         provider: "google",
         success: true,
@@ -284,8 +371,8 @@ export async function POST(req: NextRequest) {
           if (groqReply) {
             const gd = parseDual(groqReply);
             return NextResponse.json({
-              reply: gd.reply,
-              tts_text: gd.tts_text,
+              reply: cleanSymbols(gd.reply),
+              tts_text: cleanSymbols(gd.tts_text),
               model: "Groq Live LPU (qwen3.8-27b)",
               provider: "groq",
               success: true,
@@ -349,8 +436,8 @@ export async function POST(req: NextRequest) {
             if (cfReply) {
               const cd = parseDual(cfReply);
               return NextResponse.json({
-                reply: cd.reply,
-                tts_text: cd.tts_text,
+                reply: cleanSymbols(cd.reply),
+                tts_text: cleanSymbols(cd.tts_text),
                 model: `Cloudflare Workers AI (${model})`,
                 provider: "cloudflare",
                 success: true,

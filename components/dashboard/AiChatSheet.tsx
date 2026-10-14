@@ -544,6 +544,9 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
                 )}
               </div>
 
+            </div>
+          ))}
+
           {loading && (
             <div className="flex items-center gap-2 text-slate-400 text-xs py-2 px-3 bg-slate-800/40 rounded-2xl w-fit border border-slate-700/40">
               <div className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />

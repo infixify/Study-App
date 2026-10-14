@@ -261,8 +261,9 @@ function cleanTextForSpeech(raw: string): string {
   if (!raw) return "";
   let text = raw;
 
-  // 1. Remove Markdown syntax & asterisks
+  // 1. Remove Markdown syntax, asterisks, dollar signs & backslashes
   text = text.replace(/[*#`_~\[\](){}]/g, " ");
+  text = text.replace(/[$\\]/g, "");
   text = text.replace(/Step \d+:\s*/gi, "");
 
   // 2. Normalizing pauses: Multiple commas, ellipses, and semicolons to continuous speech
@@ -314,6 +315,11 @@ function cleanTextForSpeech(raw: string): string {
 function normalizeMathToTextbook(raw: string): string {
   if (!raw) return "";
   let text = raw;
+
+  // Strip LaTeX math delimiters first: $$...$$, $...$, \( ... \), \[ ... \]
+  text = text.replace(/\$\$/g, " ");
+  text = text.replace(/\\\(|\\\)|\\\[|\\\]/g, " ");
+  text = text.replace(/\$/g, "");
 
   // Fractions: \frac{a}{b} -> (a / b)
   text = text.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)");
@@ -744,7 +750,7 @@ export default function LiveVideoCallModal({
   const playAudioChunk = useCallback(
     async (textToSpeak: string, msgId: string) => {
       if (isMuted) return;
-      const cleanedSpeech = cleanTextForSpeech(textToSpeak);
+      const cleanedSpeech = cleanTextForSpeech(normalizeMathToTextbook(textToSpeak));
       if (!cleanedSpeech) return;
 
       // Stop any in-flight speech session before starting a new one
