@@ -245,6 +245,20 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
 
   useEffect(() => {
     try {
+      // 24h localStorage history first (survives app close/browser restart)
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const savedAt = parsed?._savedAt || 0;
+        const msgs = parsed?.messages;
+        if (Array.isArray(msgs) && msgs.length > 0 && savedAt && Date.now() - savedAt < 24 * 60 * 60 * 1000) {
+          setMessages(msgs);
+          setSessionRestored(true);
+          return;
+        }
+        localStorage.removeItem(STORAGE_KEY);
+      }
+      // fallback: legacy same-tab sessionStorage (array format)
       const saved = sessionStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
@@ -274,6 +288,8 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
           images: undefined,
         }));
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(lightweight));
+        // persist 24h history in localStorage (images stripped, last 15 msgs)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ _savedAt: Date.now(), messages: lightweight }));
       } catch {}
     }
   }, [messages]);
@@ -295,6 +311,7 @@ export function AiChatSheet({ open, isOpen, onClose, studentContext }: AiChatShe
   const handleClearHistory = () => {
     try {
       sessionStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(STORAGE_KEY);
     } catch {}
     setSessionRestored(false);
     setMessages([

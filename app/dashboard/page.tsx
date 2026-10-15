@@ -23,7 +23,8 @@ declare global {
 }
 
 // ─── HIGH-SPEED SWR IN-MEMORY CACHE ───
-const CACHE_TTL_MS = 1 * 60 * 1000;
+const CACHE_TTL_MS = 1 * 60 * 1000; // in-memory cache (fast, per-mount)
+const LOCAL_CACHE_TTL_MS = 30 * 60 * 1000; // localStorage cache (survives refresh, 30 min)
 const globalMemoryCache: Record<string, { timestamp: number; data: any }> = {};
 
 function getMemCache<T>(key: string): T | null {
@@ -35,7 +36,7 @@ function getMemCache<T>(key: string): T | null {
     const raw = localStorage.getItem(`pw_cache_${key}`);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Date.now() - parsed.timestamp < CACHE_TTL_MS * 3) {
+      if (Date.now() - parsed.timestamp < LOCAL_CACHE_TTL_MS) {
         globalMemoryCache[key] = parsed;
         return parsed.data as T;
       }
@@ -56,6 +57,12 @@ function loadMentorReportLocal(userId: string): { report: any; studentContext: a
     if (raw) return JSON.parse(raw);
   } catch (_) {}
   return null;
+}
+
+// Invalidate cached dashboard state after user writes (task/test/goal changes)
+function invalidateMemCache(key: string): void {
+  delete globalMemoryCache[key];
+  try { localStorage.removeItem("pw_cache_" + key); } catch (_) {}
 }
 
 function setMemCache<T>(key: string, data: T): void {
@@ -1462,11 +1469,13 @@ export default function DashboardPage() {
   const handleCompleteTask = async (id: string) => {
     setAllTasks((prev) => prev.filter((t) => t.id !== id));
     await supabase.from("tasks").update({ status: "completed" }).eq("id", id);
+    invalidateMemCache("full_dashboard_state");
   };
 
   const handleCompleteTest = async (id: string) => {
     setScheduledTests((prev) => prev.filter((t) => t.id !== id));
     await supabase.from("test_schedule").update({ status: "completed" }).eq("id", id);
+    invalidateMemCache("full_dashboard_state");
   };
 
   const handleOpenQuestionModal = () => {
@@ -1567,6 +1576,7 @@ export default function DashboardPage() {
     setDailyGoalMins(mins);
     if (user?.id) {
       await supabase.from("users").update({ daily_goal_minutes: mins }).eq("uid", user.id);
+      invalidateMemCache("full_dashboard_state");
     }
   };
 
