@@ -1954,13 +1954,13 @@ export default function DashboardPage() {
           </button>
           <button
             type="button"
-            onClick={() => router.push("/analytics")}
+            onClick={() => router.push("/error-book")}
             className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
           >
-            <div className="text-xl mb-1">📈</div>
+            <div className="text-xl mb-1">📕</div>
             <div>
-              <div className="text-xs font-black text-slate-900">Analytics</div>
-              <div className="text-[9px] font-semibold text-slate-500">Charts & Heatmap</div>
+              <div className="text-xs font-black text-slate-900">Error Book</div>
+              <div className="text-[9px] font-semibold text-slate-500">Mistakes & Revisions</div>
             </div>
           </button>
         </div>
