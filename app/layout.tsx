@@ -6,7 +6,7 @@ import FcmSync from "@/components/FcmSync";
 import { HeaderProvider } from "@/components/dashboard/AppHeader";
 
 export const metadata: Metadata = {
-  title: "PrepWise â€” JEE/NEET/Boards Study Companion",
+  title: "PrepWise - JEE/NEET/Boards Study Companion",
   description: "Track your prep, close your backlog, walk into the exam ready.",
 };
 
@@ -28,7 +28,6 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
           rel="stylesheet"
         />
-
         <style>{`
           :root {
             --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -54,18 +53,16 @@ export default function RootLayout({
                 } else {
                   document.documentElement.classList.remove("dark");
                 }
-
                 // 2. ZERO-FLASH AUTH REDIRECT:
                 // Runs synchronously in 0ms BEFORE React renders login UI
                 const isAuth = Object.keys(localStorage).some(function(k) {
-                  return (k.includes("auth-token") || k.includes("sb-")) && 
-                         (localStorage.getItem(k) || "").includes("access_token");
+                  return (k.includes("auth-token") || k.includes("sb-")) &&
+                          (localStorage.getItem(k) || "").includes("access_token");
                 });
                 if (isAuth && (window.location.pathname === "/" || window.location.pathname === "/login")) {
                   window.location.replace("/dashboard");
                 }
               } catch (_) {}
-
               // 3. Safe Media Service Worker Registration
               if (typeof window !== "undefined" && "serviceWorker" in navigator) {
                 window.addEventListener("load", function() {
