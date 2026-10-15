@@ -22,7 +22,7 @@ declare global {
   }
 }
 
-// â”€â”€â”€ HIGH-SPEED SWR IN-MEMORY CACHE â”€â”€â”€
+// ─── HIGH-SPEED SWR IN-MEMORY CACHE ───
 const CACHE_TTL_MS = 1 * 60 * 1000;
 const globalMemoryCache: Record<string, { timestamp: number; data: any }> = {};
 
@@ -44,7 +44,7 @@ function getMemCache<T>(key: string): T | null {
   return null;
 }
 
-// â”€â”€â”€ AI MENTOR REPORT PERSISTENCE (last refresh survives page refresh/back) â”€â”€â”€
+// ─── AI MENTOR REPORT PERSISTENCE (last refresh survives page refresh/back) ───
 function saveMentorReportLocal(userId: string, report: any, studentContext: any) {
   try {
     localStorage.setItem(`pw_ai_mentor_report_${userId}`, JSON.stringify({ report, studentContext }));
@@ -170,7 +170,7 @@ const QUOTE_LIMIT = 1; // 1 tap allowed: see 1 initial + 1 new = 2 cards total p
 const MEME_LIMIT = 1; // same for memes
 
 function getTodayKey(): string {
-  const istDate = getIstTodayDateString();
+  const istDate = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   return `pw_content_state_${istDate}`;
 }
 
@@ -224,7 +224,7 @@ function saveDailyContentState(state: DailyContentState): void {
 
 function getDailyIndex(deckLength: number, salt: string): number {
   if (!deckLength) return 0;
-  const dateStr = getIstTodayDateString();
+  const dateStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const str = dateStr + salt;
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -265,11 +265,11 @@ const FALLBACK_MOTIVATION_QUOTES: ContentCardItem[] = [
 const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
   {
     id: "meme-1",
-    quote: "PAKAD PAKAD PAKAD... Isne aaj tak numericals solve nahi kiye! Daya, iska phone tod do! ðŸ˜‚",
+    quote: "PAKAD PAKAD PAKAD... Isne aaj tak numericals solve nahi kiye! Daya, iska phone tod do! 😂",
     quote_source: "human",
     character: "ACP Pradyuman",
     show: "CID (Meme Edition)",
-    icon_or_sticker: "ðŸ‘®",
+    icon_or_sticker: "👮",
     color: "from-gray-600 to-gray-800",
     bg: "bg-gray-50",
     border: "border-gray-300",
@@ -279,13 +279,13 @@ const FALLBACK_MEME_QUOTES: ContentCardItem[] = [
 ];
 
 function getGreeting(name: string, hour: number): string {
-  if (hour >= 5 && hour < 9) return `Rise & grind, ${name}! ðŸŒ…`;
-  if (hour >= 9 && hour < 12) return `Good morning, ${name}! â˜€ï¸`;
-  if (hour >= 12 && hour < 14) return `Lunch break, ${name}? ðŸ± Back to books!`;
-  if (hour >= 14 && hour < 17) return `Afternoon session, ${name}! ðŸ’ª`;
-  if (hour >= 17 && hour < 20) return `Evening grind, ${name}! ðŸŒ†`;
-  if (hour >= 20 && hour < 23) return `Late night mode, ${name}! ðŸŒ™`;
-  return `Night owl alert, ${name}! ðŸ¦‰ Sleep matters too!`;
+  if (hour >= 5 && hour < 9) return `Rise & grind, ${name}! 🌅`;
+  if (hour >= 9 && hour < 12) return `Good morning, ${name}! ☀️`;
+  if (hour >= 12 && hour < 14) return `Lunch break, ${name}? 🍱 Back to books!`;
+  if (hour >= 14 && hour < 17) return `Afternoon session, ${name}! 💪`;
+  if (hour >= 17 && hour < 20) return `Evening grind, ${name}! 🌆`;
+  if (hour >= 20 && hour < 23) return `Late night mode, ${name}! 🌙`;
+  return `Night owl alert, ${name}! 🦉 Sleep matters too!`;
 }
 
 function timeToMinutes(t: string | null | undefined): number | null {
@@ -405,7 +405,7 @@ function HeroWidget({
               quote_source: (row.quote_source as "human" | "anime") || "human",
               character: row.character,
               show: row.show || "PrepWise",
-              icon_or_sticker: row.icon_or_sticker || "âš¡",
+              icon_or_sticker: row.icon_or_sticker || "⚡",
               color: row.gradient_color || fallbackPreset.color,
               bg: row.bg_color || fallbackPreset.bg,
               border: row.border_color || fallbackPreset.border,
@@ -505,8 +505,7 @@ function HeroWidget({
   }, [dbItems, mode]);
 
   const greeting = getGreeting(name, hour);
-  const todayHours = ((todayStudyMins || 0) / 60).toFixed(1);
-  const safeSplitRatio = splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 };
+  const todayHours = (todayStudyMins / 60).toFixed(1);
   const goalHoursDisplay = (dailyGoalMins / 60).toFixed(0);
   const goalReached = todayStudyMins >= dailyGoalMins && dailyGoalMins > 0;
 
@@ -533,7 +532,7 @@ function HeroWidget({
               streak > 0 ? "bg-orange-50 border border-orange-200" : "bg-slate-50 border border-slate-200"
             }`}
           >
-            <span className="text-sm leading-none">{streak > 0 ? "ðŸ”¥" : "ðŸ’¤"}</span>
+            <span className="text-sm leading-none">{streak > 0 ? "🔥" : "💤"}</span>
             <span className={`text-sm font-black leading-none ${streak > 0 ? "text-orange-600" : "text-slate-400"}`}>
               {streak}
             </span>
@@ -548,7 +547,7 @@ function HeroWidget({
               goalReached ? "bg-emerald-50 border-emerald-200" : "bg-teal-50 border-teal-100"
             }`}
           >
-            <span className="text-sm">{goalReached ? "ðŸŽ¯" : "â±ï¸"}</span>
+            <span className="text-sm">{goalReached ? "🎯" : "⏱️"}</span>
             <div>
               <p className={`text-[9px] font-bold leading-none ${goalReached ? "text-emerald-600" : "text-teal-600"}`}>
                 {goalReached ? "Goal Reached!" : "Today"}
@@ -560,7 +559,7 @@ function HeroWidget({
           </div>
           <div className="flex-1 bg-indigo-50 border border-indigo-100 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-1.5">
             <div className="flex items-center gap-1.5">
-              <span className="text-sm">ðŸŽ¯</span>
+              <span className="text-sm">🎯</span>
               <div>
                 <p className="text-[9px] font-bold text-indigo-600 leading-none">Goal</p>
                 <p className="text-xs font-black text-indigo-900 leading-tight">{goalHoursDisplay}h / day</p>
@@ -630,7 +629,7 @@ function HeroWidget({
               mode === "motivation" ? "bg-white text-slate-900 shadow-2xs font-black" : "text-slate-500 hover:text-slate-900"
             }`}
           >
-            <span>ðŸ”¥</span> Motivation
+            <span>🔥</span> Motivation
           </button>
           <button
             type="button"
@@ -639,7 +638,7 @@ function HeroWidget({
               mode === "meme" ? "bg-white text-slate-900 shadow-2xs font-black" : "text-slate-500 hover:text-slate-900"
             }`}
           >
-            <span>ðŸ˜‚</span> Memes
+            <span>😂</span> Memes
           </button>
         </div>
 
@@ -667,15 +666,15 @@ function HeroWidget({
                     }}
                   />
                 ) : (
-                  <span className="text-3xl">{currentItem.icon_or_sticker || "ðŸ’¡"}</span>
+                  <span className="text-3xl">{currentItem.icon_or_sticker || "💡"}</span>
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className={`text-xs font-bold ${currentItem.text} leading-snug`}>"{currentItem.quote}"</p>
                 <div className="flex items-center justify-between mt-2 pt-1 border-t border-black/5">
-                  <p className="text-[10px] font-black text-slate-600 truncate">â€” {currentItem.character}</p>
+                  <p className="text-[10px] font-black text-slate-600 truncate">— {currentItem.character}</p>
                   <span className="text-[9.5px] font-bold text-slate-500 bg-white/90 border border-slate-200/90 px-1.5 py-0.5 rounded-full shrink-0">
-                    Tap â†»
+                    Tap ↻
                   </span>
                 </div>
               </div>
@@ -686,8 +685,8 @@ function HeroWidget({
         {limitHit && (
           <p className="mt-1.5 text-center text-[10px] font-bold text-red-500">
             {mode === "motivation"
-              ? `Only 2 quotes per day â€” come back tomorrow! ðŸŒ…`
-              : `Only 2 memes per day â€” back to books! ðŸ“š`}
+              ? `Only 2 quotes per day — come back tomorrow! 🌅`
+              : `Only 2 memes per day — back to books! 📚`}
           </p>
         )}
       </div>
@@ -695,7 +694,7 @@ function HeroWidget({
   );
 }
 
-// â”€â”€â”€ SYLLABUS COMPLETION WIDGET â”€â”€â”€
+// ─── SYLLABUS COMPLETION WIDGET ───
 function SyllabusCompletionWidget({
   subjects,
   chapters,
@@ -758,7 +757,7 @@ function SyllabusCompletionWidget({
     <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-          <span>ðŸ“š</span> Syllabus Completion
+          <span>📚</span> Syllabus Completion
         </h3>
         <span className="text-[10px] font-bold text-teal bg-teal/10 px-2 py-0.5 rounded-md border border-teal/20">
           {stats.grandDone}/{stats.grandTotal} Chapters Done
@@ -813,33 +812,24 @@ function SyllabusCompletionWidget({
         className="w-full py-2.5 bg-slate-50 hover:bg-slate-100 text-teal font-bold text-xs rounded-xl border border-slate-200 transition-all text-center flex items-center justify-center gap-1"
       >
         <span>Go to Syllabus Tracker</span>
-        <span>â†’</span>
+        <span>→</span>
       </button>
     </div>
   );
 }
 
-// â”€â”€â”€ ANALYTICS TEASER BANNER (MINI VISUALIZATION + DIAGONAL WATERMARK) â”€â”€â”€
+// ─── ANALYTICS TEASER BANNER (MINI VISUALIZATION + DIAGONAL WATERMARK) ───
 function AnalyticsTeaserBanner({
   logs,
   splitRatio,
   subjects,
   onOpenAnalytics,
 }: {
-  logs?: DailyLogItem[];
-  splitRatio?: { theory: number; practice: number; revision: number; verified?: number };
-  subjects?: SubjectItem[];
+  logs: DailyLogItem[];
+  splitRatio: { theory: number; practice: number; revision: number; verified?: number };
+  subjects: SubjectItem[];
   onOpenAnalytics: () => void;
 }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const safeLogs = Array.isArray(logs) ? logs : [];
-  const safeSubjects = Array.isArray(subjects) ? subjects : [];
-  const safeSplit = splitRatio || { theory: 33, practice: 33, revision: 34, verified: 0 };
-
   // Compute past 7 days study minutes for the mini sparkline bars
   const weekData = useMemo(() => {
     const days: { label: string; mins: number }[] = [];
@@ -848,30 +838,24 @@ function AnalyticsTeaserBanner({
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      let dateStr = "";
-      try {
-        dateStr = getIstTodayDateString(d);
-      } catch (_) {
-        dateStr = d.toISOString().split("T")[0];
-      }
-      const dayName = dayNames[d.getDay()] || "D";
-      const matching = safeLogs.find((l) => l && l.log_date === dateStr);
+      const dateStr = d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      const dayName = dayNames[d.getDay()];
+      const matching = logs.find((l) => l.log_date === dateStr);
       days.push({
         label: dayName,
-        mins: matching && typeof matching.study_time_minutes === "number" ? matching.study_time_minutes : 0,
+        mins: matching ? matching.study_time_minutes : 0,
       });
     }
     return days;
-  }, [safeLogs]);
+  }, [logs]);
 
   // Total study time across all logs
   const totalMins = useMemo(() => {
-    return safeLogs.reduce((acc, l) => acc + (l?.study_time_minutes || 0), 0);
-  }, [safeLogs]);
+    return logs.reduce((acc, l) => acc + (l.study_time_minutes || 0), 0);
+  }, [logs]);
 
   const maxDailyMins = useMemo(() => {
-    if (!weekData.length) return 180;
-    const mx = Math.max(...weekData.map((d) => d.mins || 0));
+    const mx = Math.max(...weekData.map((d) => d.mins));
     return mx > 0 ? mx : 180;
   }, [weekData]);
 
@@ -880,19 +864,14 @@ function AnalyticsTeaserBanner({
   return (
     <div
       onClick={onOpenAnalytics}
-      className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs hover:shadow-md cursor-pointer group active:scale-[0.99] transition-all select-none"
+      className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-2xs hover:shadow-md cursor-pointer group active:scale-[0.99] transition-all"
     >
-      {/* â”€â”€ BACKGROUND LAYER: Mini Analytics Elements (Preview & Visualisation) â”€â”€ */}
-      <div className="p-3.5 space-y-2.5 opacity-80 group-hover:opacity-65 transition-opacity pointer-events-none">
+      {/* ── BACKGROUND LAYER: Mini Analytics Elements (Preview & Visualisation) ── */}
+      <div className="p-3.5 space-y-2.5 opacity-50 group-hover:opacity-35 transition-opacity select-none pointer-events-none filter blur-[0.2px]">
         {/* Mini Header & Summary Pill */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <svg className="w-3.5 h-3.5 text-teal-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 3v18h18" />
-              <path d="M18 17V9" />
-              <path d="M13 17V5" />
-              <path d="M8 17v-3" />
-            </svg>
+            <span className="text-xs">📊</span>
             <span className="text-[11px] font-black text-slate-800 tracking-tight">Analytics & Telemetry</span>
           </div>
           <div className="flex items-center gap-1.5">
@@ -940,17 +919,17 @@ function AnalyticsTeaserBanner({
             <span className="font-bold text-slate-500 block mb-1">Study Split Ratio</span>
             <div className="flex h-2 rounded-full overflow-hidden bg-slate-200 gap-0.5">
               <div
-                style={{ width: `${Math.max(10, safeSplit.theory || 33)}%` }}
+                style={{ width: `${Math.max(10, splitRatio.theory || 33)}%` }}
                 className="bg-indigo-500 h-full"
                 title="Theory"
               />
               <div
-                style={{ width: `${Math.max(10, safeSplit.practice || 33)}%` }}
+                style={{ width: `${Math.max(10, splitRatio.practice || 33)}%` }}
                 className="bg-emerald-500 h-full"
                 title="Practice"
               />
               <div
-                style={{ width: `${Math.max(10, safeSplit.revision || 33)}%` }}
+                style={{ width: `${Math.max(10, splitRatio.revision || 33)}%` }}
                 className="bg-amber-500 h-full"
                 title="Revision"
               />
@@ -966,19 +945,19 @@ function AnalyticsTeaserBanner({
           <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2 flex flex-col justify-between">
             <span className="font-bold text-slate-500 block mb-1">Subject Focus</span>
             <div className="flex items-center gap-1.5 flex-wrap">
-              {safeSubjects.slice(0, 4).map((s, i) => (
+              {subjects.slice(0, 4).map((s, i) => (
                 <span
-                  key={s?.id || i}
-                  className="inline-flex items-center gap-1 text-[8px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700"
+                  key={s.id || i}
+                  className="inline-flex items-center gap-1 text-[8px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200/80 text-slate-700"
                 >
                   <span
                     className="w-1.5 h-1.5 rounded-full shrink-0"
                     style={{ backgroundColor: subjectColors[i % subjectColors.length] }}
                   />
-                  <span className="truncate max-w-[45px]">{s?.name || "Subject"}</span>
+                  <span className="truncate max-w-[45px]">{s.name}</span>
                 </span>
               ))}
-              {safeSubjects.length === 0 && (
+              {subjects.length === 0 && (
                 <span className="text-[8px] text-slate-400">Physics, Chem, Math</span>
               )}
             </div>
@@ -986,29 +965,24 @@ function AnalyticsTeaserBanner({
         </div>
       </div>
 
-      {/* â”€â”€ FOREGROUND LAYER: Tilted Watermark Ribbon (Upper-Left to Bottom-Right) â”€â”€ */}
+      {/* ── FOREGROUND LAYER: Tilted Watermark Ribbon (Upper-Left to Bottom-Right) ── */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
-        {/* Diagonal Line & Ribbon tilted at 6 degrees from Upper-left to Bottom-right */}
-        <div className="w-[140%] -mx-[20%] rotate-6 py-2 bg-slate-900/80 backdrop-blur-xs text-white text-center shadow-md border-y-2 border-teal-400/90 flex items-center justify-center gap-2 group-hover:bg-slate-900/90 transition-all">
-          <svg className="w-4 h-4 text-teal-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 3v18h18" />
-            <path d="M18 17V9" />
-            <path d="M13 17V5" />
-            <path d="M8 17v-3" />
-          </svg>
+        {/* Diagonal Line & Ribbon tilted at 12 degrees (Upper-left to Bottom-right) */}
+        <div className="w-[140%] -mx-[20%] rotate-12 py-2.5 bg-slate-900/90 backdrop-blur-xs text-white text-center shadow-lg border-y-2 border-teal-400/80 flex items-center justify-center gap-2 group-hover:bg-slate-900 transition-colors">
+          <span className="text-xs">📊</span>
           <span className="text-[11px] font-black tracking-widest uppercase bg-gradient-to-r from-teal-300 via-white to-teal-300 bg-clip-text text-transparent">
             VIEW FULL ANALYTICS
           </span>
-          <svg className="w-3.5 h-3.5 text-teal-300 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-          </svg>
+          <span className="text-xs font-black text-teal-300 group-hover:translate-x-1 transition-transform">
+            ➔
+          </span>
         </div>
       </div>
     </div>
   );
 }
 
-// â”€â”€â”€ ACTION ITEMS WIDGET â”€â”€â”€
+// ─── ACTION ITEMS WIDGET ───
 function ActionItemsWidget({
   tasks,
   scheduledTests,
@@ -1047,7 +1021,7 @@ function ActionItemsWidget({
     <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-          <span>ðŸ“‹</span> Action Items
+          <span>📋</span> Action Items
         </h3>
         <button
           type="button"
@@ -1073,7 +1047,7 @@ function ActionItemsWidget({
       </div>
       {items.length === 0 ? (
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-xs text-emerald-900 font-bold">
-          ðŸŽ‰ All caught up! No pending items in this category.
+          🎉 All caught up! No pending items in this category.
         </div>
       ) : (
         <div className="space-y-2">
@@ -1089,7 +1063,7 @@ function ActionItemsWidget({
                   <span className="font-bold text-slate-900 block truncate">{it.title}</span>
                   {it.date && (
                     <span className="text-[9.5px] font-semibold text-slate-500 block">
-                      {it.itemType === "test" ? `ðŸ“… Scheduled: ${it.date}` : `Target: ${it.date}`}
+                      {it.itemType === "test" ? `📅 Scheduled: ${it.date}` : `Target: ${it.date}`}
                     </span>
                   )}
                 </div>
@@ -1099,7 +1073,7 @@ function ActionItemsWidget({
                 onClick={() => (it.itemType === "test" ? onCompleteTest(it.id) : onCompleteTask(it.id))}
                 className="text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg hover:bg-emerald-200 active:scale-95 shrink-0"
               >
-                Done âœ“
+                Done ✓
               </button>
             </div>
           ))}
@@ -1107,14 +1081,14 @@ function ActionItemsWidget({
       )}
       {totalCount > 5 && (
         <button type="button" onClick={onViewAll} className="w-full text-center text-[11px] font-bold text-slate-600 hover:text-slate-900 pt-1 block">
-          View All ({totalCount}) â†’
+          View All ({totalCount}) →
         </button>
       )}
     </div>
   );
 }
 
-// â”€â”€â”€ MAIN DASHBOARD PAGE â”€â”€â”€
+// ─── MAIN DASHBOARD PAGE ───
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -1170,65 +1144,56 @@ export default function DashboardPage() {
     const later = new Date(now.getTime() + 60 * 60 * 1000);
     return `${String(later.getHours()).padStart(2, "0")}:00`;
   });
-  const [qLogDate, setQLogDate] = useState<string>(() => getIstTodayDateString());
+  const [qLogDate, setQLogDate] = useState<string>(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
   const [savingQuestion, setSavingQuestion] = useState(false);
   const [questionConflictWarning, setQuestionConflictWarning] = useState<string | null>(null);
 
   // Exact Indian Standard Time (IST) YYYY-MM-DD
-  const todayStr = useMemo(() => getIstTodayDateString(), []);
+  const todayStr = useMemo(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }), []);
 
   useEffect(() => {
     let isCancelled = false;
 
-    // Safety failsafe: Cockpit loading screen should never freeze the UI indefinitely
-    const safetyTimer = setTimeout(() => {
-      if (!isCancelled) {
+    async function loadData() {
+      const cached = getMemCache<any>("full_dashboard_state");
+      if (cached && !isCancelled) {
+        setProfile(cached.profile);
+        setUser(cached.user);
+        setSelectedShiftId(cached.selectedShiftId);
+        setDailyGoalMins(cached.dailyGoalMins);
+        setSubjects(cached.subjects || []);
+        setChapters(cached.chapters || []);
+        if (cached.distinctSub) setSelectedDistinctSubject(cached.distinctSub);
+        if (cached.initChap) setQChapterId(cached.initChap);
+        setExamSchedules(cached.examSchedules || []);
+        setShiftsMap(cached.shiftsMap || {});
+        setTodayStudyMins(cached.todayStudyMins || 0);
+        setSplitRatio(cached.splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 });
+        setTotalQuestionsAllTime(cached.totalQuestionsAllTime || 0);
+        setTodayQuestions(cached.todayQuestions || 0);
+        setTodayQuestionEntries(cached.todayQuestionEntries || []);
+        setTodayAvgQPerHr(cached.todayAvgQPerHr || 0);
+        setStreak(cached.streak || 0);
+        setChapterProgress(cached.chapterProgress || []);
+        setAllTasks(cached.allTasks || []);
+        setScheduledTests(cached.scheduledTests || []);
+        setRecentTests(cached.recentTests || []);
         setLoading(false);
       }
-    }, 3500);
 
-    async function loadData() {
-      try {
-        const cached = getMemCache<any>("full_dashboard_state");
-        if (cached && !isCancelled) {
-          setProfile(cached.profile);
-          setUser(cached.user);
-          setSelectedShiftId(cached.selectedShiftId);
-          setDailyGoalMins(cached.dailyGoalMins);
-          setSubjects(cached.subjects || []);
-          setChapters(cached.chapters || []);
-          if (cached.allPastLogs) setAllPastLogs(cached.allPastLogs);
-          if (cached.distinctSub) setSelectedDistinctSubject(cached.distinctSub);
-          if (cached.initChap) setQChapterId(cached.initChap);
-          setExamSchedules(cached.examSchedules || []);
-          setShiftsMap(cached.shiftsMap || {});
-          setTodayStudyMins(cached.todayStudyMins || 0);
-          setSplitRatio(cached.splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 });
-          setTotalQuestionsAllTime(cached.totalQuestionsAllTime || 0);
-          setTodayQuestions(cached.todayQuestions || 0);
-          setTodayQuestionEntries(cached.todayQuestionEntries || []);
-          setTodayAvgQPerHr(cached.todayAvgQPerHr || 0);
-          setStreak(cached.streak || 0);
-          setChapterProgress(cached.chapterProgress || []);
-          setAllTasks(cached.allTasks || []);
-          setScheduledTests(cached.scheduledTests || []);
-          setRecentTests(cached.recentTests || []);
-          setLoading(false);
-        }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session) {
-          if (!cached) router.push("/");
-          return;
-        }
+      if (!session) {
+        if (!cached) router.push("/");
+        return;
+      }
       const currentUser = session.user;
       const uid = currentUser.id;
       if (!isCancelled) {
         setUser(currentUser);
-        // INSTANT HYDRATE: last refresh ka mentor report turant dikha do â€”
+        // INSTANT HYDRATE: last refresh ka mentor report turant dikha do —
         // DB fetch complete hone tak card khaali nahi dikhega.
         const localMentor = loadMentorReportLocal(uid);
         if (localMentor?.report) {
@@ -1439,12 +1404,11 @@ export default function DashboardPage() {
         allTasks: tasksData,
         scheduledTests: schedTestsData,
         recentTests: recentTestsData,
-        allPastLogs: pastLogsRes?.data || [],
       });
 
       setLoading(false);
 
-      // AI Mentor: strictly read-only â€” never auto-generate.
+      // AI Mentor: strictly read-only — never auto-generate.
       // DB ka latest report chalega; agar DB me null hai to last refresh ka
       // localStorage copy dikhega (card refresh/back par khaali nahi hoga).
       if (!isCancelled) {
@@ -1464,21 +1428,12 @@ export default function DashboardPage() {
           }
         }
       }
-      } catch (err) {
-        console.error("Dashboard loadData caught error:", err);
-      } finally {
-        clearTimeout(safetyTimer);
-        if (!isCancelled) {
-          setLoading(false);
-        }
-      }
     }
 
     loadData();
 
     return () => {
       isCancelled = true;
-      clearTimeout(safetyTimer);
     };
   }, [router, todayStr]);
 
@@ -1519,7 +1474,7 @@ export default function DashboardPage() {
     const later = new Date(now.getTime() + 60 * 60 * 1000);
     setQTimeFrom(`${String(now.getHours()).padStart(2, "0")}:00`);
     setQTimeTo(`${String(later.getHours()).padStart(2, "0")}:00`);
-    setQLogDate(getIstTodayDateString(now));
+    setQLogDate(now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
     setQTopicName("");
     setQCount("30");
     setQStartFrom("1");
@@ -1533,7 +1488,7 @@ export default function DashboardPage() {
     for (const e of sameDay) {
       if (timeRangesOverlap(newFrom, newTo, e.time_from, e.time_to)) {
         const label = e.topic_name || "a previous entry";
-        return `Time overlap with "${label}" (${e.time_from || "?"} â€“ ${e.time_to || "?"}). Alag time range use karo.`;
+        return `Time overlap with "${label}" (${e.time_from || "?"} – ${e.time_to || "?"}). Alag time range use karo.`;
       }
     }
     return null;
@@ -1623,27 +1578,24 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center text-white p-6">
-        <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center shadow-lg mb-4 animate-pulse text-teal-400">
-          <svg className="w-7 h-7" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-          </svg>
+        <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-2xl shadow-lg mb-4 animate-pulse">
+          ⚡
         </div>
-        <h2 className="text-base font-black tracking-wide">PrepWise Cockpit</h2>
-        <p className="text-xs text-slate-400 mt-1 font-medium">Starting engine...</p>
+        <h2 className="text-base font-black">PrepWise Cockpit</h2>
+        <p className="text-xs text-slate-400 mt-1">Starting engine…</p>
       </div>
     );
   }
 
   const studentName = profile?.name || user?.user_metadata?.full_name || "Champion";
-  const firstName = (studentName || "Champion").split(" ")[0];
-  const todayHours = ((todayStudyMins || 0) / 60).toFixed(1);
-  const safeSplitRatio = splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 };
+  const firstName = studentName.split(" ")[0];
+  const todayHours = (todayStudyMins / 60).toFixed(1);
 
-  const sumSplit = (safeSplitRatio.theory || 0) + (safeSplitRatio.practice || 0) + (safeSplitRatio.revision || 0);
+  const sumSplit = splitRatio.theory + splitRatio.practice + splitRatio.revision;
   const totalSplitMins = sumSplit > 0 ? sumSplit : 1;
-  const theoryPct = Math.round(((safeSplitRatio.theory || 0) / totalSplitMins) * 100);
-  const practicePct = Math.round(((safeSplitRatio.practice || 0) / totalSplitMins) * 100);
-  const revisionPct = Math.round(((safeSplitRatio.revision || 0) / totalSplitMins) * 100);
+  const theoryPct = Math.round((splitRatio.theory / totalSplitMins) * 100);
+  const practicePct = Math.round((splitRatio.practice / totalSplitMins) * 100);
+  const revisionPct = Math.round((splitRatio.revision / totalSplitMins) * 100);
 
   return (
     <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased">
@@ -1670,7 +1622,7 @@ export default function DashboardPage() {
             const days = calculateDaysLeft(exam.exam_date);
             const shifts = shiftsMap[exam.id] || [];
             const formattedDate = new Date(exam.exam_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-            let cleanLabel = exam?.label || "Exam";
+            let cleanLabel = exam.label;
             const norm = cleanLabel.toLowerCase();
             if (norm.includes("session 1") || norm.includes("jan")) cleanLabel = "JEE Main (Jan)";
             else if (norm.includes("session 2") || norm.includes("apr")) cleanLabel = "JEE Main (Apr)";
@@ -1694,7 +1646,7 @@ export default function DashboardPage() {
                   <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">DAYS LEFT</span>
                 </div>
                 <div className="mt-1 pt-1.5 border-t border-white/10 flex flex-col items-center">
-                  <span className="text-[10px] font-bold text-slate-300 tracking-wide">ðŸ“… {formattedDate}</span>
+                  <span className="text-[10px] font-bold text-slate-300 tracking-wide">📅 {formattedDate}</span>
                   {shifts.length > 0 && (
                     <div className="w-full mt-1.5">
                       <select
@@ -1727,7 +1679,7 @@ export default function DashboardPage() {
               {todayHours}
               <span className="text-xs font-semibold text-slate-500 ml-0.5">h</span>
             </div>
-            <span className="text-[10px] font-bold text-teal block mt-0.5">Study Timer â†’</span>
+            <span className="text-[10px] font-bold text-teal block mt-0.5">Study Timer →</span>
           </button>
 
           <div className="bg-white p-3 rounded-2xl border border-slate-200/90 flex flex-col justify-between shadow-2xs">
@@ -1762,7 +1714,7 @@ export default function DashboardPage() {
             <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Tasks</span>
             <div className="text-lg font-black text-slate-900 tracking-tight">{allTasks.length}</div>
             <span className={`text-[10px] font-bold block mt-0.5 ${allTasks.length > 0 ? "text-rose-600" : "text-emerald-600"}`}>
-              {allTasks.length > 0 ? "Pending" : "All Done âœ“"}
+              {allTasks.length > 0 ? "Pending" : "All Done ✓"}
             </span>
           </div>
         </div>
@@ -1771,7 +1723,7 @@ export default function DashboardPage() {
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
-              <span>âš–ï¸</span> Today's Study Split
+              <span>⚖️</span> Today's Study Split
             </span>
           </div>
           <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex mb-2.5 shadow-inner">
@@ -1781,24 +1733,24 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center justify-between text-[11px] font-bold px-0.5">
             <span className="flex items-center gap-1.5 text-amber-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Theory ({safeSplitRatio.theory || 0}m)
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Theory ({splitRatio.theory}m)
             </span>
             <span className="flex items-center gap-1.5 text-teal-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-teal" /> Practice ({safeSplitRatio.practice || 0}m)
+              <span className="w-2.5 h-2.5 rounded-full bg-teal" /> Practice ({splitRatio.practice}m)
             </span>
             <span className="flex items-center gap-1.5 text-indigo-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" /> Revision ({safeSplitRatio.revision || 0}m)
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" /> Revision ({splitRatio.revision}m)
             </span>
           </div>
-          {(safeSplitRatio.verified || 0) > 0 && (
+          {splitRatio.verified > 0 && (
             <div className="mt-2.5 flex items-center gap-2 bg-teal/10 border border-teal/20 rounded-xl px-3 py-2">
-              <span className="text-sm">ðŸ›¡ï¸</span>
+              <span className="text-sm">🛡️</span>
               <div className="flex-1">
-                <span className="text-[11px] font-bold text-teal">{(safeSplitRatio.verified || 0)}m Verified (Leaderboard Counted)</span>
+                <span className="text-[11px] font-bold text-teal">{splitRatio.verified}m Verified (Leaderboard Counted)</span>
                 <p className="text-[10px] text-teal/80 mt-0.5">Face cam + App blocker both ON</p>
               </div>
               <span className="text-xs font-black text-teal">
-                {Math.round(((safeSplitRatio.verified || 0) / Math.max(todayStudyMins, 1)) * 100)}%
+                {Math.round((splitRatio.verified / Math.max(todayStudyMins, 1)) * 100)}%
               </span>
             </div>
           )}
@@ -1869,7 +1821,7 @@ export default function DashboardPage() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="w-8 h-8 rounded-xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-sm shadow-inner">
-                    âœ¨
+                    ✨
                   </div>
                   <span className="text-[8.5px] font-black uppercase tracking-wider text-teal-300 bg-teal-500/20 px-2 py-0.5 rounded-full border border-teal-400/30">
                     Text / Photo
@@ -1879,12 +1831,12 @@ export default function DashboardPage() {
                   AI Doubt Solver
                 </h4>
                 <p className="text-[9.5px] font-medium text-slate-300 leading-relaxed line-clamp-2">
-                  Photo upload karo ya type karo â€” step-by-step NCERT formula & concept solutions pao.
+                  Photo upload karo ya type karo — step-by-step NCERT formula & concept solutions pao.
                 </p>
               </div>
               <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-bold text-teal-300">
                 <span>Ask Doubts</span>
-                <span className="transition-transform group-hover:translate-x-0.5">â†’</span>
+                <span className="transition-transform group-hover:translate-x-0.5">→</span>
               </div>
             </button>
 
@@ -1898,7 +1850,7 @@ export default function DashboardPage() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-sm shadow-inner">
-                    ðŸ“¹
+                    📹
                   </div>
                   <span className="flex items-center gap-1 text-[8.5px] font-black uppercase tracking-wider text-rose-300 bg-rose-500/20 px-2 py-0.5 rounded-full border border-rose-400/30">
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
@@ -1909,12 +1861,12 @@ export default function DashboardPage() {
                   Live Video Call
                 </h4>
                 <p className="text-[9.5px] font-medium text-indigo-200/90 leading-relaxed line-clamp-2">
-                  Hands-free camera on karke book dikhao â€” AI teacher live aawaz mein real-time samjhaye.
+                  Hands-free camera on karke book dikhao — AI teacher live aawaz mein real-time samjhaye.
                 </p>
               </div>
               <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-bold text-indigo-300">
                 <span>Start Video Call</span>
-                <span className="transition-transform group-hover:translate-x-0.5">â†’</span>
+                <span className="transition-transform group-hover:translate-x-0.5">→</span>
               </div>
             </button>
           </div>
@@ -1924,10 +1876,10 @@ export default function DashboardPage() {
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-xs font-black mb-2.5">
             <span className="text-slate-900 font-bold flex items-center gap-1.5">
-              <span>ðŸ“ˆ</span> Recent Mock Performance
+              <span>📈</span> Recent Mock Performance
             </span>
             <button type="button" onClick={() => router.push("/tests/analysis")} className="text-[11px] font-bold text-indigo-700 hover:underline">
-              View Detailed Analysis â†’
+              View Detailed Analysis →
             </button>
           </div>
           {recentTests.length === 0 ? (
@@ -1983,7 +1935,7 @@ export default function DashboardPage() {
             onClick={() => router.push("/library")}
             className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
           >
-            <div className="text-xl mb-1">ðŸ“š</div>
+            <div className="text-xl mb-1">📚</div>
             <div>
               <div className="text-xs font-black text-slate-900">Syllabus</div>
               <div className="text-[9px] font-semibold text-slate-500">Chapters & Backlogs</div>
@@ -1994,7 +1946,7 @@ export default function DashboardPage() {
             onClick={() => router.push("/tests")}
             className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
           >
-            <div className="text-xl mb-1">ðŸ“Š</div>
+            <div className="text-xl mb-1">📊</div>
             <div>
               <div className="text-xs font-black text-slate-900">Test Hub</div>
               <div className="text-[8.5px] font-semibold text-slate-500 leading-tight">LOG, VIEW & SCHEDULE</div>
@@ -2005,7 +1957,7 @@ export default function DashboardPage() {
             onClick={() => router.push("/analytics")}
             className="p-3 bg-white hover:bg-slate-50 border border-slate-200/90 rounded-2xl text-left shadow-2xs active:scale-[0.98] transition-all flex flex-col justify-between"
           >
-            <div className="text-xl mb-1">ðŸ“ˆ</div>
+            <div className="text-xl mb-1">📈</div>
             <div>
               <div className="text-xs font-black text-slate-900">Analytics</div>
               <div className="text-[9px] font-semibold text-slate-500">Charts & Heatmap</div>
@@ -2021,7 +1973,7 @@ export default function DashboardPage() {
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-teal text-white flex items-center justify-center text-sm shadow-xs font-bold">
-                  âœï¸
+                  ✏️
                 </span>
                 <div>
                   <h3 className="text-sm font-black text-slate-900">Log Questions Solved</h3>
@@ -2033,7 +1985,7 @@ export default function DashboardPage() {
                 onClick={() => setShowAddQuestionModal(false)}
                 className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-200 text-sm font-bold"
               >
-                âœ•
+                ✕
               </button>
             </div>
 
@@ -2049,7 +2001,7 @@ export default function DashboardPage() {
                       <div className="truncate">
                         <span className="text-slate-800">{e.topic_name || "Practice Session"}</span>
                         {e.time_from && e.time_to && (
-                          <span className="ml-1.5 text-slate-400 font-normal text-[9px]">{e.time_from}â€“{e.time_to}</span>
+                          <span className="ml-1.5 text-slate-400 font-normal text-[9px]">{e.time_from}–{e.time_to}</span>
                         )}
                         {e.source && e.source !== "manual" && (
                           <span className="ml-1 text-[9px] text-indigo-500 font-semibold">[{e.source}]</span>
@@ -2065,7 +2017,7 @@ export default function DashboardPage() {
             <form onSubmit={handleSaveQuestionLog} className="p-4 space-y-3 overflow-y-auto text-xs">
               {questionConflictWarning && (
                 <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-[11px] font-bold text-rose-700">
-                  âš ï¸ {questionConflictWarning}
+                  âš ️ {questionConflictWarning}
                 </div>
               )}
 
@@ -2120,9 +2072,9 @@ export default function DashboardPage() {
                     const mins = dur % 60;
                     return (
                       <p className="text-[10px] font-bold text-teal mt-1">
-                        â± Duration: {hrs > 0 ? `${hrs}h ` : ""}{mins > 0 ? `${mins}m` : ""}
+                        ⏱ Duration: {hrs > 0 ? `${hrs}h ` : ""}{mins > 0 ? `${mins}m` : ""}
                         {parseInt(qCount) > 0 && (t - f) > 0
-                          ? ` Â· ${Math.round((parseInt(qCount) / (t - f)) * 60)} Q/hr`
+                          ? ` · ${Math.round((parseInt(qCount) / (t - f)) * 60)} Q/hr`
                           : ""}
                       </p>
                     );
@@ -2222,7 +2174,7 @@ export default function DashboardPage() {
                   disabled={savingQuestion}
                   className="flex-1 py-2.5 rounded-xl bg-teal text-white font-black text-xs hover:bg-teal/90 disabled:opacity-50 shadow-md"
                 >
-                  {savingQuestion ? "Savingâ€¦" : "Save Entry"}
+                  {savingQuestion ? "Saving…" : "Save Entry"}
                 </button>
               </div>
             </form>
