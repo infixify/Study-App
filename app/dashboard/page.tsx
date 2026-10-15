@@ -170,7 +170,7 @@ const QUOTE_LIMIT = 1; // 1 tap allowed: see 1 initial + 1 new = 2 cards total p
 const MEME_LIMIT = 1; // same for memes
 
 function getTodayKey(): string {
-  const istDate = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const istDate = getIstTodayDateString();
   return `pw_content_state_${istDate}`;
 }
 
@@ -224,7 +224,7 @@ function saveDailyContentState(state: DailyContentState): void {
 
 function getDailyIndex(deckLength: number, salt: string): number {
   if (!deckLength) return 0;
-  const dateStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const dateStr = getIstTodayDateString();
   const str = dateStr + salt;
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -505,7 +505,8 @@ function HeroWidget({
   }, [dbItems, mode]);
 
   const greeting = getGreeting(name, hour);
-  const todayHours = (todayStudyMins / 60).toFixed(1);
+  const todayHours = ((todayStudyMins || 0) / 60).toFixed(1);
+  const safeSplitRatio = splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 };
   const goalHoursDisplay = (dailyGoalMins / 60).toFixed(0);
   const goalReached = todayStudyMins >= dailyGoalMins && dailyGoalMins > 0;
 
@@ -849,7 +850,7 @@ function AnalyticsTeaserBanner({
       d.setDate(d.getDate() - i);
       let dateStr = "";
       try {
-        dateStr = d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+        dateStr = getIstTodayDateString(d);
       } catch (_) {
         dateStr = d.toISOString().split("T")[0];
       }
@@ -882,7 +883,7 @@ function AnalyticsTeaserBanner({
       className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs hover:shadow-md cursor-pointer group active:scale-[0.99] transition-all select-none"
     >
       {/* â”€â”€ BACKGROUND LAYER: Mini Analytics Elements (Preview & Visualisation) â”€â”€ */}
-      <div className="p-3.5 space-y-2.5 opacity-55 group-hover:opacity-40 transition-opacity pointer-events-none filter blur-[0.2px]">
+      <div className="p-3.5 space-y-2.5 opacity-80 group-hover:opacity-65 transition-opacity pointer-events-none">
         {/* Mini Header & Summary Pill */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
@@ -988,7 +989,7 @@ function AnalyticsTeaserBanner({
       {/* â”€â”€ FOREGROUND LAYER: Tilted Watermark Ribbon (Upper-Left to Bottom-Right) â”€â”€ */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
         {/* Diagonal Line & Ribbon tilted at 6 degrees from Upper-left to Bottom-right */}
-        <div className="w-[140%] -mx-[20%] rotate-6 py-2.5 bg-slate-900/95 backdrop-blur-sm text-white text-center shadow-lg border-y-2 border-teal-400/90 flex items-center justify-center gap-2 group-hover:bg-slate-900 transition-colors">
+        <div className="w-[140%] -mx-[20%] rotate-6 py-2 bg-slate-900/80 backdrop-blur-xs text-white text-center shadow-md border-y-2 border-teal-400/90 flex items-center justify-center gap-2 group-hover:bg-slate-900/90 transition-all">
           <svg className="w-4 h-4 text-teal-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 3v18h18" />
             <path d="M18 17V9" />
@@ -1169,12 +1170,12 @@ export default function DashboardPage() {
     const later = new Date(now.getTime() + 60 * 60 * 1000);
     return `${String(later.getHours()).padStart(2, "0")}:00`;
   });
-  const [qLogDate, setQLogDate] = useState<string>(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
+  const [qLogDate, setQLogDate] = useState<string>(() => getIstTodayDateString());
   const [savingQuestion, setSavingQuestion] = useState(false);
   const [questionConflictWarning, setQuestionConflictWarning] = useState<string | null>(null);
 
   // Exact Indian Standard Time (IST) YYYY-MM-DD
-  const todayStr = useMemo(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }), []);
+  const todayStr = useMemo(() => getIstTodayDateString(), []);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1518,7 +1519,7 @@ export default function DashboardPage() {
     const later = new Date(now.getTime() + 60 * 60 * 1000);
     setQTimeFrom(`${String(now.getHours()).padStart(2, "0")}:00`);
     setQTimeTo(`${String(later.getHours()).padStart(2, "0")}:00`);
-    setQLogDate(now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
+    setQLogDate(getIstTodayDateString(now));
     setQTopicName("");
     setQCount("30");
     setQStartFrom("1");
@@ -1634,14 +1635,15 @@ export default function DashboardPage() {
   }
 
   const studentName = profile?.name || user?.user_metadata?.full_name || "Champion";
-  const firstName = studentName.split(" ")[0];
-  const todayHours = (todayStudyMins / 60).toFixed(1);
+  const firstName = (studentName || "Champion").split(" ")[0];
+  const todayHours = ((todayStudyMins || 0) / 60).toFixed(1);
+  const safeSplitRatio = splitRatio || { theory: 0, practice: 0, revision: 0, verified: 0 };
 
-  const sumSplit = splitRatio.theory + splitRatio.practice + splitRatio.revision;
+  const sumSplit = (safeSplitRatio.theory || 0) + (safeSplitRatio.practice || 0) + (safeSplitRatio.revision || 0);
   const totalSplitMins = sumSplit > 0 ? sumSplit : 1;
-  const theoryPct = Math.round((splitRatio.theory / totalSplitMins) * 100);
-  const practicePct = Math.round((splitRatio.practice / totalSplitMins) * 100);
-  const revisionPct = Math.round((splitRatio.revision / totalSplitMins) * 100);
+  const theoryPct = Math.round(((safeSplitRatio.theory || 0) / totalSplitMins) * 100);
+  const practicePct = Math.round(((safeSplitRatio.practice || 0) / totalSplitMins) * 100);
+  const revisionPct = Math.round(((safeSplitRatio.revision || 0) / totalSplitMins) * 100);
 
   return (
     <div className="min-h-screen bg-[#F1F5F9] pb-28 text-[#0F172A] font-sans antialiased">
@@ -1668,7 +1670,7 @@ export default function DashboardPage() {
             const days = calculateDaysLeft(exam.exam_date);
             const shifts = shiftsMap[exam.id] || [];
             const formattedDate = new Date(exam.exam_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-            let cleanLabel = exam.label;
+            let cleanLabel = exam?.label || "Exam";
             const norm = cleanLabel.toLowerCase();
             if (norm.includes("session 1") || norm.includes("jan")) cleanLabel = "JEE Main (Jan)";
             else if (norm.includes("session 2") || norm.includes("apr")) cleanLabel = "JEE Main (Apr)";
@@ -1779,24 +1781,24 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center justify-between text-[11px] font-bold px-0.5">
             <span className="flex items-center gap-1.5 text-amber-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Theory ({splitRatio.theory}m)
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Theory ({safeSplitRatio.theory || 0}m)
             </span>
             <span className="flex items-center gap-1.5 text-teal-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-teal" /> Practice ({splitRatio.practice}m)
+              <span className="w-2.5 h-2.5 rounded-full bg-teal" /> Practice ({safeSplitRatio.practice || 0}m)
             </span>
             <span className="flex items-center gap-1.5 text-indigo-800">
-              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" /> Revision ({splitRatio.revision}m)
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" /> Revision ({safeSplitRatio.revision || 0}m)
             </span>
           </div>
-          {splitRatio.verified > 0 && (
+          {(safeSplitRatio.verified || 0) > 0 && (
             <div className="mt-2.5 flex items-center gap-2 bg-teal/10 border border-teal/20 rounded-xl px-3 py-2">
               <span className="text-sm">ðŸ›¡ï¸</span>
               <div className="flex-1">
-                <span className="text-[11px] font-bold text-teal">{splitRatio.verified}m Verified (Leaderboard Counted)</span>
+                <span className="text-[11px] font-bold text-teal">{(safeSplitRatio.verified || 0)}m Verified (Leaderboard Counted)</span>
                 <p className="text-[10px] text-teal/80 mt-0.5">Face cam + App blocker both ON</p>
               </div>
               <span className="text-xs font-black text-teal">
-                {Math.round((splitRatio.verified / Math.max(todayStudyMins, 1)) * 100)}%
+                {Math.round(((safeSplitRatio.verified || 0) / Math.max(todayStudyMins, 1)) * 100)}%
               </span>
             </div>
           )}
