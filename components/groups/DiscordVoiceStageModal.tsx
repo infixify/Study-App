@@ -172,7 +172,7 @@ export default function DiscordVoiceStageModal({
                 </h3>
               </div>
               <p className="text-[10px] text-slate-400 font-mono truncate">
-                {remotePeers.length + 1} connected · Discord Voice Stage
+                {remotePeers.length + 1} connected · Voice Stage
               </p>
             </div>
           </div>
@@ -453,7 +453,7 @@ export default function DiscordVoiceStageModal({
           </div>
         )}
 
-        {/* ── DISCORD-STYLE BOTTOM CONTROL BAR ── */}
+        {/* ── BOTTOM CONTROL BAR ── */}
         <div className="p-3 border-t border-slate-800/80 bg-slate-950/90 shrink-0">
           <div className="flex items-center justify-between gap-1.5">
             {/* Mic Button */}
