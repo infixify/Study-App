@@ -65,7 +65,7 @@ export default function FloatingVoiceDock({
               <span className="text-emerald-400 flex items-center gap-1">
                 <span>RTC Connected</span>
               </span>
-              <span>Â·</span>
+              <span>·</span>
               <span>{participantCount} in room</span>
             </div>
           </div>
