@@ -80,7 +80,7 @@ export default function DiscordVoiceHub({
           </div>
           <div>
             <h2 className="text-xs font-black text-slate-900 tracking-wide uppercase">
-              Discord Voice Channels
+              Voice Channels
             </h2>
             <p className="text-[10px] text-slate-500 font-medium">
               Join live audio rooms or share screens to study together
@@ -195,7 +195,7 @@ export default function DiscordVoiceHub({
                 <span className="text-lg">🔊</span>
                 <div>
                   <h3 className="text-sm font-black text-slate-900">Create Voice Channel</h3>
-                  <p className="text-[10px] text-slate-500">Live Discord-style room on Groups page</p>
+                  <p className="text-[10px] text-slate-500">Live audio room on the Groups page</p>
                 </div>
               </div>
               <button
