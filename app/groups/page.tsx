@@ -53,9 +53,6 @@ export default function GroupsPage() {
   const [newGroupPrivate, setNewGroupPrivate] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
 
-  // Top sub-navigation view toggle (Voice Channels vs Classic Groups)
-  const [activeView, setActiveView] = useState<"voice" | "classic">("voice");
-
   // ── DISCORD VOICE CHANNELS STATE ──
   const [voiceChannels, setVoiceChannels] = useState<VoiceChannelData[]>(() => {
     if (typeof window !== "undefined") {
@@ -670,62 +667,11 @@ export default function GroupsPage() {
               <span>+ Create Group</span>
             </button>
           </div>
-
-          {/* Sub-Nav View Switcher: Voice Channels vs Groups */}
-          <div className="grid grid-cols-2 p-1 bg-slate-950/60 rounded-2xl border border-slate-800/80 gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveView("voice")}
-              className={`py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                activeView === "voice"
-                  ? "bg-teal-500 text-slate-950 shadow-md"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-              </svg>
-              <span>Discord Voice Channels</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveView("classic")}
-              className={`py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                activeView === "classic"
-                  ? "bg-teal-500 text-slate-950 shadow-md"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-              <span>Study Groups List</span>
-            </button>
-          </div>
         </div>
 
-        {/* ── VIEW 1: DISCORD VOICE CHANNELS DIRECTLY ON GROUPS PAGE ── */}
-        {activeView === "voice" && (
-          <div className="space-y-4">
-            <DiscordVoiceHub
-              channels={voiceChannels}
-              activeChannelId={activeVoiceChannel?.id || null}
-              onJoinChannel={handleJoinVoiceChannel}
-              onCreateChannel={handleCreateCustomVoiceChannel}
-              peerCounts={peerCounts}
-            />
-          </div>
-        )}
-
-        {/* ── VIEW 2: CLASSIC STUDY GROUPS DIRECTORY ── */}
-        {activeView === "classic" && (
-          <div className="space-y-3.5">
+                {/* ── STUDY GROUPS DIRECTORY ── */}
+{/* ── VIEW 2: CLASSIC STUDY GROUPS DIRECTORY ── */}
+                  <div className="space-y-3.5">
             {/* Search & Exam Filter */}
             <div className="flex gap-2">
               <div className="relative flex-1">
@@ -859,7 +805,18 @@ export default function GroupsPage() {
               </div>
             )}
           </div>
-        )}
+
+        {/* ── VOICE CHANNELS (LIVE AUDIO ROOMS) ── */}
+{/* ── VIEW 1: DISCORD VOICE CHANNELS DIRECTLY ON GROUPS PAGE ── */}
+                  <div className="space-y-4">
+            <DiscordVoiceHub
+              channels={voiceChannels}
+              activeChannelId={activeVoiceChannel?.id || null}
+              onJoinChannel={handleJoinVoiceChannel}
+              onCreateChannel={handleCreateCustomVoiceChannel}
+              peerCounts={peerCounts}
+            />
+          </div>
       </main>
 
       {/* ── MINIMIZED FLOATING VOICE DOCK ── */}
