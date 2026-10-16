@@ -68,7 +68,7 @@ export default function DiscordVoiceHub({
 
   return (
     <div className="space-y-3.5">
-      {/* â”€â”€ HEADER & BADGE â”€â”€ */}
+      {/* ──── HEADER & BADGE ──── */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-lg bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-teal-600">
@@ -97,7 +97,7 @@ export default function DiscordVoiceHub({
         </button>
       </div>
 
-      {/* â”€â”€ CHANNELS LIST â”€â”€ */}
+      {/* ──── CHANNELS LIST ──── */}
       <div className="space-y-2.5">
         {channels.map((ch) => {
           const isConnected = activeChannelId === ch.id;
@@ -125,7 +125,7 @@ export default function DiscordVoiceHub({
                       ? "bg-teal-500/30 text-teal-300 border border-teal-400/50"
                       : "bg-slate-100 text-slate-700 border border-slate-200"
                   }`}>
-                    {ch.isSilentFocus ? "ðŸ¤«" : "ðŸ”Š"}
+                    {ch.isSilentFocus ? "🤫" : "🔊"}
                   </div>
 
                   <div className="min-w-0">
@@ -186,13 +186,13 @@ export default function DiscordVoiceHub({
         })}
       </div>
 
-      {/* â”€â”€ CREATE CHANNEL MODAL â”€â”€ */}
+      {/* ──── CREATE CHANNEL MODAL ──── */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 border border-slate-200 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
-                <span className="text-lg">ðŸ”Š</span>
+                <span className="text-lg">🔊</span>
                 <div>
                   <h3 className="text-sm font-black text-slate-900">Create Voice Channel</h3>
                   <p className="text-[10px] text-slate-500">Live Discord-style room on Groups page</p>
@@ -203,7 +203,7 @@ export default function DiscordVoiceHub({
                 onClick={() => setShowCreateModal(false)}
                 className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 text-xs font-bold"
               >
-                âœ•
+                ✕
               </button>
             </div>
 
