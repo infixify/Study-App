@@ -12,112 +12,74 @@ import DiscordVoiceHub, {
 } from "@/components/groups/DiscordVoiceHub";
 import DiscordVoiceStageModal, {
   VoicePeer,
+  VoiceChatMessage,
 } from "@/components/groups/DiscordVoiceStageModal";
 import FloatingVoiceDock from "@/components/groups/FloatingVoiceDock";
 
 interface GroupRow {
   id: string;
   name: string;
+  description: string | null;
   target_exam: string;
   member_count: number;
-  goal_hours: number | null;
-  leader_name: string | null;
-  created_at: string | null;
-  has_password: boolean;
-  requires_approval: boolean;
+  is_private: boolean;
+  user_membership_status: "member" | "pending" | "none";
 }
 
-interface PendingRow {
+interface PendingRequest {
   request_id: string;
   group_id: string;
   group_name: string;
   target_exam: string;
 }
 
-const STUN_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
-
-function daysAgo(iso: string | null) {
-  if (!iso) return null;
-  const diff = Date.now() - new Date(iso).getTime();
-  const d = Math.floor(diff / 86400000);
-  if (d <= 0) return "today";
-  if (d === 1) return "1 day ago";
-  return `${d} days ago`;
-}
-
-function JoinTypeTag({ hasPassword, requiresApproval }: { hasPassword: boolean; requiresApproval: boolean }) {
-  if (hasPassword) {
-    return (
-      <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
-        ðŸ”’ Password
-      </span>
-    );
-  }
-  if (requiresApproval) {
-    return (
-      <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-        ðŸ›¡ï¸ Approval Required
-      </span>
-    );
-  }
-  return (
-    <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-      âœ… Open Join
-    </span>
-  );
-}
-
-export default function GroupsListPage() {
+export default function GroupsPage() {
   const router = useRouter();
+
+  // ── LOCAL STATE ──
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [activeView, setActiveView] = useState<"groups" | "voice">("groups");
-
-  // Traditional Groups State
-  const [groups, setGroups] = useState<GroupRow[]>([]);
-  const [myJoinedGroupIds, setMyJoinedGroupIds] = useState<string[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<PendingRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [groups, setGroups] = useState<GroupRow[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
+  const [activeTab, setActiveTab] = useState<"my_groups" | "browse">("my_groups");
+  const [examFilter, setExamFilter] = useState<string>("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Group Create & Join Modals
+  // Create Group Modal
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
-  const [newGroupExam, setNewGroupExam] = useState("All");
-  const [newGroupHasPassword, setNewGroupHasPassword] = useState(true);
-  const [newGroupPasscode, setNewGroupPasscode] = useState("");
-  const [newGroupRequiresApproval, setNewGroupRequiresApproval] = useState(false);
-  const [newGroupGoalHours, setNewGroupGoalHours] = useState("6");
-  const [newGroupRules, setNewGroupRules] = useState("");
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [newGroupDesc, setNewGroupDesc] = useState("");
+  const [newGroupExam, setNewGroupExam] = useState("JEE");
+  const [newGroupPrivate, setNewGroupPrivate] = useState(false);
+  const [creatingGroup, setCreatingGroup] = useState(false);
 
-  const [showJoinModal, setShowJoinModal] = useState(false);
-  const [joinTargetId, setJoinTargetId] = useState("");
-  const [enteredPasscode, setEnteredPasscode] = useState("");
-  const [joinError, setJoinError] = useState<string | null>(null);
-  const [joinNotice, setJoinNotice] = useState<string | null>(null);
-  const [joining, setJoining] = useState(false);
+  // Top sub-navigation view toggle (Voice Channels vs Classic Groups)
+  const [activeView, setActiveView] = useState<"voice" | "classic">("voice");
 
-  // â”€â”€â”€ DISCORD VOICE CHANNELS STATE â”€â”€â”€
+  // ── DISCORD VOICE CHANNELS STATE ──
   const [voiceChannels, setVoiceChannels] = useState<VoiceChannelData[]>(() => {
-    try {
-      const saved = localStorage.getItem("pw_custom_voice_channels");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return [...INITIAL_OFFICIAL_CHANNELS, ...parsed];
-      }
-    } catch (_) {}
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("custom_voice_channels");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          return [...INITIAL_OFFICIAL_CHANNELS, ...parsed];
+        }
+      } catch (_) {}
+    }
     return INITIAL_OFFICIAL_CHANNELS;
   });
 
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<VoiceChannelData | null>(null);
   const [isStageModalOpen, setIsStageModalOpen] = useState(false);
+  const [peerCounts, setPeerCounts] = useState<Record<string, number>>({});
   const [isMuted, setIsMuted] = useState(false);
   const [isDeafened, setIsDeafened] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [remotePeers, setRemotePeers] = useState<VoicePeer[]>([]);
-  const [peerCounts, setPeerCounts] = useState<Record<string, number>>({});
   const [isLocalSpeaking, setIsLocalSpeaking] = useState(false);
+  const [voiceChatMessages, setVoiceChatMessages] = useState<VoiceChatMessage[]>([]);
 
   // Media Streams & WebRTC Refs
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -133,7 +95,7 @@ export default function GroupsListPage() {
     "Student";
   const userId = currentUser?.id || "guest-user";
 
-  // â”€â”€ LOAD USER & GROUPS â”€â”€
+  // ── LOAD USER & GROUPS ──
   async function loadPending(uid: string) {
     try {
       const { data } = await supabase.rpc("get_my_pending_requests", { p_user_id: uid });
@@ -148,103 +110,138 @@ export default function GroupsListPage() {
     } catch (_) {}
   }
 
-  useEffect(() => {
-    async function init() {
-      const { data: authData } = await supabase.auth.getUser();
-      const user = authData?.user;
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-      setCurrentUser(user);
-
+  async function loadGroups(uid?: string) {
+    try {
+      const { data, error } = await supabase.rpc("get_groups_directory", {
+        p_user_id: uid || null,
+      });
+      if (error) throw error;
+      setGroups(
+        (data ?? []).map((g: any) => ({
+          id: g.id,
+          name: g.name,
+          description: g.description,
+          target_exam: g.target_exam,
+          member_count: g.member_count ?? 1,
+          is_private: g.is_private ?? false,
+          user_membership_status: g.membership_status || "none",
+        }))
+      );
+    } catch (_) {
+      // Fallback direct query if RPC missing
       try {
-        const { data: memberRows } = await supabase
-          .from("group_members")
-          .select("group_id")
-          .eq("user_id", user.id);
-        setMyJoinedGroupIds((memberRows ?? []).map((m) => m.group_id));
+        const { data } = await supabase
+          .from("study_groups")
+          .select("id, name, description, target_exam, member_count, is_private")
+          .limit(40);
+        if (data) {
+          setGroups(
+            data.map((g: any) => ({
+              ...g,
+              user_membership_status: "none",
+            }))
+          );
+        }
+      } catch (_) {}
+    }
+  }
 
-        const { data: dbGroups } = await supabase.rpc("get_group_list");
-        const { data: metaRows } = await supabase.rpc("get_group_join_meta");
-        const metaById = new Map<string, { has_password: boolean; requires_approval: boolean }>();
-        (metaRows ?? []).forEach((m: any) => {
-          metaById.set(m.group_id, { has_password: m.has_password, requires_approval: m.requires_approval });
-        });
-
-        setGroups(
-          (dbGroups ?? []).map((g: any) => {
-            const meta = metaById.get(g.id) ?? { has_password: true, requires_approval: false };
-            return {
-              id: g.id,
-              name: g.name,
-              target_exam: g.target_exam,
-              goal_hours: g.goal_hours,
-              leader_name: g.leader_name,
-              created_at: g.created_at,
-              member_count: Number(g.member_count) || 0,
-              has_password: meta.has_password,
-              requires_approval: meta.requires_approval,
-            };
-          })
-        );
-        await loadPending(user.id);
-      } catch (err) {
-        console.error("Groups load error:", err);
+  useEffect(() => {
+    let mounted = true;
+    async function init() {
+      try {
+        const { data: sessData } = await supabase.auth.getSession();
+        if (sessData?.session?.user && mounted) {
+          setCurrentUser(sessData.session.user);
+          await loadGroups(sessData.session.user.id);
+          await loadPending(sessData.session.user.id);
+        } else if (mounted) {
+          await loadGroups();
+        }
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     }
     init();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // â”€â”€ WEBRTC MESH CONNECTION LOGIC â”€â”€
-  function createPeerConnection(remoteId: string, remoteName: string) {
-    const pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
+  // ── RTC PEER CONNECTION FACTORY ──
+  const createPeerConnection = useCallback(
+    (targetUserId: string, targetName: string) => {
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+        ],
+      });
 
-    // Add audio tracks
-    localStreamRef.current?.getTracks().forEach((track) => {
-      pc.addTrack(track, localStreamRef.current!);
-    });
-
-    // Add screen track if sharing
-    screenStreamRef.current?.getTracks().forEach((track) => {
-      pc.addTrack(track, screenStreamRef.current!);
-    });
-
-    // Add camera track if active
-    camStreamRef.current?.getTracks().forEach((track) => {
-      pc.addTrack(track, camStreamRef.current!);
-    });
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        channelRef.current?.send({
-          type: "broadcast",
-          event: "ice-candidate",
-          payload: { from: userId, to: remoteId, candidate: event.candidate },
+      // Add local audio track
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => {
+          pc.addTrack(track, localStreamRef.current!);
         });
       }
-    };
 
-    pc.ontrack = (event) => {
-      setRemotePeers((prev) => {
-        const existing = prev.find((p) => p.id === remoteId);
-        if (existing) {
-          return prev.map((p) =>
-            p.id === remoteId ? { ...p, stream: event.streams[0] } : p
-          );
+      // Add camera track if on
+      if (camStreamRef.current) {
+        camStreamRef.current.getTracks().forEach((track) => {
+          pc.addTrack(track, camStreamRef.current!);
+        });
+      }
+
+      // Add screen share track if on
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((track) => {
+          pc.addTrack(track, screenStreamRef.current!);
+        });
+      }
+
+      // Remote track handling
+      pc.ontrack = (event) => {
+        setRemotePeers((prev) => {
+          const exists = prev.find((p) => p.id === targetUserId);
+          if (exists) {
+            return prev.map((p) =>
+              p.id === targetUserId ? { ...p, stream: event.streams[0] } : p
+            );
+          }
+          return [
+            ...prev,
+            {
+              id: targetUserId,
+              name: targetName || "Study Mate",
+              stream: event.streams[0],
+            },
+          ];
+        });
+      };
+
+      // ICE Candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate && channelRef.current) {
+          channelRef.current.send({
+            type: "broadcast",
+            event: "ice-candidate",
+            payload: {
+              candidate: event.candidate,
+              from: userId,
+              to: targetUserId,
+            },
+          });
         }
-        return [...prev, { id: remoteId, name: remoteName, stream: event.streams[0] }];
-      });
-    };
+      };
 
-    peerConnectionsRef.current.set(remoteId, pc);
-    return pc;
-  }
+      peerConnectionsRef.current.set(targetUserId, pc);
+      return pc;
+    },
+    [userId]
+  );
 
-  // Real-time voice amplitude detector for speaking ring indicator
-  const startSpeakingDetector = useCallback((audioTrack: MediaStreamTrack) => {
+  // Local Voice Activity Detection (Speaking Indicator)
+  const startSpeakingDetector = (audioTrack: MediaStreamTrack) => {
     try {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       audioContextRef.current = ctx;
@@ -254,28 +251,46 @@ export default function GroupsListPage() {
       source.connect(analyser);
 
       const buffer = new Uint8Array(analyser.frequencyBinCount);
-      let animId: number;
-
       const checkVolume = () => {
+        if (!audioContextRef.current || audioContextRef.current.state === "closed") return;
         analyser.getByteFrequencyData(buffer);
         let sum = 0;
         for (let i = 0; i < buffer.length; i++) {
           sum += buffer[i];
         }
         const avg = sum / buffer.length;
-        setIsLocalSpeaking(avg > 15);
-        animId = requestAnimationFrame(checkVolume);
+        setIsLocalSpeaking(avg > 14);
+        requestAnimationFrame(checkVolume);
       };
       checkVolume();
+    } catch (_) {}
+  };
 
-      return () => {
-        cancelAnimationFrame(animId);
-        if (ctx.state !== "closed") ctx.close().catch(() => {});
-      };
-    } catch (_) {
-      return () => {};
-    }
-  }, []);
+  // ── VOICE CHANNEL HANDLERS ──
+
+  // Create Custom Voice Channel
+  const handleCreateCustomVoiceChannel = (
+    name: string,
+    topic: string,
+    maxParticipants: number
+  ) => {
+    const newChan: VoiceChannelData = {
+      id: `custom-${Date.now()}`,
+      name,
+      topic,
+      maxParticipants,
+      category: "custom",
+    };
+    setVoiceChannels((prev) => {
+      const updated = [...prev, newChan];
+      const customOnly = updated.filter((c) => c.category === "custom");
+      try {
+        localStorage.setItem("custom_voice_channels", JSON.stringify(customOnly));
+      } catch (_) {}
+      return updated;
+    });
+    handleJoinVoiceChannel(newChan);
+  };
 
   // Join Voice Channel
   const handleJoinVoiceChannel = async (ch: VoiceChannelData) => {
@@ -291,6 +306,7 @@ export default function GroupsListPage() {
     }
 
     try {
+      setVoiceChatMessages([]);
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -325,6 +341,19 @@ export default function GroupsListPage() {
         const state = channel.presenceState();
         const count = Object.keys(state).length;
         setPeerCounts((prev) => ({ ...prev, [ch.id]: count }));
+        if (count === 0) {
+          setVoiceChatMessages([]);
+        }
+      });
+
+      channel.on("broadcast", { event: "voice-chat-msg" }, ({ payload }) => {
+        if (payload && payload.senderId !== userId) {
+          setVoiceChatMessages((prev) => [...prev, payload]);
+        }
+      });
+
+      channel.on("broadcast", { event: "voice-chat-clear" }, () => {
+        setVoiceChatMessages([]);
       });
 
       channel.on("broadcast", { event: "offer" }, async ({ payload }) => {
@@ -385,7 +414,6 @@ export default function GroupsListPage() {
             event: "new-peer",
             payload: { id: userId, name: displayName },
           });
-
           setActiveVoiceChannel(ch);
           setIsStageModalOpen(true);
         }
@@ -400,10 +428,8 @@ export default function GroupsListPage() {
   const handleLeaveVoiceChannel = () => {
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
-
     camStreamRef.current?.getTracks().forEach((t) => t.stop());
     camStreamRef.current = null;
-
     screenStreamRef.current?.getTracks().forEach((t) => t.stop());
     screenStreamRef.current = null;
 
@@ -425,11 +451,41 @@ export default function GroupsListPage() {
     }
 
     setRemotePeers([]);
+    setVoiceChatMessages([]);
     setActiveVoiceChannel(null);
     setIsStageModalOpen(false);
     setIsCameraOn(false);
     setIsScreenSharing(false);
     setIsLocalSpeaking(false);
+  };
+
+  // Ephemeral Voice Chat message send
+  const handleSendVoiceChatMessage = (text: string) => {
+    if (!text.trim() || !channelRef.current || !activeVoiceChannel) return;
+    const newMsg: VoiceChatMessage = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      senderId: userId,
+      senderName: displayName,
+      text: text.trim(),
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+    setVoiceChatMessages((prev) => [...prev, newMsg]);
+    channelRef.current.send({
+      type: "broadcast",
+      event: "voice-chat-msg",
+      payload: newMsg,
+    });
+  };
+
+  const handleClearVoiceChat = () => {
+    setVoiceChatMessages([]);
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "voice-chat-clear",
+        payload: { channelId: activeVoiceChannel?.id },
+      });
+    }
   };
 
   // Toggle Mute
@@ -456,18 +512,17 @@ export default function GroupsListPage() {
       setIsCameraOn(false);
     } else {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 480, height: 360, frameRate: 15 },
+        });
         camStreamRef.current = stream;
-        setIsCameraOn(true);
-        // Add video track to existing peer connections
         const videoTrack = stream.getVideoTracks()[0];
-        if (videoTrack) {
-          peerConnectionsRef.current.forEach((pc) => {
-            pc.addTrack(videoTrack, stream);
-          });
-        }
-      } catch (e) {
-        alert("Camera permission denied.");
+        peerConnectionsRef.current.forEach((pc) => {
+          pc.addTrack(videoTrack, stream);
+        });
+        setIsCameraOn(true);
+      } catch (err) {
+        alert("Camera permission not available or denied.");
       }
     }
   };
@@ -480,215 +535,182 @@ export default function GroupsListPage() {
       setIsScreenSharing(false);
     } else {
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: 15 },
+        });
         screenStreamRef.current = stream;
-        setIsScreenSharing(true);
-
         const screenTrack = stream.getVideoTracks()[0];
-        if (screenTrack) {
-          screenTrack.onended = () => {
-            setIsScreenSharing(false);
-            screenStreamRef.current = null;
-          };
-          peerConnectionsRef.current.forEach((pc) => {
-            pc.addTrack(screenTrack, stream);
-          });
-        }
-      } catch (e) {
-        console.log("Screen share cancelled or unsupported.");
+        screenTrack.onended = () => {
+          setIsScreenSharing(false);
+          screenStreamRef.current = null;
+        };
+        peerConnectionsRef.current.forEach((pc) => {
+          pc.addTrack(screenTrack, stream);
+        });
+        setIsScreenSharing(true);
+      } catch (err) {
+        // user cancelled picker
       }
     }
   };
 
-  // Create Custom Voice Channel
-  const handleCreateCustomVoiceChannel = (name: string, topic: string, maxParticipants: number) => {
-    const newChan: VoiceChannelData = {
-      id: `custom-voice-${Date.now()}`,
-      name,
-      topic,
-      maxParticipants,
-      category: "custom",
-    };
-    const updated = [...voiceChannels, newChan];
-    setVoiceChannels(updated);
+  // ── GROUP MEMBERSHIP ACTIONS ──
+  const handleJoinOrRequest = async (group: GroupRow) => {
+    if (!currentUser) {
+      router.push("/auth");
+      return;
+    }
     try {
-      const customOnly = updated.filter((c) => c.category === "custom");
-      localStorage.setItem("pw_custom_voice_channels", JSON.stringify(customOnly));
-    } catch (_) {}
+      if (group.is_private) {
+        const { error } = await supabase.from("group_join_requests").insert({
+          group_id: group.id,
+          user_id: currentUser.id,
+          status: "pending",
+        });
+        if (error) throw error;
+        setGroups((prev) =>
+          prev.map((g) => (g.id === group.id ? { ...g, user_membership_status: "pending" } : g))
+        );
+        loadPending(currentUser.id);
+      } else {
+        const { error } = await supabase.from("group_members").insert({
+          group_id: group.id,
+          user_id: currentUser.id,
+          role: "member",
+        });
+        if (error) throw error;
+        setGroups((prev) =>
+          prev.map((g) =>
+            g.id === group.id
+              ? { ...g, user_membership_status: "member", member_count: g.member_count + 1 }
+              : g
+          )
+        );
+      }
+    } catch (e: any) {
+      alert(e.message || "Could not join group.");
+    }
   };
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      localStreamRef.current?.getTracks().forEach((t) => t.stop());
-      camStreamRef.current?.getTracks().forEach((t) => t.stop());
-      screenStreamRef.current?.getTracks().forEach((t) => t.stop());
-      peerConnectionsRef.current.forEach((pc) => pc.close());
-    };
-  }, []);
-
-  // Traditional Groups Filters
-  const myGroups = groups.filter((g) => myJoinedGroupIds.includes(g.id));
-  const otherGroups = groups.filter((g) => !myJoinedGroupIds.includes(g.id));
-
-  async function handleCreateGroup(e: React.FormEvent) {
+  // Create Group Form
+  const handleCreateGroupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedName = newGroupName.trim();
-    if (!trimmedName) {
-      setCreateError("Group name is required.");
-      return;
-    }
-    if (newGroupHasPassword && !newGroupPasscode.trim()) {
-      setCreateError("Passcode is required when passcode protection is enabled.");
-      return;
-    }
-    setCreating(true);
-    setCreateError(null);
+    if (!newGroupName.trim() || !currentUser) return;
+    setCreatingGroup(true);
+    try {
+      const { data: newG, error: gErr } = await supabase
+        .from("study_groups")
+        .insert({
+          name: newGroupName.trim(),
+          description: newGroupDesc.trim() || null,
+          target_exam: newGroupExam,
+          is_private: newGroupPrivate,
+          created_by: currentUser.id,
+          member_count: 1,
+        })
+        .select()
+        .single();
 
-    const { data: inserted, error } = await supabase
-      .from("study_groups")
-      .insert({
-        name: trimmedName,
-        target_exam: newGroupExam,
-        passcode: newGroupHasPassword ? newGroupPasscode.trim() : null,
-        requires_approval: newGroupHasPassword ? false : newGroupRequiresApproval,
-        created_by: currentUser?.id ?? null,
-        goal_hours: newGroupGoalHours ? Number(newGroupGoalHours) : null,
-        rules: newGroupRules.trim() || null,
-      })
-      .select("id")
-      .single();
+      if (gErr) throw gErr;
 
-    setCreating(false);
-    if (error || !inserted) {
-      setCreateError(error?.message || "Failed to create group. Please try again.");
-      return;
-    }
+      // Add creator as admin
+      await supabase.from("group_members").insert({
+        group_id: newG.id,
+        user_id: currentUser.id,
+        role: "admin",
+      });
 
-    setShowCreateModal(false);
-    setNewGroupName("");
-    setNewGroupExam("All");
-    setNewGroupHasPassword(true);
-    setNewGroupPasscode("");
-    setNewGroupRequiresApproval(false);
-    setNewGroupGoalHours("6");
-    setNewGroupRules("");
-    router.push(`/groups/${inserted.id}`);
-  }
+      setShowCreateModal(false);
+      setNewGroupName("");
+      setNewGroupDesc("");
+      loadGroups(currentUser.id);
+    } catch (err: any) {
+      alert(err.message || "Failed to create group.");
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
 
-  async function handleRequestJoin(e: React.FormEvent) {
-    e.preventDefault();
-    if (!joinTargetId || !currentUser) {
-      setJoinError("Pick a group first.");
-      return;
+  // Filter groups
+  const filteredGroups = groups.filter((g) => {
+    if (examFilter !== "ALL" && g.target_exam !== examFilter) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchName = g.name.toLowerCase().includes(q);
+      const matchDesc = g.description?.toLowerCase().includes(q) ?? false;
+      if (!matchName && !matchDesc) return false;
     }
-    const target = groups.find((g) => g.id === joinTargetId);
-    if (!target) return;
-
-    setJoining(true);
-    setJoinError(null);
-    setJoinNotice(null);
-
-    const { data: result, error } = await supabase.rpc("request_join_group", {
-      p_group_id: joinTargetId,
-      p_user_id: currentUser.id,
-      p_passcode: target.has_password ? enteredPasscode.trim() : null,
-    });
-
-    setJoining(false);
-    if (error) {
-      setJoinError("Something went wrong. Try again.");
-      return;
+    if (activeTab === "my_groups") {
+      return g.user_membership_status === "member";
     }
-    if (result === "wrong_passcode") {
-      setJoinError("Incorrect passcode! Ask group admin.");
-      return;
-    }
-    if (result === "already_member") {
-      setJoinError("You're already in this group.");
-      return;
-    }
-    if (result === "pending") {
-      setJoinNotice(`Request sent! Join request is waiting for admin approval.`);
-      await loadPending(currentUser.id);
-      return;
-    }
-    if (result === "joined") {
-      router.push(`/groups/${joinTargetId}`);
-    }
-  }
-
-  async function handleCancelPending(groupId: string) {
-    if (!currentUser) return;
-    await supabase.rpc("cancel_join_request", { p_group_id: groupId, p_user_id: currentUser.id });
-    await loadPending(currentUser.id);
-  }
+    return true;
+  });
 
   return (
-    <div className="min-h-screen bg-paper pb-32 text-ink">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-28">
       <AppHeader />
 
-      <main className="max-w-md mx-auto px-4 pt-3.5 flex flex-col gap-4">
-        {/* Title & Tagline */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="font-display text-2xl text-ink font-black tracking-tight">
-              Study Hub
-            </h1>
-            <p className="text-[11px] text-slate font-medium">
-              Join peer study groups & live Discord voice lounges
-            </p>
+      <main className="flex-1 max-w-lg mx-auto w-full px-4 pt-3 space-y-4">
+        {/* ── TOP HERO BANNER & PRIMARY CONTROLS ── */}
+        <div className="p-4 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-teal-950/40 border border-slate-800 shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <span className="text-[10px] font-black tracking-widest uppercase text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded-full border border-teal-500/20">
+                Peer Study Network
+              </span>
+              <h1 className="text-lg font-black text-white mt-1">Study Groups & Audio</h1>
+            </div>
+
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-xs transition-all shadow-md active:scale-95 flex items-center gap-1"
+            >
+              <span>+ Create Group</span>
+            </button>
           </div>
 
-          {activeVoiceChannel && (
+          {/* Sub-Nav View Switcher: Voice Channels vs Groups */}
+          <div className="grid grid-cols-2 p-1 bg-slate-950/60 rounded-2xl border border-slate-800/80 gap-1">
             <button
-              onClick={() => setIsStageModalOpen(true)}
-              className="px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-700 text-[10px] font-black flex items-center gap-1.5 animate-pulse"
+              type="button"
+              onClick={() => setActiveView("voice")}
+              className={`py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                activeView === "voice"
+                  ? "bg-teal-500 text-slate-950 shadow-md"
+                  : "text-slate-400 hover:text-white"
+              }`}
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>Voice Active</span>
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+              </svg>
+              <span>Discord Voice Channels</span>
             </button>
-          )}
+
+            <button
+              type="button"
+              onClick={() => setActiveView("classic")}
+              className={`py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                activeView === "classic"
+                  ? "bg-teal-500 text-slate-950 shadow-md"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              <span>Study Groups List</span>
+            </button>
+          </div>
         </div>
 
-        {/* â”€â”€ TOP SEGMENT SWITCHER: GROUPS vs LIVE VOICE LOUNGES â”€â”€ */}
-        <div className="flex p-1 bg-slate-200/80 rounded-2xl border border-slate-300/80 shadow-2xs">
-          <button
-            type="button"
-            onClick={() => setActiveView("groups")}
-            className={`flex-1 py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 ${
-              activeView === "groups"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <span>ðŸ‘¥ Study Groups</span>
-            <span className="text-[10px] font-mono bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded-full font-bold">
-              {groups.length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveView("voice")}
-            className={`flex-1 py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 ${
-              activeView === "voice"
-                ? "bg-slate-900 text-white shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <span>ðŸ”Š Voice Lounges</span>
-            <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
-              activeVoiceChannel
-                ? "bg-emerald-500 text-slate-950 font-black"
-                : "bg-teal-500/20 text-teal-800"
-            }`}>
-              {activeVoiceChannel ? "Connected" : `${voiceChannels.length}`}
-            </span>
-          </button>
-        </div>
-
-        {/* â”€â”€ VIEW 1: DISCORD VOICE CHANNELS DIRECTLY ON GROUPS PAGE â”€â”€ */}
+        {/* ── VIEW 1: DISCORD VOICE CHANNELS DIRECTLY ON GROUPS PAGE ── */}
         {activeView === "voice" && (
           <div className="space-y-4">
             <DiscordVoiceHub
@@ -701,96 +723,147 @@ export default function GroupsListPage() {
           </div>
         )}
 
-        {/* â”€â”€ VIEW 2: TRADITIONAL STUDY GROUPS LIST â”€â”€ */}
-        {activeView === "groups" && (
-          <div>
+        {/* ── VIEW 2: CLASSIC STUDY GROUPS DIRECTORY ── */}
+        {activeView === "classic" && (
+          <div className="space-y-3.5">
+            {/* Search & Exam Filter */}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="Search groups..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 pl-9 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                />
+                <svg className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+
+              <select
+                value={examFilter}
+                onChange={(e) => setExamFilter(e.target.value)}
+                className="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-teal-400 font-bold focus:outline-none"
+              >
+                <option value="ALL">All Exams</option>
+                <option value="JEE">JEE</option>
+                <option value="NEET">NEET</option>
+                <option value="BOARDS">Boards</option>
+              </select>
+            </div>
+
+            {/* My Groups vs Browse Tabs */}
+            <div className="flex border-b border-slate-800 text-xs font-bold text-slate-400">
+              <button
+                onClick={() => setActiveTab("my_groups")}
+                className={`pb-2 px-3 border-b-2 transition-colors ${
+                  activeTab === "my_groups"
+                    ? "border-teal-400 text-teal-400 font-black"
+                    : "border-transparent hover:text-slate-200"
+                }`}
+              >
+                My Groups (
+                {groups.filter((g) => g.user_membership_status === "member").length}
+                )
+              </button>
+              <button
+                onClick={() => setActiveTab("browse")}
+                className={`pb-2 px-3 border-b-2 transition-colors ${
+                  activeTab === "browse"
+                    ? "border-teal-400 text-teal-400 font-black"
+                    : "border-transparent hover:text-slate-200"
+                }`}
+              >
+                Browse All ({groups.length})
+              </button>
+            </div>
+
+            {/* Groups List */}
             {loading ? (
-              <p className="text-center py-10 text-xs text-slate">Loading groupsâ€¦</p>
+              <div className="py-12 text-center text-xs text-slate-500 font-mono animate-pulse">
+                Loading study groups...
+              </div>
+            ) : filteredGroups.length === 0 ? (
+              <div className="py-12 text-center space-y-2 bg-slate-900/40 rounded-2xl border border-dashed border-slate-800">
+                <span className="text-2xl">📚</span>
+                <p className="text-xs font-bold text-slate-400">No study groups found</p>
+                <p className="text-[10px] text-slate-500 max-w-xs mx-auto">
+                  Be the first one to create a peer study circle for your target exam!
+                </p>
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="mt-2 px-3 py-1.5 rounded-xl bg-teal-500/20 border border-teal-500/40 text-teal-300 text-xs font-bold"
+                >
+                  Create Group Now
+                </button>
+              </div>
             ) : (
-              <div className="space-y-4">
-                {/* My Groups Section */}
-                <div>
-                  <p className="text-xs font-bold text-slate mb-2 px-1">My Groups</p>
-                  <div className="space-y-2.5">
-                    {pendingRequests.map((p) => (
-                      <PendingGroupCard
-                        key={p.request_id}
-                        pending={p}
-                        onOpen={() => router.push(`/groups/${p.group_id}`)}
-                        onCancel={() => handleCancelPending(p.group_id)}
-                      />
-                    ))}
-                    {myGroups.map((grp) => (
-                      <GroupCard
-                        key={grp.id}
-                        grp={grp}
-                        joined
-                        onOpen={() => router.push(`/groups/${grp.id}`)}
-                      />
-                    ))}
-                    {myGroups.length === 0 && pendingRequests.length === 0 && (
-                      <p className="text-xs text-slate px-1 py-2">
-                        You haven't joined any groups yet.
-                      </p>
-                    )}
-                  </div>
-                </div>
+              <div className="space-y-2.5">
+                {filteredGroups.map((group) => {
+                  const isMember = group.user_membership_status === "member";
+                  const isPending = group.user_membership_status === "pending";
 
-                {/* Join & Create Buttons */}
-                <div className="flex gap-2 pt-1">
-                  <button
-                    onClick={() => {
-                      setJoinTargetId(otherGroups[0]?.id ?? "");
-                      setEnteredPasscode("");
-                      setJoinError(null);
-                      setJoinNotice(null);
-                      setShowJoinModal(true);
-                    }}
-                    className="flex-1 py-3 rounded-xl border border-ink/15 text-ink font-bold text-xs hover:bg-ink/5 shadow-2xs"
-                  >
-                    ðŸ”‘ Join Group
-                  </button>
-                  <button
-                    onClick={() => {
-                      setCreateError(null);
-                      setShowCreateModal(true);
-                    }}
-                    className="flex-1 py-3 rounded-xl bg-teal text-white font-bold text-xs shadow-xs hover:bg-teal/90"
-                  >
-                    + Create Group
-                  </button>
-                </div>
+                  return (
+                    <div
+                      key={group.id}
+                      className="p-3.5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-slate-700 transition-all flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                            {group.target_exam}
+                          </span>
+                          {group.is_private && (
+                            <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                              Private 🔒
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            👥 {group.member_count}
+                          </span>
+                        </div>
 
-                {/* Explore Groups */}
-                {otherGroups.length > 0 && (
-                  <div className="pt-2">
-                    <p className="text-xs font-bold text-slate mb-2 px-1">Explore Other Groups</p>
-                    <div className="space-y-2.5">
-                      {otherGroups.map((grp) => (
-                        <GroupCard
-                          key={grp.id}
-                          grp={grp}
-                          joined={false}
-                          onOpen={() => {
-                            setJoinTargetId(grp.id);
-                            setEnteredPasscode("");
-                            setJoinError(null);
-                            setJoinNotice(null);
-                            setShowJoinModal(true);
-                          }}
-                        />
-                      ))}
+                        <h3 className="text-xs font-black text-white truncate">{group.name}</h3>
+                        {group.description && (
+                          <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">
+                            {group.description}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="shrink-0">
+                        {isMember ? (
+                          <button
+                            onClick={() => router.push(`/groups/${group.id}`)}
+                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 font-bold text-xs border border-slate-700 transition-colors"
+                          >
+                            Open Group →
+                          </button>
+                        ) : isPending ? (
+                          <span className="px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
+                            Requested ⏳
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleJoinOrRequest(group)}
+                            className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-xs transition-all shadow-sm active:scale-95"
+                          >
+                            {group.is_private ? "Request" : "Join"}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })}
               </div>
             )}
           </div>
         )}
       </main>
 
-      {/* â”€â”€ FLOATING DISCORD-STYLE VOICE DOCK â”€â”€ */}
-      {activeVoiceChannel && (
+      {/* ── MINIMIZED FLOATING VOICE DOCK ── */}
+      {activeVoiceChannel && !isStageModalOpen && (
         <FloatingVoiceDock
           channelName={activeVoiceChannel.name}
           participantCount={remotePeers.length + 1}
@@ -804,7 +877,7 @@ export default function GroupsListPage() {
         />
       )}
 
-      {/* â”€â”€ DISCORD VOICE STAGE FULL MODAL â”€â”€ */}
+      {/* ── DISCORD VOICE STAGE FULL MODAL ── */}
       {activeVoiceChannel && (
         <DiscordVoiceStageModal
           isOpen={isStageModalOpen}
@@ -827,169 +900,98 @@ export default function GroupsListPage() {
           onToggleCamera={handleToggleCamera}
           isCameraOn={isCameraOn}
           isLocalSpeaking={isLocalSpeaking}
+          chatMessages={voiceChatMessages}
+          onSendMessage={handleSendVoiceChatMessage}
+          onClearChat={handleClearVoiceChat}
         />
       )}
 
       {/* CREATE GROUP MODAL */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <h3 className="text-sm font-bold text-ink">Create Study Group</h3>
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 w-full max-w-sm space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-black text-white">Create Study Group</h3>
               <button
-                onClick={() => {
-                  setShowCreateModal(false);
-                  setCreateError(null);
-                }}
-                className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate text-xs font-bold"
+                onClick={() => setShowCreateModal(false)}
+                className="text-slate-400 hover:text-white text-sm"
               >
-                âœ•
+                ✕
               </button>
             </div>
 
-            {createError && (
-              <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium">
-                {createError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreateGroup} className="space-y-3 text-xs">
+            <form onSubmit={handleCreateGroupSubmit} className="space-y-3">
               <div>
-                <label className="font-bold text-ink block mb-1">Group Name</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Group Name
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. JEE 2027 Chasers"
+                  placeholder="e.g. Organic Chemistry Speed Drill"
                   value={newGroupName}
                   onChange={(e) => setNewGroupName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-ink/20 focus:outline-none focus:border-teal"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-teal-500"
                 />
               </div>
 
               <div>
-                <label className="font-bold text-ink block mb-1">Target Exam</label>
-                <select
-                  value={newGroupExam}
-                  onChange={(e) => setNewGroupExam(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-ink/20 focus:outline-none focus:border-teal bg-white"
-                >
-                  <option value="All">All Exams</option>
-                  <option value="JEE">JEE Main & Advanced</option>
-                  <option value="NEET">NEET UG</option>
-                  <option value="Boards">Class 11/12 Boards</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold text-ink block mb-1">Daily Goal (Hours)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="16"
-                  value={newGroupGoalHours}
-                  onChange={(e) => setNewGroupGoalHours(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-ink/20 focus:outline-none focus:border-teal"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-ink block mb-1">Rules / Bio</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Description
+                </label>
                 <textarea
-                  rows={2}
-                  placeholder="e.g. Minimum 6 hours daily, no spam"
-                  value={newGroupRules}
-                  onChange={(e) => setNewGroupRules(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-ink/20 focus:outline-none focus:border-teal"
+                  placeholder="Daily targets, PYQ solving..."
+                  value={newGroupDesc}
+                  onChange={(e) => setNewGroupDesc(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-teal-500 h-16 resize-none"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Target Exam
+                  </label>
+                  <select
+                    value={newGroupExam}
+                    onChange={(e) => setNewGroupExam(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-teal-500"
+                  >
+                    <option value="JEE">JEE</option>
+                    <option value="NEET">NEET</option>
+                    <option value="BOARDS">Boards</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Access Type
+                  </label>
+                  <select
+                    value={newGroupPrivate ? "private" : "public"}
+                    onChange={(e) => setNewGroupPrivate(e.target.value === "private")}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-teal-500"
+                  >
+                    <option value="public">Public (Open)</option>
+                    <option value="private">Private (Approval)</option>
+                  </select>
+                </div>
               </div>
 
               <div className="pt-2 flex gap-2">
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-ink/20 text-ink font-bold"
+                  className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={creating}
-                  className="flex-1 py-2.5 rounded-xl bg-teal text-white font-bold disabled:opacity-50"
+                  disabled={creatingGroup || !newGroupName.trim()}
+                  className="flex-1 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-xs disabled:opacity-50"
                 >
-                  {creating ? "Creatingâ€¦" : "Create"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* JOIN GROUP MODAL */}
-      {showJoinModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-ink/10 space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-ink/8">
-              <h3 className="text-sm font-bold text-ink">Join Group</h3>
-              <button
-                onClick={() => setShowJoinModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate text-xs font-bold"
-              >
-                âœ•
-              </button>
-            </div>
-
-            {joinError && (
-              <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium">
-                {joinError}
-              </div>
-            )}
-            {joinNotice && (
-              <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl font-medium">
-                {joinNotice}
-              </div>
-            )}
-
-            <form onSubmit={handleRequestJoin} className="space-y-3 text-xs">
-              <div>
-                <label className="font-bold text-ink block mb-1">Select Group</label>
-                <select
-                  value={joinTargetId}
-                  onChange={(e) => setJoinTargetId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-ink/20 focus:outline-none focus:border-teal bg-white"
-                >
-                  {otherGroups.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name} ({g.target_exam})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold text-ink block mb-1">Passcode (if required)</label>
-                <input
-                  type="password"
-                  placeholder="Enter group passcode"
-                  value={enteredPasscode}
-                  onChange={(e) => setEnteredPasscode(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-ink/20 focus:outline-none focus:border-teal"
-                />
-              </div>
-
-              <div className="pt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowJoinModal(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-ink/20 text-ink font-bold"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={joining}
-                  className="flex-1 py-2.5 rounded-xl bg-teal text-white font-bold disabled:opacity-50"
-                >
-                  {joining ? "Joiningâ€¦" : "Join"}
+                  {creatingGroup ? "Creating..." : "Create Group"}
                 </button>
               </div>
             </form>
@@ -998,86 +1000,6 @@ export default function GroupsListPage() {
       )}
 
       <BottomNav />
-    </div>
-  );
-}
-
-// â”€â”€ GROUP CARD HELPER â”€â”€
-function GroupCard({
-  grp,
-  joined,
-  onOpen,
-}: {
-  grp: GroupRow;
-  joined: boolean;
-  onOpen: () => void;
-}) {
-  return (
-    <div
-      onClick={onOpen}
-      className="p-3.5 bg-white rounded-2xl border border-ink/10 shadow-2xs hover:shadow-xs transition-all cursor-pointer flex items-center justify-between gap-3 active:scale-[0.99]"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 mb-1">
-          <span className="text-xs font-black text-ink truncate">{grp.name}</span>
-          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-teal/10 text-teal">
-            {grp.target_exam}
-          </span>
-        </div>
-        <div className="flex items-center gap-2 text-[10px] text-slate">
-          <span>ðŸ‘¥ {grp.member_count} members</span>
-          {grp.goal_hours && <span>Â· ðŸŽ¯ {grp.goal_hours}h goal</span>}
-        </div>
-      </div>
-
-      <div className="shrink-0 flex items-center gap-2">
-        <JoinTypeTag
-          hasPassword={grp.has_password}
-          requiresApproval={grp.requires_approval}
-        />
-        <button
-          type="button"
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
-            joined ? "bg-slate-100 text-ink" : "bg-teal text-white shadow-xs"
-          }`}
-        >
-          {joined ? "Open" : "Join"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// â”€â”€ PENDING GROUP CARD HELPER â”€â”€
-function PendingGroupCard({
-  pending,
-  onOpen,
-  onCancel,
-}: {
-  pending: PendingRow;
-  onOpen: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-2xl flex items-center justify-between gap-2 shadow-2xs">
-      <div className="min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-black text-amber-950 truncate">{pending.group_name}</span>
-          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-200/60 text-amber-900">
-            Pending
-          </span>
-        </div>
-        <p className="text-[10px] text-amber-800 mt-0.5">Waiting for group admin approval</p>
-      </div>
-
-      <div className="flex items-center gap-1.5 shrink-0">
-        <button
-          onClick={onCancel}
-          className="px-2.5 py-1 text-[10px] font-bold text-rose-700 bg-white border border-rose-200 rounded-lg"
-        >
-          Cancel
-        </button>
-      </div>
     </div>
   );
 }
