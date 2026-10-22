@@ -93,9 +93,9 @@ html.dark :where(.bg-slate-950) {
 html.dark :where(.bg-slate-50),
 html.dark :where(.bg-slate-50/80),
 html.dark :where(.bg-slate-50/70),
-html.dark :where(.hover\:bg-slate-50:hover),
-html.dark :where(.hover\:bg-slate-100:hover),
-html.dark :where(.hover\:bg-white:hover) {
+html.dark :where(.hover\\\\:bg-slate-50:hover),
+html.dark :where(.hover\\\\:bg-slate-100:hover),
+html.dark :where(.hover\\\\:bg-white:hover) {
   background-color: var(--bg-surface-elevated);
 }
 
@@ -135,18 +135,18 @@ html.dark :where(.text-slate-300) {
   color: var(--text-muted);
 }
 
-html.dark :where(.hover\:text-slate-900:hover),
-html.dark :where(.hover\:text-slate-800:hover),
-html.dark :where(.hover\:text-slate-700:hover) {
+html.dark :where(.hover\\\\:text-slate-900:hover),
+html.dark :where(.hover\\\\:text-slate-800:hover),
+html.dark :where(.hover\\\\:text-slate-700:hover) {
   color: var(--text-primary);
 }
 
 /* --- Borders & dividers --- */
 html.dark :where(.border-slate-100),
 html.dark :where(.border-slate-200),
-html.dark :where(.border-slate-200\/90),
-html.dark :where(.border-slate-200\/80),
-html.dark :where(.border-slate-200\/70),
+html.dark :where(.border-slate-200\\\\/90),
+html.dark :where(.border-slate-200\\\\/80),
+html.dark :where(.border-slate-200\\\\/70),
 html.dark :where(.border-slate-300),
 html.dark :where(.border-slate-700),
 html.dark :where(.border-slate-800),
