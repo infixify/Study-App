@@ -150,6 +150,27 @@ html.dark select.bg-slate-50 {
   background-color: var(--bg-surface-elevated) !important;
 }
 
+/* --- Custom semantic colors (ink, paper) --- */
+html.dark .bg-paper {
+  background-color: rgb(var(--bg-page)) !important;
+}
+
+html.dark .bg-ink {
+  background-color: rgb(var(--text-primary)) !important;
+}
+
+html.dark .text-ink {
+  color: rgb(var(--text-primary)) !important;
+}
+
+html.dark .text-paper {
+  color: rgb(var(--bg-page)) !important;
+}
+
+html.dark .border-ink {
+  border-color: rgb(var(--text-primary)) !important;
+}
+
 html.dark .hover\:bg-slate-50:hover,
 html.dark .hover\:bg-slate-100:hover,
 html.dark .hover\:bg-white:hover {
