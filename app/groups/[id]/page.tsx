@@ -503,19 +503,6 @@ export default function GroupDetailPage() {
     );
   }
 
-  const overallProgress = members.length
-    ? Math.round(
-        members.reduce((sum, m) => sum + (progress[m.user_id] ?? 0), 0) / members.length
-      )
-    : 0;
-  const overallAttendance = members.length
-    ? Math.round(
-        (members.reduce((sum, m) => sum + m.attendance_days, 0) / (members.length * 7)) * 100
-      )
-    : 0;
-  const totalWeekSeconds = members.reduce((sum, m) => sum + m.week_seconds, 0);
-  const maxWeekSeconds = Math.max(1, ...members.map((m) => m.week_seconds));
-
   return (
     <div className="min-h-screen bg-paper pb-20 flex flex-col">
       <div className="sticky top-0 z-20 bg-paper/95 backdrop-blur border-b border-ink/8">
@@ -826,10 +813,6 @@ export default function GroupDetailPage() {
                   {Math.round((selectedMember.attendance_days / 7) * 100)}%
                 </p>
                 <p className="text-[9px] text-slate">7-day attendance</p>
-              </div>
-              <div className="bg-paper/70 rounded-xl p-2.5">
-                <p className="text-sm font-bold text-teal">{formatHM(selectedMember.week_seconds)}</p>
-                <p className="text-[9px] text-slate">Total time</p>
               </div>
             </div>
           </div>
