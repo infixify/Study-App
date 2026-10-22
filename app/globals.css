@@ -66,102 +66,99 @@ html.dark ::-webkit-scrollbar-thumb {
    GLOBAL DARK-MODE PATCH
    Kai pages hardcoded light classes use karte hain (bg-white,
    bg-slate-50, text-slate-900, border-slate-200, bg-[#F1F5F9]
-   etc.) bina dark: variant ke — isliye dark mode mein page
+   etc.) bina dark: variant ke - isliye dark mode mein page
    switch nahi hota tha. Ye rules unhe dark palette pe remap
    karte hain.
 
    :where() ka fayda: specificity 0 rehti hai, isliye agar kisi
    component mein pehle se dark: variant hai (jaise
-   "bg-white dark:bg-[#141C2B]"), to WOHI jeet jata hai — hum
+   "bg-white dark:bg-[#141C2B]"), to WOHI jeet jata hai - hum
    sirf un elements ko override karte hain jinme dark: nahi hai.
    ============================================================ */
 
 /* --- Page backgrounds --- */
-html.dark :where(.bg-white),
-html.dark :where(.bg-white/90),
-html.dark :where(.bg-white/95),
-html.dark :where(.bg-slate-100),
-html.dark :where(.bg-slate-500),
-html.dark :where(.bg-slate-600),
-html.dark :where(.bg-slate-700),
-html.dark :where(.bg-slate-800),
-html.dark :where(.bg-slate-900),
-html.dark :where(.bg-slate-950) {
-  background-color: var(--bg-surface);
+html.dark .bg-white,
+html.dark .bg-slate-50,
+html.dark .bg-slate-100 {
+  background-color: var(--bg-surface) !important;
 }
 
-html.dark :where(.bg-slate-50),
-html.dark :where(.bg-slate-50/80),
-html.dark :where(.bg-slate-50/70),
-html.dark :where(.hover\\\\:bg-slate-50:hover),
-html.dark :where(.hover\\\\:bg-slate-100:hover),
-html.dark :where(.hover\\\\:bg-white:hover) {
-  background-color: var(--bg-surface-elevated);
+html.dark .bg-slate-500,
+html.dark .bg-slate-600,
+html.dark .bg-slate-700,
+html.dark .bg-slate-800,
+html.dark .bg-slate-900,
+html.dark .bg-slate-950 {
+  background-color: var(--bg-surface) !important;
 }
 
-html.dark :where(.bg-\[#090E17\]),
-html.dark :where(.bg-\[#0B132B\]),
-html.dark :where(.bg-\[#0F172A\]),
-html.dark :where(.bg-\[#121A29\]),
-html.dark :where(.bg-\[#141C2B\]),
-html.dark :where(.bg-\[#151D2A\]),
-html.dark :where(.bg-\[#161F30\]),
-html.dark :where(.bg-\[#162032\]),
-html.dark :where(.bg-\[#1A2438\]),
-html.dark :where(.bg-\[#F1F5F9\]),
-html.dark :where(.bg-\[#F8FAFC\]),
-html.dark :where(.bg-\[#FFFFFF\]) {
-  background-color: var(--bg-page);
+html.dark .bg-\[#090E17\],
+html.dark .bg-\[#0B132B\],
+html.dark .bg-\[#0F172A\],
+html.dark .bg-\[#121A29\],
+html.dark .bg-\[#141C2B\],
+html.dark .bg-\[#151D2A\],
+html.dark .bg-\[#161F30\],
+html.dark .bg-\[#162032\],
+html.dark .bg-\[#1A2438\],
+html.dark .bg-\[#F1F5F9\],
+html.dark .bg-\[#F8FAFC\],
+html.dark .bg-\[#FFFFFF\] {
+  background-color: var(--bg-page) !important;
 }
 
 /* --- Text colors --- */
-html.dark :where(.text-slate-700),
-html.dark :where(.text-slate-800),
-html.dark :where(.text-slate-900),
-html.dark :where(.text-slate-950),
-html.dark :where(.text-\[#0F172A\]),
-html.dark :where(.text-\[#1E293B\]),
-html.dark :where(.text-\[#2DD4BF\]) {
-  color: var(--text-primary);
+html.dark .text-slate-700,
+html.dark .text-slate-800,
+html.dark .text-slate-900,
+html.dark .text-slate-950,
+html.dark .text-\[#0F172A\],
+html.dark .text-\[#1E293B\],
+html.dark .text-\[#2DD4BF\] {
+  color: var(--text-primary) !important;
 }
 
-html.dark :where(.text-slate-600),
-html.dark :where(.text-slate-500) {
-  color: var(--text-secondary);
+html.dark .text-slate-600,
+html.dark .text-slate-500 {
+  color: var(--text-secondary) !important;
 }
 
-html.dark :where(.text-slate-400),
-html.dark :where(.text-slate-300) {
-  color: var(--text-muted);
-}
-
-html.dark :where(.hover\\\\:text-slate-900:hover),
-html.dark :where(.hover\\\\:text-slate-800:hover),
-html.dark :where(.hover\\\\:text-slate-700:hover) {
-  color: var(--text-primary);
+html.dark .text-slate-400,
+html.dark .text-slate-300 {
+  color: var(--text-muted) !important;
 }
 
 /* --- Borders & dividers --- */
-html.dark :where(.border-slate-100),
-html.dark :where(.border-slate-200),
-html.dark :where(.border-slate-200\\\\/90),
-html.dark :where(.border-slate-200\\\\/80),
-html.dark :where(.border-slate-200\\\\/70),
-html.dark :where(.border-slate-300),
-html.dark :where(.border-slate-700),
-html.dark :where(.border-slate-800),
-html.dark :where(.border-slate-900) {
-  border-color: var(--border-subtle);
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-300,
+html.dark .border-slate-700,
+html.dark .border-slate-800,
+html.dark .border-slate-900 {
+  border-color: var(--border-subtle) !important;
 }
 
-html.dark :where(.divide-slate-100) > :not([hidden]) ~ :not([hidden]),
-html.dark :where(.divide-slate-200) > :not([hidden]) ~ :not([hidden]) {
-  border-color: var(--border-subtle);
+html.dark .divide-slate-100,
+html.dark .divide-slate-200 {
+  border-color: var(--border-subtle) !important;
 }
 
-/* --- Inputs (light bg inputs → dark surface) --- */
-html.dark :where(input.bg-slate-50),
-html.dark :where(textarea.bg-slate-50),
-html.dark :where(select.bg-slate-50) {
-  background-color: var(--bg-surface-elevated);
+/* --- Inputs (light bg inputs -> dark surface) --- */
+html.dark input.bg-slate-50,
+html.dark textarea.bg-slate-50,
+html.dark select.bg-slate-50 {
+  background-color: var(--bg-surface-elevated) !important;
+}
+
+/* --- Hover states --- */
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-slate-100:hover,
+html.dark .hover\:bg-white:hover {
+  background-color: var(--bg-surface-elevated) !important;
+}
+
+html.dark .hover\:text-slate-900:hover,
+html.dark .hover\:text-slate-800:hover,
+html.dark .hover\:text-slate-700:hover {
+  color: var(--text-primary) !important;
 }
