@@ -5,22 +5,25 @@
 
 :root {
   /* LIGHT MODE (Clean Modern Studio) */
-  --bg-page: #F8FAFC;
+  /* --text-primary / --bg-page are RGB channel values so Tailwind opacity
+     modifiers like text-ink/75 or bg-paper/50 keep working. */
+  --bg-page: 248 250 252;
+  --text-primary: 15 23 42;
   --bg-surface: #FFFFFF;
   --bg-surface-elevated: #F1F5F9;
-  --text-primary: #0F172A;
   --text-secondary: #475569;
   --text-muted: #64748B;
   --border-subtle: #E2E8F0;
   --border-highlight: #CBD5E1;
+  color-scheme: light;
 }
 
 html.dark {
   /* DARK MODE (Midnight OLED Studio) */
-  --bg-page: #090E17;
+  --bg-page: 9 14 23;
+  --text-primary: 248 250 252;
   --bg-surface: #121A29;
   --bg-surface-elevated: #1A2438;
-  --text-primary: #F8FAFC;
   --text-secondary: #CBD5E1;
   --text-muted: #94A3B8;
   --border-subtle: rgba(255, 255, 255, 0.08);
@@ -29,8 +32,8 @@ html.dark {
 }
 
 body {
-  background-color: var(--bg-page);
-  color: var(--text-primary);
+  background-color: rgb(var(--bg-page));
+  color: rgb(var(--text-primary));
   font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   transition: background-color 0.2s ease, color 0.2s ease;
   min-height: 100vh;
