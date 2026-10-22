@@ -1,9 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
-  basePath: '',
+  distDir: 'out',
   images: {
     unoptimized: true,
+  },
+  // Disable Next.js telemetry
+  experimental: {
+    // For static export
   },
 };
 
