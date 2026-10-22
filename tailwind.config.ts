@@ -1,5 +1,6 @@
 // tailwind.config.ts
 import type { Config } from "tailwindcss";
+import colors from "tailwindcss/colors";
 
 const config: Config = {
   darkMode: "class",
@@ -10,12 +11,13 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#0F172A",
-        paper: "#F8FAFC",
+        // Theme-aware semantic colors (switch automatically in dark mode)
+        ink: "rgb(var(--text-primary) / <alpha-value>)",
+        paper: "rgb(var(--bg-page) / <alpha-value>)",
         marigold: "#F59E0B",
-        teal: "#0D9488",
+        teal: { ...colors.teal, DEFAULT: "#0D9488" },
         coral: "#EF4444",
-        slate: "#64748B",
+        slate: { ...colors.slate, DEFAULT: "#64748B" },
       },
       fontFamily: {
         display: ["var(--font-space-grotesk)", "sans-serif"],
