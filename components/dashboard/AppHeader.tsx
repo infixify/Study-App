@@ -76,6 +76,16 @@ function AppHeaderContent({ isRootLayout }: { isRootLayout: boolean }) {
   useEffect(() => {
     const isCurrentlyDark = document.documentElement.classList.contains("dark");
     setIsDark(isCurrentlyDark);
+    
+    // Also sync with localStorage on mount
+    const savedTheme = localStorage.getItem("prepwise_theme");
+    if (savedTheme === "dark" && !isCurrentlyDark) {
+      document.documentElement.classList.add("dark");
+      setIsDark(true);
+    } else if (savedTheme === "light" && isCurrentlyDark) {
+      document.documentElement.classList.remove("dark");
+      setIsDark(false);
+    }
   }, []);
 
   const toggleTheme = () => {
@@ -88,6 +98,8 @@ function AppHeaderContent({ isRootLayout }: { isRootLayout: boolean }) {
       document.documentElement.classList.remove("dark");
       localStorage.setItem("prepwise_theme", "light");
     }
+    // Force re-render to apply theme changes
+    window.location.reload();
   };
 
   const fetchNotifications = useCallback(async (userId: string, targetExam: string | null) => {
