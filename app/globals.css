@@ -93,9 +93,9 @@ html.dark :where(.hover\:bg-white:hover) {
   background-color: var(--bg-surface-elevated);
 }
 
-html.dark :where(.bg-\[\#F1F5F9\]),
-html.dark :where(.bg-\[\#F8FAFC\]),
-html.dark :where(.bg-\[\#FFFFFF\]) {
+html.dark :where(.bg-\[#F1F5F9\]),
+html.dark :where(.bg-\[#F8FAFC\]),
+html.dark :where(.bg-\[#FFFFFF\]) {
   background-color: var(--bg-page);
 }
 
@@ -103,8 +103,8 @@ html.dark :where(.bg-\[\#FFFFFF\]) {
 html.dark :where(.text-slate-900),
 html.dark :where(.text-slate-800),
 html.dark :where(.text-slate-700),
-html.dark :where(.text-\[\#0F172A\]),
-html.dark :where(.text-\[\#1E293B\]) {
+html.dark :where(.text-\[#0F172A\]),
+html.dark :where(.text-\[#1E293B\]) {
   color: var(--text-primary);
 }
 
