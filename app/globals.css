@@ -80,7 +80,13 @@ html.dark ::-webkit-scrollbar-thumb {
 html.dark :where(.bg-white),
 html.dark :where(.bg-white/90),
 html.dark :where(.bg-white/95),
-html.dark :where(.bg-slate-100) {
+html.dark :where(.bg-slate-100),
+html.dark :where(.bg-slate-500),
+html.dark :where(.bg-slate-600),
+html.dark :where(.bg-slate-700),
+html.dark :where(.bg-slate-800),
+html.dark :where(.bg-slate-900),
+html.dark :where(.bg-slate-950) {
   background-color: var(--bg-surface);
 }
 
@@ -109,9 +115,10 @@ html.dark :where(.bg-\[#FFFFFF\]) {
 }
 
 /* --- Text colors --- */
-html.dark :where(.text-slate-900),
-html.dark :where(.text-slate-800),
 html.dark :where(.text-slate-700),
+html.dark :where(.text-slate-800),
+html.dark :where(.text-slate-900),
+html.dark :where(.text-slate-950),
 html.dark :where(.text-\[#0F172A\]),
 html.dark :where(.text-\[#1E293B\]),
 html.dark :where(.text-\[#2DD4BF\]) {
@@ -135,14 +142,19 @@ html.dark :where(.hover\:text-slate-700:hover) {
 }
 
 /* --- Borders & dividers --- */
+html.dark :where(.border-slate-100),
 html.dark :where(.border-slate-200),
 html.dark :where(.border-slate-200\/90),
 html.dark :where(.border-slate-200\/80),
 html.dark :where(.border-slate-200\/70),
-html.dark :where(.border-slate-300) {
+html.dark :where(.border-slate-300),
+html.dark :where(.border-slate-700),
+html.dark :where(.border-slate-800),
+html.dark :where(.border-slate-900) {
   border-color: var(--border-subtle);
 }
 
+html.dark :where(.divide-slate-100) > :not([hidden]) ~ :not([hidden]),
 html.dark :where(.divide-slate-200) > :not([hidden]) ~ :not([hidden]) {
   border-color: var(--border-subtle);
 }
