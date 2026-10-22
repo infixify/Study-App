@@ -1,11 +1,11 @@
-name: Deploy to Cloudflare Pages
+name: Build and Deploy to Cloudflare Pages
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,8 +22,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
+      - name: Build static export
         run: npm run build
+
+      - name: Copy service worker to out directory
+        run: cp public/sw.js out/sw.js
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@1
@@ -32,3 +35,4 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: eterprep
           directory: out
+          branch: main
