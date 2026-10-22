@@ -61,3 +61,85 @@ html.dark ::-webkit-scrollbar-thumb {
     outline-offset: 2px;
   }
 }
+
+/* ============================================================
+   GLOBAL DARK-MODE PATCH
+   Kai pages hardcoded light classes use karte hain (bg-white,
+   bg-slate-50, text-slate-900, border-slate-200, bg-[#F1F5F9]
+   etc.) bina dark: variant ke — isliye dark mode mein page
+   switch nahi hota tha. Ye rules unhe dark palette pe remap
+   karte hain.
+
+   :where() ka fayda: specificity 0 rehti hai, isliye agar kisi
+   component mein pehle se dark: variant hai (jaise
+   "bg-white dark:bg-[#141C2B]"), to WOHI jeet jata hai — hum
+   sirf un elements ko override karte hain jinme dark: nahi hai.
+   ============================================================ */
+
+/* --- Page backgrounds --- */
+html.dark :where(.bg-white),
+html.dark :where(.bg-white/90),
+html.dark :where(.bg-white/95),
+html.dark :where(.bg-slate-100) {
+  background-color: var(--bg-surface);
+}
+
+html.dark :where(.bg-slate-50),
+html.dark :where(.bg-slate-50/80),
+html.dark :where(.bg-slate-50/70),
+html.dark :where(.hover\:bg-slate-50:hover),
+html.dark :where(.hover\:bg-slate-100:hover),
+html.dark :where(.hover\:bg-white:hover) {
+  background-color: var(--bg-surface-elevated);
+}
+
+html.dark :where(.bg-\[\#F1F5F9\]),
+html.dark :where(.bg-\[\#F8FAFC\]),
+html.dark :where(.bg-\[\#FFFFFF\]) {
+  background-color: var(--bg-page);
+}
+
+/* --- Text colors --- */
+html.dark :where(.text-slate-900),
+html.dark :where(.text-slate-800),
+html.dark :where(.text-slate-700),
+html.dark :where(.text-\[\#0F172A\]),
+html.dark :where(.text-\[\#1E293B\]) {
+  color: var(--text-primary);
+}
+
+html.dark :where(.text-slate-600),
+html.dark :where(.text-slate-500) {
+  color: var(--text-secondary);
+}
+
+html.dark :where(.text-slate-400),
+html.dark :where(.text-slate-300) {
+  color: var(--text-muted);
+}
+
+html.dark :where(.hover\:text-slate-900:hover),
+html.dark :where(.hover\:text-slate-800:hover),
+html.dark :where(.hover\:text-slate-700:hover) {
+  color: var(--text-primary);
+}
+
+/* --- Borders & dividers --- */
+html.dark :where(.border-slate-200),
+html.dark :where(.border-slate-200\/90),
+html.dark :where(.border-slate-200\/80),
+html.dark :where(.border-slate-200\/70),
+html.dark :where(.border-slate-300) {
+  border-color: var(--border-subtle);
+}
+
+html.dark :where(.divide-slate-200) > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border-subtle);
+}
+
+/* --- Inputs (light bg inputs → dark surface) --- */
+html.dark :where(input.bg-slate-50),
+html.dark :where(textarea.bg-slate-50),
+html.dark :where(select.bg-slate-50) {
+  background-color: var(--bg-surface-elevated);
+}
