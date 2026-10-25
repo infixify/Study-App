@@ -2,10 +2,10 @@
 import GroupDetailClient from './GroupDetailClient';
 
 export async function generateStaticParams() {
-  return [];
+  return [{ id: '1' }];
 }
 
-export const dynamicParams = false;
+export const dynamicParams = true;
 
 export default function GroupDetailPage({ params }: { params: { id: string } }) {
   return <GroupDetailClient groupId={params.id} />;
